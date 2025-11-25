@@ -85,7 +85,7 @@ substitutions:
   flow_control_pin: GPIO4
 
 packages:
-  waterfurnace.aurora: github://damonp/esphome_waterfurnace_aurora/waterfurnace_aurora.yaml@master
+  waterfurnace.aurora: github://daemonp/esphome_waterfurnace_aurora/waterfurnace_aurora.yaml@master
 
 esphome:
   name: ${name}
