@@ -4,16 +4,9 @@
 # It provides all sensors, controls, and configuration options for WaterFurnace Aurora
 # geothermal heat pumps via RS-485 Modbus RTU.
 #
-# USAGE:
+# USAGE (from GitHub):
 #   packages:
-#     waterfurnace: !include waterfurnace_aurora.yaml
-#
-# Or from GitHub:
-#   packages:
-#     waterfurnace:
-#       url: https://github.com/ccutrer/waterfurnace_aurora
-#       ref: master
-#       file: esphome/waterfurnace_aurora.yaml
+#     waterfurnace.aurora: github://damonp/esphome_waterfurnace_aurora/waterfurnace_aurora.yaml@master
 #
 # REQUIRED SUBSTITUTIONS (set these before including):
 #   uart_tx_pin: GPIO pin for UART TX (e.g., GPIO17)
@@ -48,7 +41,7 @@ substitutions:
 external_components:
   - source:
       type: git
-      url: https://github.com/ccutrer/waterfurnace_aurora
+      url: https://github.com/damonp/esphome_waterfurnace_aurora
       ref: master
     components: [ waterfurnace_aurora ]
 
