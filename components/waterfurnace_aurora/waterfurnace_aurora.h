@@ -343,6 +343,11 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   void set_fan_mode_sensor(text_sensor::TextSensor *sensor) { fan_mode_sensor_ = sensor; }
   void set_model_number_sensor(text_sensor::TextSensor *sensor) { model_number_sensor_ = sensor; }
   void set_serial_number_sensor(text_sensor::TextSensor *sensor) { serial_number_sensor_ = sensor; }
+  void set_fault_history_sensor(text_sensor::TextSensor *sensor) { fault_history_sensor_ = sensor; }
+  void set_vs_derate_sensor(text_sensor::TextSensor *sensor) { vs_derate_sensor_ = sensor; }
+  void set_vs_safe_mode_sensor(text_sensor::TextSensor *sensor) { vs_safe_mode_sensor_ = sensor; }
+  void set_vs_alarm_sensor(text_sensor::TextSensor *sensor) { vs_alarm_sensor_ = sensor; }
+  void set_axb_inputs_sensor(text_sensor::TextSensor *sensor) { axb_inputs_sensor_ = sensor; }
 
   // Control methods (called by climate/water_heater components)
   bool set_heating_setpoint(float temp);
@@ -443,6 +448,13 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   static const char* get_fault_description(uint8_t code);
   static const char* get_hvac_mode_string(HeatingMode mode);
   static const char* get_fan_mode_string(FanMode mode);
+  static std::string get_vs_derate_string(uint16_t value);
+  static std::string get_vs_safe_mode_string(uint16_t value);
+  static std::string get_vs_alarm_string(uint16_t alarm1, uint16_t alarm2);
+  static std::string get_axb_inputs_string(uint16_t value);
+  
+  // Read fault history (registers 601-699)
+  void read_fault_history();
 
   uint8_t address_{1};
   uint8_t read_retries_{2};  // Number of retries on read failure (default 2, like Ruby)
@@ -557,6 +569,11 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   text_sensor::TextSensor *fan_mode_sensor_{nullptr};
   text_sensor::TextSensor *model_number_sensor_{nullptr};
   text_sensor::TextSensor *serial_number_sensor_{nullptr};
+  text_sensor::TextSensor *fault_history_sensor_{nullptr};
+  text_sensor::TextSensor *vs_derate_sensor_{nullptr};
+  text_sensor::TextSensor *vs_safe_mode_sensor_{nullptr};
+  text_sensor::TextSensor *vs_alarm_sensor_{nullptr};
+  text_sensor::TextSensor *axb_inputs_sensor_{nullptr};
   
   // Cached device info
   std::string model_number_;

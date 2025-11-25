@@ -14,6 +14,11 @@ CONF_FAN_MODE = "fan_mode"
 CONF_FAULT_DESCRIPTION = "fault_description"
 CONF_MODEL_NUMBER = "model_number"
 CONF_SERIAL_NUMBER = "serial_number"
+CONF_FAULT_HISTORY = "fault_history"
+CONF_VS_DERATE = "vs_derate"
+CONF_VS_SAFE_MODE = "vs_safe_mode"
+CONF_VS_ALARM = "vs_alarm"
+CONF_AXB_INPUTS = "axb_inputs"
 
 CONFIG_SCHEMA = cv.Schema(
     {
@@ -24,6 +29,11 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_FAULT_DESCRIPTION): text_sensor.text_sensor_schema(),
         cv.Optional(CONF_MODEL_NUMBER): text_sensor.text_sensor_schema(),
         cv.Optional(CONF_SERIAL_NUMBER): text_sensor.text_sensor_schema(),
+        cv.Optional(CONF_FAULT_HISTORY): text_sensor.text_sensor_schema(),
+        cv.Optional(CONF_VS_DERATE): text_sensor.text_sensor_schema(),
+        cv.Optional(CONF_VS_SAFE_MODE): text_sensor.text_sensor_schema(),
+        cv.Optional(CONF_VS_ALARM): text_sensor.text_sensor_schema(),
+        cv.Optional(CONF_AXB_INPUTS): text_sensor.text_sensor_schema(),
     }
 )
 
@@ -54,3 +64,23 @@ async def to_code(config):
     if CONF_SERIAL_NUMBER in config:
         sens = await text_sensor.new_text_sensor(config[CONF_SERIAL_NUMBER])
         cg.add(parent.set_serial_number_sensor(sens))
+
+    if CONF_FAULT_HISTORY in config:
+        sens = await text_sensor.new_text_sensor(config[CONF_FAULT_HISTORY])
+        cg.add(parent.set_fault_history_sensor(sens))
+
+    if CONF_VS_DERATE in config:
+        sens = await text_sensor.new_text_sensor(config[CONF_VS_DERATE])
+        cg.add(parent.set_vs_derate_sensor(sens))
+
+    if CONF_VS_SAFE_MODE in config:
+        sens = await text_sensor.new_text_sensor(config[CONF_VS_SAFE_MODE])
+        cg.add(parent.set_vs_safe_mode_sensor(sens))
+
+    if CONF_VS_ALARM in config:
+        sens = await text_sensor.new_text_sensor(config[CONF_VS_ALARM])
+        cg.add(parent.set_vs_alarm_sensor(sens))
+
+    if CONF_AXB_INPUTS in config:
+        sens = await text_sensor.new_text_sensor(config[CONF_AXB_INPUTS])
+        cg.add(parent.set_axb_inputs_sensor(sens))

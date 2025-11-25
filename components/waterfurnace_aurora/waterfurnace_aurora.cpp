@@ -185,6 +185,13 @@ void WaterFurnaceAurora::loop() {
 void WaterFurnaceAurora::update() {
   ESP_LOGD(TAG, "Updating WaterFurnace Aurora data...");
   this->refresh_all_data();
+  
+  // Read fault history less frequently (every 12 updates = ~1 minute at 5s interval)
+  static uint8_t fault_history_counter = 0;
+  if (++fault_history_counter >= 12) {
+    fault_history_counter = 0;
+    this->read_fault_history();
+  }
 }
 
 void WaterFurnaceAurora::dump_config() {
@@ -229,6 +236,7 @@ void WaterFurnaceAurora::refresh_all_data() {
     addresses_to_read.push_back(registers::RELATIVE_HUMIDITY);           // 741
     addresses_to_read.push_back(registers::OUTDOOR_TEMP);                // 742
     addresses_to_read.push_back(registers::LEAVING_AIR);                 // 900
+    addresses_to_read.push_back(registers::AXB_INPUTS);                  // 1103
     addresses_to_read.push_back(registers::AXB_OUTPUTS);                 // 1104
     addresses_to_read.push_back(registers::LEAVING_WATER);               // 1110
     addresses_to_read.push_back(registers::ENTERING_WATER);              // 1111
@@ -295,6 +303,10 @@ void WaterFurnaceAurora::refresh_all_data() {
   // VS Drive data
   if (this->has_vs_drive_) {
     addresses_to_read.push_back(362);                                    // Active dehumidify
+    addresses_to_read.push_back(registers::VS_DERATE);                   // 214
+    addresses_to_read.push_back(registers::VS_SAFE_MODE);                // 216
+    addresses_to_read.push_back(registers::VS_ALARM1);                   // 217
+    addresses_to_read.push_back(registers::VS_ALARM2);                   // 218
     addresses_to_read.push_back(registers::COMPRESSOR_SPEED_DESIRED);    // 3000
     addresses_to_read.push_back(registers::COMPRESSOR_SPEED_ACTUAL);     // 3001
     addresses_to_read.push_back(registers::VS_DISCHARGE_PRESSURE);       // 3322
@@ -384,6 +396,12 @@ void WaterFurnaceAurora::refresh_all_data() {
     if (this->load_shed_sensor_ != nullptr) {
       this->load_shed_sensor_->publish_state((status & STATUS_LOAD_SHED) != 0);
     }
+  }
+  
+  // AXB inputs (register 1103) - DIP switch settings
+  it = result.find(registers::AXB_INPUTS);
+  if (it != result.end() && this->axb_inputs_sensor_ != nullptr) {
+    this->axb_inputs_sensor_->publish_state(get_axb_inputs_string(it->second));
   }
   
   // AXB outputs (register 1104)
@@ -615,6 +633,25 @@ void WaterFurnaceAurora::refresh_all_data() {
   it = result.find(registers::VS_INVERTER_TEMP);
   if (it != result.end() && this->vs_inverter_temp_sensor_ != nullptr) {
     this->vs_inverter_temp_sensor_->publish_state(to_signed_tenths(it->second));
+  }
+  
+  // VS Drive derate status (register 214)
+  it = result.find(registers::VS_DERATE);
+  if (it != result.end() && this->vs_derate_sensor_ != nullptr) {
+    this->vs_derate_sensor_->publish_state(get_vs_derate_string(it->second));
+  }
+  
+  // VS Drive safe mode status (register 216)
+  it = result.find(registers::VS_SAFE_MODE);
+  if (it != result.end() && this->vs_safe_mode_sensor_ != nullptr) {
+    this->vs_safe_mode_sensor_->publish_state(get_vs_safe_mode_string(it->second));
+  }
+  
+  // VS Drive alarm status (registers 217-218)
+  auto it_alarm1 = result.find(registers::VS_ALARM1);
+  auto it_alarm2 = result.find(registers::VS_ALARM2);
+  if (it_alarm1 != result.end() && it_alarm2 != result.end() && this->vs_alarm_sensor_ != nullptr) {
+    this->vs_alarm_sensor_->publish_state(get_vs_alarm_string(it_alarm1->second, it_alarm2->second));
   }
   
   // FP1 - Cooling liquid line temperature (register 19)
@@ -1485,6 +1522,223 @@ std::string WaterFurnaceAurora::registers_to_string(const std::vector<uint16_t> 
   }
   
   return result;
+}
+
+// VS Drive derate status string (from registers.rb VS_DRIVE_DERATE)
+std::string WaterFurnaceAurora::get_vs_derate_string(uint16_t value) {
+  if (value == 0) return "None";
+  
+  std::string result;
+  if (value & VS_DERATE_DRIVE_OVER_TEMP) {
+    if (!result.empty()) result += ", ";
+    result += "Drive Over Temp";
+  }
+  if (value & VS_DERATE_LOW_SUCTION_PRESSURE) {
+    if (!result.empty()) result += ", ";
+    result += "Low Suction Pressure";
+  }
+  if (value & VS_DERATE_LOW_DISCHARGE_PRESSURE) {
+    if (!result.empty()) result += ", ";
+    result += "Low Discharge Pressure";
+  }
+  if (value & VS_DERATE_HIGH_DISCHARGE_PRESSURE) {
+    if (!result.empty()) result += ", ";
+    result += "High Discharge Pressure";
+  }
+  if (value & VS_DERATE_OUTPUT_POWER_LIMIT) {
+    if (!result.empty()) result += ", ";
+    result += "Output Power Limit";
+  }
+  
+  return result.empty() ? "Unknown" : result;
+}
+
+// VS Drive safe mode status string (from registers.rb VS_SAFE_MODE)
+std::string WaterFurnaceAurora::get_vs_safe_mode_string(uint16_t value) {
+  if (value == 0) return "None";
+  
+  std::string result;
+  if (value & VS_SAFE_EEV_INDOOR_FAILED) {
+    if (!result.empty()) result += ", ";
+    result += "EEV Indoor Failed";
+  }
+  if (value & VS_SAFE_EEV_OUTDOOR_FAILED) {
+    if (!result.empty()) result += ", ";
+    result += "EEV Outdoor Failed";
+  }
+  if (value & VS_SAFE_INVALID_AMBIENT_TEMP) {
+    if (!result.empty()) result += ", ";
+    result += "Invalid Ambient Temp";
+  }
+  
+  return result.empty() ? "Unknown" : result;
+}
+
+// VS Drive alarm status string (from registers.rb VS_ALARM1/VS_ALARM2)
+std::string WaterFurnaceAurora::get_vs_alarm_string(uint16_t alarm1, uint16_t alarm2) {
+  if (alarm1 == 0 && alarm2 == 0) return "None";
+  
+  std::string result;
+  
+  // Alarm1 flags
+  if (alarm1 & 0x8000) {
+    if (!result.empty()) result += ", ";
+    result += "Internal Error";
+  }
+  
+  // Alarm2 flags
+  if (alarm2 & 0x0001) {
+    if (!result.empty()) result += ", ";
+    result += "Multi Safe Modes";
+  }
+  if (alarm2 & 0x0002) {
+    if (!result.empty()) result += ", ";
+    result += "Out of Envelope";
+  }
+  if (alarm2 & 0x0004) {
+    if (!result.empty()) result += ", ";
+    result += "Over Current";
+  }
+  if (alarm2 & 0x0008) {
+    if (!result.empty()) result += ", ";
+    result += "Over Voltage";
+  }
+  if (alarm2 & 0x0010) {
+    if (!result.empty()) result += ", ";
+    result += "Drive Over Temp";
+  }
+  if (alarm2 & 0x0020) {
+    if (!result.empty()) result += ", ";
+    result += "Under Voltage";
+  }
+  if (alarm2 & 0x0040) {
+    if (!result.empty()) result += ", ";
+    result += "High Discharge Temp";
+  }
+  if (alarm2 & 0x0080) {
+    if (!result.empty()) result += ", ";
+    result += "Invalid Discharge Temp";
+  }
+  if (alarm2 & 0x0100) {
+    if (!result.empty()) result += ", ";
+    result += "OEM Comms Timeout";
+  }
+  if (alarm2 & 0x0200) {
+    if (!result.empty()) result += ", ";
+    result += "MOC Safety";
+  }
+  if (alarm2 & 0x0400) {
+    if (!result.empty()) result += ", ";
+    result += "DC Under Voltage";
+  }
+  if (alarm2 & 0x0800) {
+    if (!result.empty()) result += ", ";
+    result += "Invalid Suction Pressure";
+  }
+  if (alarm2 & 0x1000) {
+    if (!result.empty()) result += ", ";
+    result += "Invalid Discharge Pressure";
+  }
+  if (alarm2 & 0x2000) {
+    if (!result.empty()) result += ", ";
+    result += "Low Discharge Pressure";
+  }
+  
+  return result.empty() ? "Unknown" : result;
+}
+
+// AXB inputs status string (from registers.rb axb_inputs)
+std::string WaterFurnaceAurora::get_axb_inputs_string(uint16_t value) {
+  std::string result;
+  
+  if (value & 0x001) {
+    if (!result.empty()) result += ", ";
+    result += "SmartGrid";
+  }
+  if (value & 0x002) {
+    if (!result.empty()) result += ", ";
+    result += "HA1";
+  }
+  if (value & 0x004) {
+    if (!result.empty()) result += ", ";
+    result += "HA2";
+  }
+  if (value & 0x008) {
+    if (!result.empty()) result += ", ";
+    result += "PumpSlave";
+  }
+  
+  // MB Address: bit 4 determines address 3 or 4
+  if (!result.empty()) result += ", ";
+  result += "Addr=";
+  result += (value & 0x010) ? "3" : "4";
+  
+  // Accessory relay 2 mode (bits 7-8)
+  if (!result.empty()) result += ", ";
+  result += "Acc2=";
+  bool bit7 = (value & 0x080) != 0;
+  bool bit8 = (value & 0x100) != 0;
+  if (bit7 && bit8) {
+    result += "Blower";
+  } else if (bit8) {
+    result += "LowCapComp";
+  } else if (bit7) {
+    result += "HighCapComp";
+  } else {
+    result += "Dehum";
+  }
+  
+  return result;
+}
+
+// Read fault history from registers 601-699
+void WaterFurnaceAurora::read_fault_history() {
+  if (this->fault_history_sensor_ == nullptr) {
+    return;
+  }
+  
+  // Read fault history registers 601-699 (99 registers)
+  std::vector<uint16_t> result;
+  if (!this->read_holding_registers(registers::FAULT_HISTORY_START, 99, result)) {
+    ESP_LOGW(TAG, "Failed to read fault history");
+    return;
+  }
+  
+  // Format fault history: each register contains a fault code
+  // Register 601 = fault 1, 602 = fault 2, etc.
+  // Value format: E{code % 100} with description
+  std::string history;
+  int fault_count = 0;
+  const int max_faults = 10;  // Only show first 10 faults to avoid huge strings
+  
+  for (size_t i = 0; i < result.size() && fault_count < max_faults; i++) {
+    uint16_t fault_value = result[i];
+    if (fault_value == 0 || fault_value == 0xFFFF) continue;
+    
+    uint8_t fault_code = fault_value % 100;
+    if (fault_code == 0) continue;
+    
+    if (!history.empty()) history += "; ";
+    history += "E";
+    history += std::to_string(fault_code);
+    
+    const char* desc = get_fault_description(fault_code);
+    if (desc && strcmp(desc, "Unknown Fault") != 0) {
+      history += " (";
+      history += desc;
+      history += ")";
+    }
+    
+    fault_count++;
+  }
+  
+  if (history.empty()) {
+    history = "No faults";
+  } else if (fault_count >= max_faults) {
+    history += "...";
+  }
+  
+  this->fault_history_sensor_->publish_state(history);
 }
 
 }  // namespace waterfurnace_aurora

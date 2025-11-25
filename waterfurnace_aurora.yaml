@@ -265,6 +265,16 @@ text_sensor:
       name: "Model Number"
     serial_number:
       name: "Serial Number"
+    fault_history:
+      name: "Fault History"
+    vs_derate:
+      name: "VS Drive Derate"
+    vs_safe_mode:
+      name: "VS Drive Safe Mode"
+    vs_alarm:
+      name: "VS Drive Alarm"
+    axb_inputs:
+      name: "AXB Inputs"
 
   - platform: version
     name: "ESPHome Version"
