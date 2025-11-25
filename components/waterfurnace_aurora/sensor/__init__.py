@@ -1,0 +1,292 @@
+import esphome.codegen as cg
+import esphome.config_validation as cv
+from esphome.components import sensor
+from esphome.const import (
+    CONF_ID,
+    DEVICE_CLASS_TEMPERATURE,
+    DEVICE_CLASS_HUMIDITY,
+    DEVICE_CLASS_VOLTAGE,
+    DEVICE_CLASS_POWER,
+    DEVICE_CLASS_PRESSURE,
+    STATE_CLASS_MEASUREMENT,
+    UNIT_CELSIUS,
+    UNIT_PERCENT,
+    UNIT_VOLT,
+    UNIT_WATT,
+)
+
+from .. import waterfurnace_aurora_ns, WaterFurnaceAurora, CONF_AURORA_ID
+
+DEPENDENCIES = ["waterfurnace_aurora"]
+CODEOWNERS = ["@damonmaria"]
+
+# Sensor configuration keys
+CONF_ENTERING_AIR_TEMPERATURE = "entering_air_temperature"
+CONF_LEAVING_AIR_TEMPERATURE = "leaving_air_temperature"
+CONF_AMBIENT_TEMPERATURE = "ambient_temperature"
+CONF_OUTDOOR_TEMPERATURE = "outdoor_temperature"
+CONF_ENTERING_WATER_TEMPERATURE = "entering_water_temperature"
+CONF_LEAVING_WATER_TEMPERATURE = "leaving_water_temperature"
+CONF_HEATING_SETPOINT = "heating_setpoint"
+CONF_COOLING_SETPOINT = "cooling_setpoint"
+CONF_HUMIDITY = "humidity"
+CONF_DHW_TEMPERATURE = "dhw_temperature"
+CONF_DHW_SETPOINT = "dhw_setpoint"
+CONF_COMPRESSOR_SPEED = "compressor_speed"
+CONF_DISCHARGE_PRESSURE = "discharge_pressure"
+CONF_SUCTION_PRESSURE = "suction_pressure"
+CONF_EEV_OPEN_PERCENTAGE = "eev_open_percentage"
+CONF_SUPERHEAT_TEMPERATURE = "superheat_temperature"
+CONF_LINE_VOLTAGE = "line_voltage"
+CONF_TOTAL_WATTS = "total_watts"
+CONF_COMPRESSOR_WATTS = "compressor_watts"
+CONF_BLOWER_WATTS = "blower_watts"
+CONF_AUX_HEAT_WATTS = "aux_heat_watts"
+CONF_PUMP_WATTS = "pump_watts"
+CONF_WATERFLOW = "waterflow"
+CONF_LOOP_PRESSURE = "loop_pressure"
+CONF_FAULT_CODE = "fault_code"
+CONF_FP1_TEMPERATURE = "fp1_temperature"
+CONF_FP2_TEMPERATURE = "fp2_temperature"
+CONF_LINE_VOLTAGE_SETTING = "line_voltage_setting"
+CONF_ANTI_SHORT_CYCLE = "anti_short_cycle"
+
+# Unit definitions
+UNIT_FAHRENHEIT = "°F"
+UNIT_PSI = "psi"
+UNIT_GPM = "gpm"
+
+# Sensor schema for temperature sensors
+TEMPERATURE_SENSOR_SCHEMA = sensor.sensor_schema(
+    unit_of_measurement=UNIT_FAHRENHEIT,
+    accuracy_decimals=1,
+    device_class=DEVICE_CLASS_TEMPERATURE,
+    state_class=STATE_CLASS_MEASUREMENT,
+)
+
+# Sensor schema for pressure sensors
+PRESSURE_SENSOR_SCHEMA = sensor.sensor_schema(
+    unit_of_measurement=UNIT_PSI,
+    accuracy_decimals=1,
+    device_class=DEVICE_CLASS_PRESSURE,
+    state_class=STATE_CLASS_MEASUREMENT,
+)
+
+# Sensor schema for power sensors
+POWER_SENSOR_SCHEMA = sensor.sensor_schema(
+    unit_of_measurement=UNIT_WATT,
+    accuracy_decimals=0,
+    device_class=DEVICE_CLASS_POWER,
+    state_class=STATE_CLASS_MEASUREMENT,
+)
+
+CONFIG_SCHEMA = cv.Schema(
+    {
+        cv.GenerateID(CONF_AURORA_ID): cv.use_id(WaterFurnaceAurora),
+        # Temperature sensors
+        cv.Optional(CONF_ENTERING_AIR_TEMPERATURE): TEMPERATURE_SENSOR_SCHEMA,
+        cv.Optional(CONF_LEAVING_AIR_TEMPERATURE): TEMPERATURE_SENSOR_SCHEMA,
+        cv.Optional(CONF_AMBIENT_TEMPERATURE): TEMPERATURE_SENSOR_SCHEMA,
+        cv.Optional(CONF_OUTDOOR_TEMPERATURE): TEMPERATURE_SENSOR_SCHEMA,
+        cv.Optional(CONF_ENTERING_WATER_TEMPERATURE): TEMPERATURE_SENSOR_SCHEMA,
+        cv.Optional(CONF_LEAVING_WATER_TEMPERATURE): TEMPERATURE_SENSOR_SCHEMA,
+        cv.Optional(CONF_HEATING_SETPOINT): TEMPERATURE_SENSOR_SCHEMA,
+        cv.Optional(CONF_COOLING_SETPOINT): TEMPERATURE_SENSOR_SCHEMA,
+        cv.Optional(CONF_DHW_TEMPERATURE): TEMPERATURE_SENSOR_SCHEMA,
+        cv.Optional(CONF_DHW_SETPOINT): TEMPERATURE_SENSOR_SCHEMA,
+        cv.Optional(CONF_SUPERHEAT_TEMPERATURE): TEMPERATURE_SENSOR_SCHEMA,
+        # Humidity
+        cv.Optional(CONF_HUMIDITY): sensor.sensor_schema(
+            unit_of_measurement=UNIT_PERCENT,
+            accuracy_decimals=0,
+            device_class=DEVICE_CLASS_HUMIDITY,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        # Compressor
+        cv.Optional(CONF_COMPRESSOR_SPEED): sensor.sensor_schema(
+            accuracy_decimals=0,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        # Pressures
+        cv.Optional(CONF_DISCHARGE_PRESSURE): PRESSURE_SENSOR_SCHEMA,
+        cv.Optional(CONF_SUCTION_PRESSURE): PRESSURE_SENSOR_SCHEMA,
+        cv.Optional(CONF_LOOP_PRESSURE): PRESSURE_SENSOR_SCHEMA,
+        # EEV
+        cv.Optional(CONF_EEV_OPEN_PERCENTAGE): sensor.sensor_schema(
+            unit_of_measurement=UNIT_PERCENT,
+            accuracy_decimals=0,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        # Voltage
+        cv.Optional(CONF_LINE_VOLTAGE): sensor.sensor_schema(
+            unit_of_measurement=UNIT_VOLT,
+            accuracy_decimals=0,
+            device_class=DEVICE_CLASS_VOLTAGE,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        # Power sensors
+        cv.Optional(CONF_TOTAL_WATTS): POWER_SENSOR_SCHEMA,
+        cv.Optional(CONF_COMPRESSOR_WATTS): POWER_SENSOR_SCHEMA,
+        cv.Optional(CONF_BLOWER_WATTS): POWER_SENSOR_SCHEMA,
+        cv.Optional(CONF_AUX_HEAT_WATTS): POWER_SENSOR_SCHEMA,
+        cv.Optional(CONF_PUMP_WATTS): POWER_SENSOR_SCHEMA,
+        # Flow
+        cv.Optional(CONF_WATERFLOW): sensor.sensor_schema(
+            unit_of_measurement=UNIT_GPM,
+            accuracy_decimals=1,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        # Fault
+        cv.Optional(CONF_FAULT_CODE): sensor.sensor_schema(
+            accuracy_decimals=0,
+        ),
+        # FP1/FP2 refrigerant temperatures
+        cv.Optional(CONF_FP1_TEMPERATURE): TEMPERATURE_SENSOR_SCHEMA,
+        cv.Optional(CONF_FP2_TEMPERATURE): TEMPERATURE_SENSOR_SCHEMA,
+        # Line voltage setting (configured voltage, not measured)
+        cv.Optional(CONF_LINE_VOLTAGE_SETTING): sensor.sensor_schema(
+            unit_of_measurement=UNIT_VOLT,
+            accuracy_decimals=0,
+            device_class=DEVICE_CLASS_VOLTAGE,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        # Anti-short-cycle countdown (seconds)
+        cv.Optional(CONF_ANTI_SHORT_CYCLE): sensor.sensor_schema(
+            unit_of_measurement="s",
+            accuracy_decimals=0,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+    }
+)
+
+
+async def to_code(config):
+    parent = await cg.get_variable(config[CONF_AURORA_ID])
+
+    # Temperature sensors
+    if CONF_ENTERING_AIR_TEMPERATURE in config:
+        sens = await sensor.new_sensor(config[CONF_ENTERING_AIR_TEMPERATURE])
+        cg.add(parent.set_entering_air_sensor(sens))
+
+    if CONF_LEAVING_AIR_TEMPERATURE in config:
+        sens = await sensor.new_sensor(config[CONF_LEAVING_AIR_TEMPERATURE])
+        cg.add(parent.set_leaving_air_sensor(sens))
+
+    if CONF_AMBIENT_TEMPERATURE in config:
+        sens = await sensor.new_sensor(config[CONF_AMBIENT_TEMPERATURE])
+        cg.add(parent.set_ambient_temp_sensor(sens))
+
+    if CONF_OUTDOOR_TEMPERATURE in config:
+        sens = await sensor.new_sensor(config[CONF_OUTDOOR_TEMPERATURE])
+        cg.add(parent.set_outdoor_temp_sensor(sens))
+
+    if CONF_ENTERING_WATER_TEMPERATURE in config:
+        sens = await sensor.new_sensor(config[CONF_ENTERING_WATER_TEMPERATURE])
+        cg.add(parent.set_entering_water_sensor(sens))
+
+    if CONF_LEAVING_WATER_TEMPERATURE in config:
+        sens = await sensor.new_sensor(config[CONF_LEAVING_WATER_TEMPERATURE])
+        cg.add(parent.set_leaving_water_sensor(sens))
+
+    if CONF_HEATING_SETPOINT in config:
+        sens = await sensor.new_sensor(config[CONF_HEATING_SETPOINT])
+        cg.add(parent.set_heating_setpoint_sensor(sens))
+
+    if CONF_COOLING_SETPOINT in config:
+        sens = await sensor.new_sensor(config[CONF_COOLING_SETPOINT])
+        cg.add(parent.set_cooling_setpoint_sensor(sens))
+
+    if CONF_DHW_TEMPERATURE in config:
+        sens = await sensor.new_sensor(config[CONF_DHW_TEMPERATURE])
+        cg.add(parent.set_dhw_temp_sensor(sens))
+
+    if CONF_DHW_SETPOINT in config:
+        sens = await sensor.new_sensor(config[CONF_DHW_SETPOINT])
+        cg.add(parent.set_dhw_setpoint_sensor(sens))
+
+    if CONF_SUPERHEAT_TEMPERATURE in config:
+        sens = await sensor.new_sensor(config[CONF_SUPERHEAT_TEMPERATURE])
+        cg.add(parent.set_superheat_sensor(sens))
+
+    # Humidity
+    if CONF_HUMIDITY in config:
+        sens = await sensor.new_sensor(config[CONF_HUMIDITY])
+        cg.add(parent.set_humidity_sensor(sens))
+
+    # Compressor
+    if CONF_COMPRESSOR_SPEED in config:
+        sens = await sensor.new_sensor(config[CONF_COMPRESSOR_SPEED])
+        cg.add(parent.set_compressor_speed_sensor(sens))
+
+    # Pressures
+    if CONF_DISCHARGE_PRESSURE in config:
+        sens = await sensor.new_sensor(config[CONF_DISCHARGE_PRESSURE])
+        cg.add(parent.set_discharge_pressure_sensor(sens))
+
+    if CONF_SUCTION_PRESSURE in config:
+        sens = await sensor.new_sensor(config[CONF_SUCTION_PRESSURE])
+        cg.add(parent.set_suction_pressure_sensor(sens))
+
+    if CONF_LOOP_PRESSURE in config:
+        sens = await sensor.new_sensor(config[CONF_LOOP_PRESSURE])
+        cg.add(parent.set_loop_pressure_sensor(sens))
+
+    # EEV
+    if CONF_EEV_OPEN_PERCENTAGE in config:
+        sens = await sensor.new_sensor(config[CONF_EEV_OPEN_PERCENTAGE])
+        cg.add(parent.set_eev_open_sensor(sens))
+
+    # Voltage
+    if CONF_LINE_VOLTAGE in config:
+        sens = await sensor.new_sensor(config[CONF_LINE_VOLTAGE])
+        cg.add(parent.set_line_voltage_sensor(sens))
+
+    # Power sensors
+    if CONF_TOTAL_WATTS in config:
+        sens = await sensor.new_sensor(config[CONF_TOTAL_WATTS])
+        cg.add(parent.set_total_watts_sensor(sens))
+
+    if CONF_COMPRESSOR_WATTS in config:
+        sens = await sensor.new_sensor(config[CONF_COMPRESSOR_WATTS])
+        cg.add(parent.set_compressor_watts_sensor(sens))
+
+    if CONF_BLOWER_WATTS in config:
+        sens = await sensor.new_sensor(config[CONF_BLOWER_WATTS])
+        cg.add(parent.set_blower_watts_sensor(sens))
+
+    if CONF_AUX_HEAT_WATTS in config:
+        sens = await sensor.new_sensor(config[CONF_AUX_HEAT_WATTS])
+        cg.add(parent.set_aux_watts_sensor(sens))
+
+    if CONF_PUMP_WATTS in config:
+        sens = await sensor.new_sensor(config[CONF_PUMP_WATTS])
+        cg.add(parent.set_pump_watts_sensor(sens))
+
+    # Flow
+    if CONF_WATERFLOW in config:
+        sens = await sensor.new_sensor(config[CONF_WATERFLOW])
+        cg.add(parent.set_waterflow_sensor(sens))
+
+    # Fault
+    if CONF_FAULT_CODE in config:
+        sens = await sensor.new_sensor(config[CONF_FAULT_CODE])
+        cg.add(parent.set_fault_code_sensor(sens))
+
+    # FP1/FP2 refrigerant temperatures
+    if CONF_FP1_TEMPERATURE in config:
+        sens = await sensor.new_sensor(config[CONF_FP1_TEMPERATURE])
+        cg.add(parent.set_fp1_sensor(sens))
+
+    if CONF_FP2_TEMPERATURE in config:
+        sens = await sensor.new_sensor(config[CONF_FP2_TEMPERATURE])
+        cg.add(parent.set_fp2_sensor(sens))
+
+    # Line voltage setting
+    if CONF_LINE_VOLTAGE_SETTING in config:
+        sens = await sensor.new_sensor(config[CONF_LINE_VOLTAGE_SETTING])
+        cg.add(parent.set_line_voltage_setting_sensor(sens))
+
+    # Anti-short-cycle countdown
+    if CONF_ANTI_SHORT_CYCLE in config:
+        sens = await sensor.new_sensor(config[CONF_ANTI_SHORT_CYCLE])
+        cg.add(parent.set_anti_short_cycle_sensor(sens))

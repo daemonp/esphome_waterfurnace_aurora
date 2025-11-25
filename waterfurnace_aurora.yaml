@@ -1,0 +1,241 @@
+# WaterFurnace Aurora ESPHome Configuration
+# 
+# This configuration creates an ESPHome device that communicates with
+# a WaterFurnace Aurora heat pump via RS-485 Modbus RTU.
+#
+# Hardware requirements:
+#   - ESP32 board (recommended) or ESP8266
+#   - RS-485 transceiver (MAX485, MAX3485, or similar)
+#   - Connection to Aurora ABC board RS-485 port
+#
+# Wiring (ESP32 -> MAX485 -> Aurora):
+#   ESP32 GPIO17 (TX) -> MAX485 DI
+#   ESP32 GPIO16 (RX) -> MAX485 RO  
+#   ESP32 GPIO4       -> MAX485 DE + RE (tied together)
+#   3.3V              -> MAX485 VCC
+#   GND               -> MAX485 GND
+#   MAX485 A          -> Aurora RS-485 A (+)
+#   MAX485 B          -> Aurora RS-485 B (-)
+#   GND               -> Aurora GND (shield)
+#
+# Serial settings: 19200 baud, 8 data bits, Even parity, 1 stop bit
+
+substitutions:
+  device_name: waterfurnace-aurora
+  friendly_name: "WaterFurnace Aurora"
+
+esphome:
+  name: ${device_name}
+  friendly_name: ${friendly_name}
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+# Enable logging
+logger:
+  level: DEBUG
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+# Enable OTA updates  
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  
+  # Enable fallback hotspot in case wifi connection fails
+  ap:
+    ssid: "${device_name} Fallback"
+    password: !secret ap_password
+
+captive_portal:
+
+# Web server for local access
+web_server:
+  port: 80
+
+# UART configuration for RS-485 communication
+# Aurora uses: 19200 baud, 8 data bits, Even parity, 1 stop bit
+uart:
+  id: mod_bus
+  tx_pin: GPIO17
+  rx_pin: GPIO16
+  baud_rate: 19200
+  parity: EVEN
+  stop_bits: 1
+
+# RS-485 flow control pin (active high for TX)
+output:
+  - platform: gpio
+    id: rs485_flow_control
+    pin: GPIO4
+
+# External components - load from local directory
+external_components:
+  - source:
+      type: local
+      path: components
+
+# WaterFurnace Aurora hub
+waterfurnace_aurora:
+  id: aurora
+  uart_id: mod_bus
+  address: 1  # Modbus slave address (default is 1)
+  update_interval: 5s
+
+# Climate entity for the heat pump thermostat
+climate:
+  - platform: waterfurnace_aurora
+    id: aurora_thermostat
+    name: "Heat Pump"
+    aurora_id: aurora
+
+# Water heater entity for DHW (Domestic Hot Water)
+water_heater:
+  - platform: waterfurnace_aurora
+    id: aurora_dhw
+    name: "Hot Water"
+    aurora_id: aurora
+
+# Additional sensors for monitoring
+sensor:
+  # Temperature sensors
+  - platform: waterfurnace_aurora
+    aurora_id: aurora
+    entering_air_temperature:
+      name: "Entering Air Temperature"
+    leaving_air_temperature:
+      name: "Leaving Air Temperature"
+    ambient_temperature:
+      name: "Ambient Temperature"
+    outdoor_temperature:
+      name: "Outdoor Temperature"
+    entering_water_temperature:
+      name: "Entering Water Temperature"
+    leaving_water_temperature:
+      name: "Leaving Water Temperature"
+    
+    # Setpoints (readonly)
+    heating_setpoint:
+      name: "Heating Setpoint"
+    cooling_setpoint:
+      name: "Cooling Setpoint"
+    
+    # Humidity
+    humidity:
+      name: "Relative Humidity"
+    
+    # DHW
+    dhw_temperature:
+      name: "DHW Temperature"
+    dhw_setpoint:
+      name: "DHW Setpoint"
+    
+    # Compressor (VS Drive)
+    compressor_speed:
+      name: "Compressor Speed"
+    discharge_pressure:
+      name: "Discharge Pressure"
+    suction_pressure:
+      name: "Suction Pressure"
+    eev_open_percentage:
+      name: "EEV Open Percentage"
+    superheat_temperature:
+      name: "Superheat Temperature"
+    
+    # Energy monitoring
+    line_voltage:
+      name: "Line Voltage"
+    total_watts:
+      name: "Total Power"
+    compressor_watts:
+      name: "Compressor Power"
+    blower_watts:
+      name: "Blower Power"
+    aux_heat_watts:
+      name: "Aux Heat Power"
+    pump_watts:
+      name: "Pump Power"
+    
+    # Loop
+    waterflow:
+      name: "Loop Flow Rate"
+    loop_pressure:
+      name: "Loop Pressure"
+    
+    # Fault
+    fault_code:
+      name: "Fault Code"
+    
+    # Refrigerant temperatures (FP1/FP2)
+    fp1_temperature:
+      name: "FP1 Temperature"  # Cooling liquid line
+    fp2_temperature:
+      name: "FP2 Temperature"  # Air coil
+    
+    # System status
+    line_voltage_setting:
+      name: "Line Voltage Setting"
+    anti_short_cycle:
+      name: "Anti-Short-Cycle Countdown"
+
+  # WiFi signal strength
+  - platform: wifi_signal
+    name: "WiFi Signal"
+    update_interval: 60s
+
+  # Uptime sensor
+  - platform: uptime
+    name: "Uptime"
+
+# Binary sensors
+binary_sensor:
+  - platform: waterfurnace_aurora
+    aurora_id: aurora
+    compressor_running:
+      name: "Compressor Running"
+    blower_running:
+      name: "Blower Running"
+    aux_heat_running:
+      name: "Aux Heat Running"
+    dhw_running:
+      name: "DHW Running"
+    loop_pump_running:
+      name: "Loop Pump Running"
+    lockout:
+      name: "Lockout"
+      device_class: problem
+
+  # Connection status
+  - platform: status
+    name: "Status"
+
+# Text sensors
+text_sensor:
+  - platform: waterfurnace_aurora
+    aurora_id: aurora
+    current_mode:
+      name: "Current Mode"
+    hvac_mode:
+      name: "HVAC Mode"
+    fan_mode:
+      name: "Fan Mode"
+    fault_description:
+      name: "Fault Description"
+
+  # ESPHome version
+  - platform: version
+    name: "ESPHome Version"
+
+# Button to restart
+button:
+  - platform: restart
+    name: "Restart"
