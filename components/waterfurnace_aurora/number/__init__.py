@@ -40,7 +40,7 @@ AuroraDHWNumber = waterfurnace_aurora_ns.class_(
 AuroraNumber = waterfurnace_aurora_ns.class_(
     "AuroraNumber", number.Number, cg.Component
 )
-AuroraNumberType = waterfurnace_aurora_ns.enum("AuroraNumberType")
+AuroraNumberType = waterfurnace_aurora_ns.enum("AuroraNumberType", is_class=True)
 
 # Number type enum values
 AURORA_NUMBER_TYPES = {
