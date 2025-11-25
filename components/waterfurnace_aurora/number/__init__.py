@@ -7,10 +7,11 @@ from esphome.const import (
     CONF_MAX_VALUE,
     CONF_STEP,
     DEVICE_CLASS_TEMPERATURE,
-    UNIT_FAHRENHEIT,
 )
 
 from .. import waterfurnace_aurora_ns, WaterFurnaceAurora, CONF_AURORA_ID
+
+UNIT_FAHRENHEIT = "°F"
 
 DEPENDENCIES = ["waterfurnace_aurora"]
 CODEOWNERS = ["@damonmaria"]
