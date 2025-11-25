@@ -1,6 +1,6 @@
 # WaterFurnace Aurora for ESPHome
 
-A native ESPHome custom component for controlling and monitoring WaterFurnace geothermal heat pumps. This component communicates directly with the Aurora Base Control (ABC) board via RS485, bypassing the need for expensive Symphony/AWL hardware or complex Raspberry Pi bridges.
+A native ESPHome custom component for controlling and monitoring WaterFurnace geothermal heat pumps. This component communicates directly with the Aurora Base Control (ABC) board via RS-485 Modbus RTU, bypassing the need for expensive Symphony/AWL hardware or complex Raspberry Pi bridges.
 
 It is a C++ port of the [waterfurnace_aurora Ruby gem](https://github.com/ccutrer/waterfurnace_aurora), optimized for ESP32/ESP8266 devices.
 
@@ -31,93 +31,63 @@ Connect the RS485 adapter to the ESP and the Heat Pump's AID Tool port (RJ45).
 | Pin 4 (RS485-) | Blue | B / - | - |
 | - | - | DI (TX) | GPIO_TX |
 | - | - | RO (RX) | GPIO_RX |
-| - | - | DE/RE | GPIO_EN (Optional*) |
+| - | - | DE/RE | GPIO_FLOW (Optional*) |
 | - | - | VCC | 3.3V / 5V |
 | - | - | GND | GND |
 
-*Note: Many cheap RS485 modules require DE/RE pins to be pulled high/low to switch between Transmit and Receive. You can tie them to a single GPIO defined as `flow_control_pin` in ESPHome.*
+*Note: Many cheap RS485 modules require DE/RE pins to be pulled high/low to switch between Transmit and Receive. You can tie them to a single GPIO defined as `flow_control_pin` in the configuration.*
 
-## Installation
+## Installation & Configuration
 
-1. Copy the `components` directory into your ESPHome project folder.
-2. Add the configuration to your ESPHome YAML file.
+The recommended way to use this component is via **ESPHome Packages**. This allows you to include the full configuration with a single line and customize it using substitutions.
 
-## Configuration Example
+### Minimal Example
+
+Add the following to your ESPHome YAML configuration:
 
 ```yaml
+substitutions:
+  name: waterfurnace-aurora
+  friendly_name: "Geothermal Heat Pump"
+  # Adjust pins to match your wiring
+  uart_tx_pin: GPIO17
+  uart_rx_pin: GPIO16
+  flow_control_pin: GPIO4
+
+packages:
+  waterfurnace.aurora: github://daemonp/esphome_waterfurnace_aurora/waterfurnace_aurora.yaml@master
+
 esphome:
-  name: waterfurnace
-  platform: ESP32
+  name: ${name}
+  friendly_name: ${friendly_name}
 
-# Enable logging
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+# Standard ESPHome components
 logger:
-  level: DEBUG
-  baud_rate: 0  # Disable UART logging if using the same UART for RS485
-
-# Define UART for RS485
-uart:
-  id: modbus_uart
-  tx_pin: GPIO17
-  rx_pin: GPIO16
-  baud_rate: 19200
-  stop_bits: 1
-
-# Load the component
-waterfurnace_aurora:
-  uart_id: modbus_uart
-  # flow_control_pin: GPIO4  # Uncomment if your RS485 adapter requires it
-
-# Expose the Climate entity
-climate:
-  - platform: waterfurnace_aurora
-    name: "Geothermal Heat Pump"
-
-# Expose Sensors
-sensor:
-  - platform: waterfurnace_aurora
-    entering_air_temperature:
-      name: "Entering Air Temp"
-    leaving_air_temperature:
-      name: "Leaving Air Temp"
-    entering_water_temperature:
-      name: "Entering Water Temp"
-    leaving_water_temperature:
-      name: "Leaving Water Temp"
-    total_watts:
-      name: "Total Power"
-    compressor_watts:
-      name: "Compressor Power"
-    blower_watts:
-      name: "Blower Power"
-    aux_watts:
-      name: "Aux Heat Power"
-    loop_pressure:
-      name: "Loop Pressure"
-    compressor_speed:
-      name: "Compressor Speed"
-    fault_code:
-      name: "Fault Code"
-
-# Expose Text Sensors
-text_sensor:
-  - platform: waterfurnace_aurora
-    current_mode:
-      name: "Current Mode"
-    fault_description:
-      name: "Fault Description"
-
-# Expose Binary Sensors
-binary_sensor:
-  - platform: waterfurnace_aurora
-    compressor_running:
-      name: "Compressor Running"
-    aux_heat_running:
-      name: "Aux Heat Running"
-    blower_running:
-      name: "Blower Running"
-    lockout:
-      name: "System Lockout"
+api:
+ota:
+wifi:
+  ssid: "MyWiFi"
+  password: "password"
 ```
+
+### Configuration Variables
+
+You can customize the following variables in the `substitutions` section:
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `name` | `waterfurnace-aurora` | Device name used for ESPHome ID. |
+| `friendly_name` | `WaterFurnace Aurora` | Friendly name for Home Assistant. |
+| `uart_tx_pin` | `GPIO17` | TX pin connected to RS485 module DI. |
+| `uart_rx_pin` | `GPIO16` | RX pin connected to RS485 module RO. |
+| `flow_control_pin` | `GPIO4` | Pin for RS485 DE/RE flow control. |
+| `modbus_address` | `1` | Modbus slave address of the Aurora ABC board. |
+| `update_interval` | `5s` | How often to poll the heat pump for data. |
 
 ## Protocol Details
 

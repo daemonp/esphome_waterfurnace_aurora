@@ -1,16 +1,16 @@
-#include "aurora_climate.h"
+#include "aurora_iz2_climate.h"
 #include "esphome/core/log.h"
 
 namespace esphome {
 namespace waterfurnace_aurora {
 
-static const char *const TAG = "aurora.climate";
+static const char *const TAG = "aurora.iz2_climate";
 
-void AuroraClimate::setup() {
+void AuroraIZ2Climate::setup() {
   // Nothing specific to set up
 }
 
-void AuroraClimate::loop() {
+void AuroraIZ2Climate::loop() {
   // Update state periodically
   uint32_t now = millis();
   if (now - this->last_update_ >= 5000) {  // Every 5 seconds
@@ -19,14 +19,14 @@ void AuroraClimate::loop() {
   }
 }
 
-void AuroraClimate::dump_config() {
-  ESP_LOGCONFIG(TAG, "Aurora Climate:");
+void AuroraIZ2Climate::dump_config() {
+  ESP_LOGCONFIG(TAG, "Aurora IZ2 Zone %d Climate:", this->zone_number_);
 }
 
-climate::ClimateTraits AuroraClimate::traits() {
+climate::ClimateTraits AuroraIZ2Climate::traits() {
   auto traits = climate::ClimateTraits();
   
-  // Feature flags - use add_feature_flags() instead of deprecated set_supports_*() methods
+  // Feature flags
   traits.add_feature_flags(climate::CLIMATE_SUPPORTS_CURRENT_TEMPERATURE);
   traits.add_feature_flags(climate::CLIMATE_REQUIRES_TWO_POINT_TARGET_TEMPERATURE);
   traits.add_feature_flags(climate::CLIMATE_SUPPORTS_ACTION);
@@ -41,21 +41,32 @@ climate::ClimateTraits AuroraClimate::traits() {
   traits.add_supported_fan_mode(climate::CLIMATE_FAN_AUTO);
   traits.add_supported_fan_mode(climate::CLIMATE_FAN_ON);  // Continuous
   
-  // Presets - use BOOST for emergency heat (there's no CLIMATE_PRESET_EMERGENCY_HEAT)
+  // Presets - use BOOST for emergency heat
   traits.add_supported_preset(climate::CLIMATE_PRESET_NONE);
   traits.add_supported_preset(climate::CLIMATE_PRESET_BOOST);  // Emergency Heat
   
-  // Temperature ranges from thermostat.rb
-  traits.set_visual_min_temperature(40);  // Heating min
-  traits.set_visual_max_temperature(99);  // Cooling max
+  // Temperature ranges from thermostat.rb / iz2_zone.rb
+  // Heating: 40-90, Cooling: 54-99
+  traits.set_visual_min_temperature(40);
+  traits.set_visual_max_temperature(99);
   traits.set_visual_temperature_step(0.5);
   
   return traits;
 }
 
-void AuroraClimate::control(const climate::ClimateCall &call) {
+void AuroraIZ2Climate::control(const climate::ClimateCall &call) {
   if (this->parent_ == nullptr) {
-    ESP_LOGW(TAG, "Parent not set, cannot control");
+    ESP_LOGW(TAG, "Parent not set, cannot control zone %d", this->zone_number_);
+    return;
+  }
+
+  if (!this->parent_->has_iz2()) {
+    ESP_LOGW(TAG, "IZ2 not detected, cannot control zone %d", this->zone_number_);
+    return;
+  }
+
+  if (this->zone_number_ > this->parent_->get_num_iz2_zones()) {
+    ESP_LOGW(TAG, "Zone %d not available (only %d zones)", this->zone_number_, this->parent_->get_num_iz2_zones());
     return;
   }
 
@@ -78,11 +89,11 @@ void AuroraClimate::control(const climate::ClimateCall &call) {
         aurora_mode = HEATING_MODE_HEAT;
         break;
       default:
-        ESP_LOGW(TAG, "Unsupported mode");
+        ESP_LOGW(TAG, "Unsupported mode for zone %d", this->zone_number_);
         return;
     }
     
-    if (this->parent_->set_hvac_mode(aurora_mode)) {
+    if (this->parent_->set_zone_hvac_mode(this->zone_number_, aurora_mode)) {
       this->mode = mode;
     }
   }
@@ -90,14 +101,14 @@ void AuroraClimate::control(const climate::ClimateCall &call) {
   // Handle target temperature changes (dual setpoint)
   if (call.get_target_temperature_low().has_value()) {
     float temp = *call.get_target_temperature_low();
-    if (this->parent_->set_heating_setpoint(temp)) {
+    if (this->parent_->set_zone_heating_setpoint(this->zone_number_, temp)) {
       this->target_temperature_low = temp;
     }
   }
   
   if (call.get_target_temperature_high().has_value()) {
     float temp = *call.get_target_temperature_high();
-    if (this->parent_->set_cooling_setpoint(temp)) {
+    if (this->parent_->set_zone_cooling_setpoint(this->zone_number_, temp)) {
       this->target_temperature_high = temp;
     }
   }
@@ -118,7 +129,7 @@ void AuroraClimate::control(const climate::ClimateCall &call) {
         aurora_fan = FAN_MODE_AUTO;
     }
     
-    if (this->parent_->set_fan_mode(aurora_fan)) {
+    if (this->parent_->set_zone_fan_mode(this->zone_number_, aurora_fan)) {
       this->fan_mode = fan_mode;
     }
   }
@@ -129,14 +140,15 @@ void AuroraClimate::control(const climate::ClimateCall &call) {
     
     if (preset == climate::CLIMATE_PRESET_BOOST) {
       // BOOST preset = Emergency Heat mode
-      if (this->parent_->set_hvac_mode(HEATING_MODE_EHEAT)) {
+      if (this->parent_->set_zone_hvac_mode(this->zone_number_, HEATING_MODE_EHEAT)) {
         this->preset = preset;
         this->mode = climate::CLIMATE_MODE_HEAT;
       }
     } else if (preset == climate::CLIMATE_PRESET_NONE) {
-      // Clear preset - if we were in E-Heat, switch back to regular heat
-      if (this->parent_->get_hvac_mode() == HEATING_MODE_EHEAT) {
-        this->parent_->set_hvac_mode(HEATING_MODE_HEAT);
+      // Clear preset - switch back to regular heat if we were in E-Heat
+      const IZ2ZoneData& zone = this->parent_->get_zone_data(this->zone_number_);
+      if (zone.target_mode == HEATING_MODE_EHEAT) {
+        this->parent_->set_zone_hvac_mode(this->zone_number_, HEATING_MODE_HEAT);
       }
       this->preset = preset;
     }
@@ -145,31 +157,36 @@ void AuroraClimate::control(const climate::ClimateCall &call) {
   this->publish_state();
 }
 
-void AuroraClimate::update_state_() {
+void AuroraIZ2Climate::update_state_() {
   if (this->parent_ == nullptr) {
     return;
   }
 
+  if (!this->parent_->has_iz2()) {
+    return;
+  }
+
+  if (this->zone_number_ > this->parent_->get_num_iz2_zones()) {
+    return;
+  }
+
+  const IZ2ZoneData& zone = this->parent_->get_zone_data(this->zone_number_);
+
   // Update current temperature
-  float ambient = this->parent_->get_ambient_temperature();
-  if (!std::isnan(ambient)) {
-    this->current_temperature = ambient;
+  if (!std::isnan(zone.ambient_temperature)) {
+    this->current_temperature = zone.ambient_temperature;
   }
 
   // Update setpoints
-  float heating_sp = this->parent_->get_heating_setpoint();
-  float cooling_sp = this->parent_->get_cooling_setpoint();
-  
-  if (!std::isnan(heating_sp)) {
-    this->target_temperature_low = heating_sp;
+  if (!std::isnan(zone.heating_setpoint)) {
+    this->target_temperature_low = zone.heating_setpoint;
   }
-  if (!std::isnan(cooling_sp)) {
-    this->target_temperature_high = cooling_sp;
+  if (!std::isnan(zone.cooling_setpoint)) {
+    this->target_temperature_high = zone.cooling_setpoint;
   }
 
   // Update mode and preset
-  HeatingMode aurora_mode = this->parent_->get_hvac_mode();
-  switch (aurora_mode) {
+  switch (zone.target_mode) {
     case HEATING_MODE_OFF:
       this->mode = climate::CLIMATE_MODE_OFF;
       this->preset = climate::CLIMATE_PRESET_NONE;
@@ -192,28 +209,33 @@ void AuroraClimate::update_state_() {
       break;
   }
 
-  // Update action based on system outputs
-  uint16_t outputs = this->parent_->get_system_outputs();
-  bool compressor = outputs & (OUTPUT_CC | OUTPUT_CC2);
-  bool cooling = outputs & OUTPUT_RV;
-  bool aux_heat = outputs & (OUTPUT_EH1 | OUTPUT_EH2);
-  bool blower = outputs & OUTPUT_BLOWER;
-  
-  if (this->parent_->is_locked_out()) {
-    this->action = climate::CLIMATE_ACTION_OFF;
-  } else if (compressor && cooling) {
-    this->action = climate::CLIMATE_ACTION_COOLING;
-  } else if (compressor || aux_heat) {
-    this->action = climate::CLIMATE_ACTION_HEATING;
-  } else if (blower) {
-    this->action = climate::CLIMATE_ACTION_FAN;
-  } else {
+  // Update action based on zone current call and damper state
+  // Zone call indicates what the zone is requesting
+  if (!zone.damper_open) {
+    // Damper closed - idle
     this->action = climate::CLIMATE_ACTION_IDLE;
+  } else {
+    // Damper open - determine action from current call
+    switch (zone.current_call) {
+      case ZONE_CALL_STANDBY:
+        this->action = climate::CLIMATE_ACTION_IDLE;
+        break;
+      case ZONE_CALL_H1:
+      case ZONE_CALL_H2:
+      case ZONE_CALL_H3:
+        this->action = climate::CLIMATE_ACTION_HEATING;
+        break;
+      case ZONE_CALL_C1:
+      case ZONE_CALL_C2:
+        this->action = climate::CLIMATE_ACTION_COOLING;
+        break;
+      default:
+        this->action = climate::CLIMATE_ACTION_IDLE;
+    }
   }
 
   // Update fan mode
-  FanMode aurora_fan = this->parent_->get_fan_mode();
-  switch (aurora_fan) {
+  switch (zone.target_fan_mode) {
     case FAN_MODE_AUTO:
       this->fan_mode = climate::CLIMATE_FAN_AUTO;
       break;

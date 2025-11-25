@@ -1,6 +1,7 @@
 #pragma once
 
 #include "esphome/core/component.h"
+#include "esphome/core/gpio.h"
 #include "esphome/components/uart/uart.h"
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/binary_sensor/binary_sensor.h"
@@ -50,6 +51,30 @@ static const uint16_t AXB_OUTPUT_DHW = 0x01;
 static const uint16_t AXB_OUTPUT_LOOP_PUMP = 0x02;
 static const uint16_t AXB_OUTPUT_DIVERTING_VALVE = 0x04;
 
+// System status bitmask (register 31, from registers.rb status method)
+static const uint16_t STATUS_LPS = 0x80;          // Low pressure switch (bit 7)
+static const uint16_t STATUS_HPS = 0x100;         // High pressure switch (bit 8)
+static const uint16_t STATUS_Y1 = 0x01;
+static const uint16_t STATUS_Y2 = 0x02;
+static const uint16_t STATUS_W = 0x04;
+static const uint16_t STATUS_O = 0x08;
+static const uint16_t STATUS_G = 0x10;
+static const uint16_t STATUS_DH_RH = 0x20;
+static const uint16_t STATUS_EMERGENCY_SHUTDOWN = 0x40;
+static const uint16_t STATUS_LOAD_SHED = 0x200;
+
+// VS Drive Derate flags (registers 214, 3223)
+static const uint16_t VS_DERATE_DRIVE_OVER_TEMP = 0x01;
+static const uint16_t VS_DERATE_LOW_SUCTION_PRESSURE = 0x04;
+static const uint16_t VS_DERATE_LOW_DISCHARGE_PRESSURE = 0x10;
+static const uint16_t VS_DERATE_HIGH_DISCHARGE_PRESSURE = 0x20;
+static const uint16_t VS_DERATE_OUTPUT_POWER_LIMIT = 0x40;
+
+// VS Drive Safe Mode flags (registers 216, 3225)
+static const uint16_t VS_SAFE_EEV_INDOOR_FAILED = 0x01;
+static const uint16_t VS_SAFE_EEV_OUTDOOR_FAILED = 0x02;
+static const uint16_t VS_SAFE_INVALID_AMBIENT_TEMP = 0x04;
+
 // Key register addresses (from registers.rb)
 namespace registers {
   // System info
@@ -61,7 +86,19 @@ namespace registers {
   static const uint16_t LAST_FAULT = 25;
   static const uint16_t SYSTEM_OUTPUTS = 30;
   static const uint16_t SYSTEM_STATUS = 31;
+  static const uint16_t MODEL_NUMBER = 92;       // 12 registers (92-103)
+  static const uint16_t SERIAL_NUMBER = 105;     // 5 registers (105-109)
   static const uint16_t LINE_VOLTAGE_SETTING = 112;
+  
+  // VS Drive details (from registers.rb)
+  static const uint16_t VS_DERATE = 214;         // Also at 3223
+  static const uint16_t VS_SAFE_MODE = 216;      // Also at 3225
+  static const uint16_t VS_ALARM1 = 217;         // Also at 3226
+  static const uint16_t VS_ALARM2 = 218;         // Also at 3227
+  
+  // Fault history (registers 601-699)
+  static const uint16_t FAULT_HISTORY_START = 601;
+  static const uint16_t FAULT_HISTORY_END = 699;
   
   // DHW (requires AXB)
   static const uint16_t DHW_ENABLED = 400;
@@ -89,11 +126,32 @@ namespace registers {
   static const uint16_t WATERFLOW = 1117;
   static const uint16_t LOOP_PRESSURE = 1119;
   
+  // Blower / ECM (from blower.rb)
+  static const uint16_t BLOWER_ONLY_SPEED = 340;
+  static const uint16_t LO_COMPRESSOR_ECM_SPEED = 341;
+  static const uint16_t HI_COMPRESSOR_ECM_SPEED = 342;
+  static const uint16_t ECM_SPEED = 344;
+  static const uint16_t AUX_HEAT_ECM_SPEED = 347;
+  
+  // VS Pump (from pump.rb)
+  static const uint16_t VS_PUMP_MIN = 321;
+  static const uint16_t VS_PUMP_MAX = 322;
+  static const uint16_t VS_PUMP_MANUAL = 323;
+  static const uint16_t VS_PUMP_SPEED = 325;
+  
+  // Refrigeration monitoring (from compressor.rb)
+  static const uint16_t HEATING_LIQUID_LINE_TEMP = 1109;
+  static const uint16_t SATURATED_CONDENSER_TEMP = 1134;
+  static const uint16_t SUBCOOL_HEATING = 1135;
+  static const uint16_t SUBCOOL_COOLING = 1136;
+  
   // Energy monitoring (32-bit values, high word first)
   static const uint16_t COMPRESSOR_WATTS = 1146;
   static const uint16_t BLOWER_WATTS = 1148;
   static const uint16_t AUX_WATTS = 1150;
   static const uint16_t TOTAL_WATTS = 1152;
+  static const uint16_t HEAT_OF_EXTRACTION = 1154;
+  static const uint16_t HEAT_OF_REJECTION = 1156;
   static const uint16_t PUMP_WATTS = 1164;
   
   // VS Drive
@@ -113,6 +171,13 @@ namespace registers {
   static const uint16_t FAN_CONFIG = 12005;
   static const uint16_t HEATING_MODE_READ = 12006;
   
+  // Humidistat (from humidistat.rb)
+  static const uint16_t HUMIDISTAT_SETTINGS = 12309;    // For non-IZ2
+  static const uint16_t HUMIDISTAT_TARGETS = 12310;     // For non-IZ2
+  static const uint16_t IZ2_HUMIDISTAT_SETTINGS = 21114;
+  static const uint16_t IZ2_HUMIDISTAT_MODE = 31109;
+  static const uint16_t IZ2_HUMIDISTAT_TARGETS = 31110;
+  
   // Thermostat config (write)
   static const uint16_t HEATING_MODE_WRITE = 12606;
   static const uint16_t HEATING_SETPOINT_WRITE = 12619;
@@ -124,10 +189,62 @@ namespace registers {
   static const uint16_t IZ2_HEAT_SP_WRITE_BASE = 21203;
   static const uint16_t IZ2_COOL_SP_WRITE_BASE = 21204;
   static const uint16_t IZ2_FAN_MODE_WRITE_BASE = 21205;
+  static const uint16_t IZ2_FAN_ON_WRITE_BASE = 21206;
+  static const uint16_t IZ2_FAN_OFF_WRITE_BASE = 21207;
   static const uint16_t IZ2_AMBIENT_BASE = 31007;         // +3 per zone
   static const uint16_t IZ2_CONFIG1_BASE = 31008;
   static const uint16_t IZ2_CONFIG2_BASE = 31009;
+  static const uint16_t IZ2_CONFIG3_BASE = 31200;         // +3 per zone
+  
+  // IZ2 system registers
+  static const uint16_t IZ2_INSTALLED = 812;
+  static const uint16_t IZ2_NUM_ZONES = 483;
+  static const uint16_t IZ2_OUTDOOR_TEMP = 31003;
+  static const uint16_t IZ2_DEMAND = 31005;
 }
+
+// Maximum number of IZ2 zones
+static const uint8_t MAX_IZ2_ZONES = 6;
+
+// IZ2 Zone current mode/call (from registers.rb CALLS)
+enum ZoneCall : uint8_t {
+  ZONE_CALL_STANDBY = 0,
+  ZONE_CALL_H1 = 1,
+  ZONE_CALL_H2 = 2,
+  ZONE_CALL_H3 = 3,
+  ZONE_CALL_C1 = 4,
+  ZONE_CALL_C2 = 5
+};
+
+// Zone priority
+enum ZonePriority : uint8_t {
+  ZONE_PRIORITY_COMFORT = 0,
+  ZONE_PRIORITY_ECONOMY = 1
+};
+
+// Zone size
+enum ZoneSize : uint8_t {
+  ZONE_SIZE_QUARTER = 0,
+  ZONE_SIZE_HALF = 1,
+  ZONE_SIZE_THREE_QUARTER = 2,
+  ZONE_SIZE_FULL = 3
+};
+
+// Structure to hold IZ2 zone data
+struct IZ2ZoneData {
+  float ambient_temperature{NAN};
+  float heating_setpoint{NAN};
+  float cooling_setpoint{NAN};
+  HeatingMode target_mode{HEATING_MODE_OFF};
+  FanMode target_fan_mode{FAN_MODE_AUTO};
+  ZoneCall current_call{ZONE_CALL_STANDBY};
+  bool damper_open{false};
+  uint8_t fan_on_time{0};
+  uint8_t fan_off_time{0};
+  ZonePriority priority{ZONE_PRIORITY_COMFORT};
+  ZoneSize size{ZONE_SIZE_FULL};
+  uint8_t normalized_size{0};
+};
 
 class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
  public:
@@ -141,6 +258,8 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   float get_setup_priority() const override { return setup_priority::DATA; }
 
   void set_address(uint8_t address) { this->address_ = address; }
+  void set_flow_control_pin(GPIOPin *pin) { this->flow_control_pin_ = pin; }
+  void set_read_retries(uint8_t retries) { this->read_retries_ = retries; }
 
   // Register sensors
   void set_entering_air_sensor(sensor::Sensor *sensor) { entering_air_sensor_ = sensor; }
@@ -173,6 +292,36 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   void set_line_voltage_setting_sensor(sensor::Sensor *sensor) { line_voltage_setting_sensor_ = sensor; }
   void set_anti_short_cycle_sensor(sensor::Sensor *sensor) { anti_short_cycle_sensor_ = sensor; }
   
+  // Additional VS Drive sensors
+  void set_compressor_desired_speed_sensor(sensor::Sensor *sensor) { compressor_desired_speed_sensor_ = sensor; }
+  void set_discharge_temp_sensor(sensor::Sensor *sensor) { discharge_temp_sensor_ = sensor; }
+  void set_suction_temp_sensor(sensor::Sensor *sensor) { suction_temp_sensor_ = sensor; }
+  void set_vs_drive_temp_sensor(sensor::Sensor *sensor) { vs_drive_temp_sensor_ = sensor; }
+  void set_vs_inverter_temp_sensor(sensor::Sensor *sensor) { vs_inverter_temp_sensor_ = sensor; }
+  
+  // Blower/ECM sensors
+  void set_blower_speed_sensor(sensor::Sensor *sensor) { blower_speed_sensor_ = sensor; }
+  void set_blower_only_speed_sensor(sensor::Sensor *sensor) { blower_only_speed_sensor_ = sensor; }
+  void set_lo_compressor_speed_sensor(sensor::Sensor *sensor) { lo_compressor_speed_sensor_ = sensor; }
+  void set_hi_compressor_speed_sensor(sensor::Sensor *sensor) { hi_compressor_speed_sensor_ = sensor; }
+  void set_aux_heat_speed_sensor(sensor::Sensor *sensor) { aux_heat_speed_sensor_ = sensor; }
+  
+  // VS Pump sensors
+  void set_pump_speed_sensor(sensor::Sensor *sensor) { pump_speed_sensor_ = sensor; }
+  void set_pump_min_speed_sensor(sensor::Sensor *sensor) { pump_min_speed_sensor_ = sensor; }
+  void set_pump_max_speed_sensor(sensor::Sensor *sensor) { pump_max_speed_sensor_ = sensor; }
+  
+  // Refrigeration monitoring sensors
+  void set_heating_liquid_line_temp_sensor(sensor::Sensor *sensor) { heating_liquid_line_temp_sensor_ = sensor; }
+  void set_saturated_condenser_temp_sensor(sensor::Sensor *sensor) { saturated_condenser_temp_sensor_ = sensor; }
+  void set_subcool_temp_sensor(sensor::Sensor *sensor) { subcool_temp_sensor_ = sensor; }
+  void set_heat_of_extraction_sensor(sensor::Sensor *sensor) { heat_of_extraction_sensor_ = sensor; }
+  void set_heat_of_rejection_sensor(sensor::Sensor *sensor) { heat_of_rejection_sensor_ = sensor; }
+  
+  // Humidifier sensors
+  void set_humidification_target_sensor(sensor::Sensor *sensor) { humidification_target_sensor_ = sensor; }
+  void set_dehumidification_target_sensor(sensor::Sensor *sensor) { dehumidification_target_sensor_ = sensor; }
+  
   // Binary sensors
   void set_compressor_binary_sensor(binary_sensor::BinarySensor *sensor) { compressor_sensor_ = sensor; }
   void set_blower_binary_sensor(binary_sensor::BinarySensor *sensor) { blower_sensor_ = sensor; }
@@ -180,12 +329,20 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   void set_dhw_running_binary_sensor(binary_sensor::BinarySensor *sensor) { dhw_running_sensor_ = sensor; }
   void set_lockout_binary_sensor(binary_sensor::BinarySensor *sensor) { lockout_sensor_ = sensor; }
   void set_loop_pump_binary_sensor(binary_sensor::BinarySensor *sensor) { loop_pump_sensor_ = sensor; }
+  void set_humidifier_running_binary_sensor(binary_sensor::BinarySensor *sensor) { humidifier_running_sensor_ = sensor; }
+  void set_dehumidifier_running_binary_sensor(binary_sensor::BinarySensor *sensor) { dehumidifier_running_sensor_ = sensor; }
+  void set_lps_binary_sensor(binary_sensor::BinarySensor *sensor) { lps_sensor_ = sensor; }
+  void set_hps_binary_sensor(binary_sensor::BinarySensor *sensor) { hps_sensor_ = sensor; }
+  void set_emergency_shutdown_binary_sensor(binary_sensor::BinarySensor *sensor) { emergency_shutdown_sensor_ = sensor; }
+  void set_load_shed_binary_sensor(binary_sensor::BinarySensor *sensor) { load_shed_sensor_ = sensor; }
 
   // Text sensors
   void set_current_mode_sensor(text_sensor::TextSensor *sensor) { current_mode_sensor_ = sensor; }
   void set_fault_description_sensor(text_sensor::TextSensor *sensor) { fault_description_sensor_ = sensor; }
   void set_hvac_mode_sensor(text_sensor::TextSensor *sensor) { hvac_mode_sensor_ = sensor; }
   void set_fan_mode_sensor(text_sensor::TextSensor *sensor) { fan_mode_sensor_ = sensor; }
+  void set_model_number_sensor(text_sensor::TextSensor *sensor) { model_number_sensor_ = sensor; }
+  void set_serial_number_sensor(text_sensor::TextSensor *sensor) { serial_number_sensor_ = sensor; }
 
   // Control methods (called by climate/water_heater components)
   bool set_heating_setpoint(float temp);
@@ -194,6 +351,36 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   bool set_fan_mode(FanMode mode);
   bool set_dhw_enabled(bool enabled);
   bool set_dhw_setpoint(float temp);
+  
+  // Blower speed controls (from blower.rb)
+  bool set_blower_only_speed(uint8_t speed);
+  bool set_lo_compressor_speed(uint8_t speed);
+  bool set_hi_compressor_speed(uint8_t speed);
+  bool set_aux_heat_ecm_speed(uint8_t speed);
+  
+  // Pump speed controls (from pump.rb)
+  bool set_pump_speed(uint8_t speed);
+  bool set_pump_min_speed(uint8_t speed);
+  bool set_pump_max_speed(uint8_t speed);
+  
+  // Fan intermittent timing (from thermostat.rb)
+  bool set_fan_intermittent_on(uint8_t minutes);
+  bool set_fan_intermittent_off(uint8_t minutes);
+  
+  // Humidifier controls (from humidistat.rb)
+  bool set_humidification_target(uint8_t percent);
+  bool set_dehumidification_target(uint8_t percent);
+  
+  // System controls
+  bool clear_fault_history();
+  
+  // IZ2 Zone controls (zone_number is 1-6)
+  bool set_zone_heating_setpoint(uint8_t zone_number, float temp);
+  bool set_zone_cooling_setpoint(uint8_t zone_number, float temp);
+  bool set_zone_hvac_mode(uint8_t zone_number, HeatingMode mode);
+  bool set_zone_fan_mode(uint8_t zone_number, FanMode mode);
+  bool set_zone_fan_intermittent_on(uint8_t zone_number, uint8_t minutes);
+  bool set_zone_fan_intermittent_off(uint8_t zone_number, uint8_t minutes);
 
   // Getters for current state
   float get_ambient_temperature() const { return ambient_temp_; }
@@ -207,6 +394,11 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   uint16_t get_system_outputs() const { return system_outputs_; }
   uint16_t get_axb_outputs() const { return axb_outputs_; }
   bool is_locked_out() const { return locked_out_; }
+  
+  // IZ2 Zone getters
+  bool has_iz2() const { return has_iz2_; }
+  uint8_t get_num_iz2_zones() const { return num_iz2_zones_; }
+  const IZ2ZoneData& get_zone_data(uint8_t zone_number) const { return iz2_zones_[zone_number - 1]; }
 
  protected:
   // WaterFurnace custom Modbus protocol implementation
@@ -241,6 +433,7 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   static float to_tenths(uint16_t value);
   static uint32_t to_uint32(uint16_t high, uint16_t low);
   static int32_t to_int32(uint16_t high, uint16_t low);
+  static std::string registers_to_string(const std::vector<uint16_t> &regs);
   
   // Refresh data from device
   void refresh_all_data();
@@ -252,6 +445,10 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   static const char* get_fan_mode_string(FanMode mode);
 
   uint8_t address_{1};
+  uint8_t read_retries_{2};  // Number of retries on read failure (default 2, like Ruby)
+  
+  // RS485 flow control pin (optional, for half-duplex RS485)
+  GPIOPin *flow_control_pin_{nullptr};
   
   // Cached register values
   std::map<uint16_t, uint16_t> register_cache_;
@@ -271,7 +468,12 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   bool locked_out_{false};
   bool has_axb_{false};
   bool has_vs_drive_{false};
+  bool has_iz2_{false};
+  uint8_t num_iz2_zones_{0};
   bool active_dehumidify_{false};
+  
+  // IZ2 Zone data
+  IZ2ZoneData iz2_zones_[MAX_IZ2_ZONES];
   
   // Sensors
   sensor::Sensor *entering_air_sensor_{nullptr};
@@ -304,6 +506,36 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   sensor::Sensor *line_voltage_setting_sensor_{nullptr};
   sensor::Sensor *anti_short_cycle_sensor_{nullptr};
   
+  // Additional VS Drive sensors
+  sensor::Sensor *compressor_desired_speed_sensor_{nullptr};
+  sensor::Sensor *discharge_temp_sensor_{nullptr};
+  sensor::Sensor *suction_temp_sensor_{nullptr};
+  sensor::Sensor *vs_drive_temp_sensor_{nullptr};
+  sensor::Sensor *vs_inverter_temp_sensor_{nullptr};
+  
+  // Blower/ECM sensors
+  sensor::Sensor *blower_speed_sensor_{nullptr};
+  sensor::Sensor *blower_only_speed_sensor_{nullptr};
+  sensor::Sensor *lo_compressor_speed_sensor_{nullptr};
+  sensor::Sensor *hi_compressor_speed_sensor_{nullptr};
+  sensor::Sensor *aux_heat_speed_sensor_{nullptr};
+  
+  // VS Pump sensors
+  sensor::Sensor *pump_speed_sensor_{nullptr};
+  sensor::Sensor *pump_min_speed_sensor_{nullptr};
+  sensor::Sensor *pump_max_speed_sensor_{nullptr};
+  
+  // Refrigeration monitoring sensors
+  sensor::Sensor *heating_liquid_line_temp_sensor_{nullptr};
+  sensor::Sensor *saturated_condenser_temp_sensor_{nullptr};
+  sensor::Sensor *subcool_temp_sensor_{nullptr};
+  sensor::Sensor *heat_of_extraction_sensor_{nullptr};
+  sensor::Sensor *heat_of_rejection_sensor_{nullptr};
+  
+  // Humidifier sensors
+  sensor::Sensor *humidification_target_sensor_{nullptr};
+  sensor::Sensor *dehumidification_target_sensor_{nullptr};
+  
   // Binary sensors
   binary_sensor::BinarySensor *compressor_sensor_{nullptr};
   binary_sensor::BinarySensor *blower_sensor_{nullptr};
@@ -311,12 +543,24 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   binary_sensor::BinarySensor *dhw_running_sensor_{nullptr};
   binary_sensor::BinarySensor *lockout_sensor_{nullptr};
   binary_sensor::BinarySensor *loop_pump_sensor_{nullptr};
+  binary_sensor::BinarySensor *humidifier_running_sensor_{nullptr};
+  binary_sensor::BinarySensor *dehumidifier_running_sensor_{nullptr};
+  binary_sensor::BinarySensor *lps_sensor_{nullptr};
+  binary_sensor::BinarySensor *hps_sensor_{nullptr};
+  binary_sensor::BinarySensor *emergency_shutdown_sensor_{nullptr};
+  binary_sensor::BinarySensor *load_shed_sensor_{nullptr};
 
   // Text sensors
   text_sensor::TextSensor *current_mode_sensor_{nullptr};
   text_sensor::TextSensor *fault_description_sensor_{nullptr};
   text_sensor::TextSensor *hvac_mode_sensor_{nullptr};
   text_sensor::TextSensor *fan_mode_sensor_{nullptr};
+  text_sensor::TextSensor *model_number_sensor_{nullptr};
+  text_sensor::TextSensor *serial_number_sensor_{nullptr};
+  
+  // Cached device info
+  std::string model_number_;
+  std::string serial_number_;
 };
 
 }  // namespace waterfurnace_aurora

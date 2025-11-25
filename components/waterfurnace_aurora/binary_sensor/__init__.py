@@ -18,6 +18,12 @@ CONF_AUX_HEAT_RUNNING = "aux_heat_running"
 CONF_DHW_RUNNING = "dhw_running"
 CONF_LOOP_PUMP_RUNNING = "loop_pump_running"
 CONF_LOCKOUT = "lockout"
+CONF_HUMIDIFIER_RUNNING = "humidifier_running"
+CONF_DEHUMIDIFIER_RUNNING = "dehumidifier_running"
+CONF_LPS = "low_pressure_switch"
+CONF_HPS = "high_pressure_switch"
+CONF_EMERGENCY_SHUTDOWN = "emergency_shutdown"
+CONF_LOAD_SHED = "load_shed"
 
 CONFIG_SCHEMA = cv.Schema(
     {
@@ -39,6 +45,24 @@ CONFIG_SCHEMA = cv.Schema(
         ),
         cv.Optional(CONF_LOCKOUT): binary_sensor.binary_sensor_schema(
             device_class=DEVICE_CLASS_PROBLEM,
+        ),
+        cv.Optional(CONF_HUMIDIFIER_RUNNING): binary_sensor.binary_sensor_schema(
+            device_class=DEVICE_CLASS_RUNNING,
+        ),
+        cv.Optional(CONF_DEHUMIDIFIER_RUNNING): binary_sensor.binary_sensor_schema(
+            device_class=DEVICE_CLASS_RUNNING,
+        ),
+        cv.Optional(CONF_LPS): binary_sensor.binary_sensor_schema(
+            device_class=DEVICE_CLASS_PROBLEM,
+        ),
+        cv.Optional(CONF_HPS): binary_sensor.binary_sensor_schema(
+            device_class=DEVICE_CLASS_PROBLEM,
+        ),
+        cv.Optional(CONF_EMERGENCY_SHUTDOWN): binary_sensor.binary_sensor_schema(
+            device_class=DEVICE_CLASS_PROBLEM,
+        ),
+        cv.Optional(CONF_LOAD_SHED): binary_sensor.binary_sensor_schema(
+            device_class=DEVICE_CLASS_RUNNING,
         ),
     }
 )
@@ -70,3 +94,27 @@ async def to_code(config):
     if CONF_LOCKOUT in config:
         sens = await binary_sensor.new_binary_sensor(config[CONF_LOCKOUT])
         cg.add(parent.set_lockout_binary_sensor(sens))
+
+    if CONF_HUMIDIFIER_RUNNING in config:
+        sens = await binary_sensor.new_binary_sensor(config[CONF_HUMIDIFIER_RUNNING])
+        cg.add(parent.set_humidifier_running_binary_sensor(sens))
+
+    if CONF_DEHUMIDIFIER_RUNNING in config:
+        sens = await binary_sensor.new_binary_sensor(config[CONF_DEHUMIDIFIER_RUNNING])
+        cg.add(parent.set_dehumidifier_running_binary_sensor(sens))
+
+    if CONF_LPS in config:
+        sens = await binary_sensor.new_binary_sensor(config[CONF_LPS])
+        cg.add(parent.set_lps_binary_sensor(sens))
+
+    if CONF_HPS in config:
+        sens = await binary_sensor.new_binary_sensor(config[CONF_HPS])
+        cg.add(parent.set_hps_binary_sensor(sens))
+
+    if CONF_EMERGENCY_SHUTDOWN in config:
+        sens = await binary_sensor.new_binary_sensor(config[CONF_EMERGENCY_SHUTDOWN])
+        cg.add(parent.set_emergency_shutdown_binary_sensor(sens))
+
+    if CONF_LOAD_SHED in config:
+        sens = await binary_sensor.new_binary_sensor(config[CONF_LOAD_SHED])
+        cg.add(parent.set_load_shed_binary_sensor(sens))

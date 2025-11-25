@@ -50,6 +50,35 @@ CONF_FP1_TEMPERATURE = "fp1_temperature"
 CONF_FP2_TEMPERATURE = "fp2_temperature"
 CONF_LINE_VOLTAGE_SETTING = "line_voltage_setting"
 CONF_ANTI_SHORT_CYCLE = "anti_short_cycle"
+# Additional VS Drive sensors
+CONF_COMPRESSOR_DESIRED_SPEED = "compressor_desired_speed"
+CONF_DISCHARGE_TEMPERATURE = "discharge_temperature"
+CONF_SUCTION_TEMPERATURE = "suction_temperature"
+CONF_VS_DRIVE_TEMPERATURE = "vs_drive_temperature"
+CONF_VS_INVERTER_TEMPERATURE = "vs_inverter_temperature"
+
+# Blower/ECM sensors
+CONF_BLOWER_SPEED = "blower_speed"
+CONF_BLOWER_ONLY_SPEED = "blower_only_speed"
+CONF_LO_COMPRESSOR_SPEED = "lo_compressor_speed"
+CONF_HI_COMPRESSOR_SPEED = "hi_compressor_speed"
+CONF_AUX_HEAT_SPEED = "aux_heat_speed"
+
+# VS Pump sensors
+CONF_PUMP_SPEED = "pump_speed"
+CONF_PUMP_MIN_SPEED = "pump_min_speed"
+CONF_PUMP_MAX_SPEED = "pump_max_speed"
+
+# Refrigeration monitoring sensors
+CONF_HEATING_LIQUID_LINE_TEMP = "heating_liquid_line_temperature"
+CONF_SATURATED_CONDENSER_TEMP = "saturated_condenser_temperature"
+CONF_SUBCOOL_TEMPERATURE = "subcool_temperature"
+CONF_HEAT_OF_EXTRACTION = "heat_of_extraction"
+CONF_HEAT_OF_REJECTION = "heat_of_rejection"
+
+# Humidifier sensors
+CONF_HUMIDIFICATION_TARGET = "humidification_target"
+CONF_DEHUMIDIFICATION_TARGET = "dehumidification_target"
 
 # Unit definitions
 UNIT_FAHRENHEIT = "°F"
@@ -154,6 +183,79 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_ANTI_SHORT_CYCLE): sensor.sensor_schema(
             unit_of_measurement="s",
             accuracy_decimals=0,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        # Additional VS Drive sensors
+        cv.Optional(CONF_COMPRESSOR_DESIRED_SPEED): sensor.sensor_schema(
+            accuracy_decimals=0,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        cv.Optional(CONF_DISCHARGE_TEMPERATURE): TEMPERATURE_SENSOR_SCHEMA,
+        cv.Optional(CONF_SUCTION_TEMPERATURE): TEMPERATURE_SENSOR_SCHEMA,
+        cv.Optional(CONF_VS_DRIVE_TEMPERATURE): TEMPERATURE_SENSOR_SCHEMA,
+        cv.Optional(CONF_VS_INVERTER_TEMPERATURE): TEMPERATURE_SENSOR_SCHEMA,
+        # Blower/ECM sensors
+        cv.Optional(CONF_BLOWER_SPEED): sensor.sensor_schema(
+            accuracy_decimals=0,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        cv.Optional(CONF_BLOWER_ONLY_SPEED): sensor.sensor_schema(
+            accuracy_decimals=0,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        cv.Optional(CONF_LO_COMPRESSOR_SPEED): sensor.sensor_schema(
+            accuracy_decimals=0,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        cv.Optional(CONF_HI_COMPRESSOR_SPEED): sensor.sensor_schema(
+            accuracy_decimals=0,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        cv.Optional(CONF_AUX_HEAT_SPEED): sensor.sensor_schema(
+            accuracy_decimals=0,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        # VS Pump sensors
+        cv.Optional(CONF_PUMP_SPEED): sensor.sensor_schema(
+            unit_of_measurement=UNIT_PERCENT,
+            accuracy_decimals=0,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        cv.Optional(CONF_PUMP_MIN_SPEED): sensor.sensor_schema(
+            unit_of_measurement=UNIT_PERCENT,
+            accuracy_decimals=0,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        cv.Optional(CONF_PUMP_MAX_SPEED): sensor.sensor_schema(
+            unit_of_measurement=UNIT_PERCENT,
+            accuracy_decimals=0,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        # Refrigeration monitoring sensors
+        cv.Optional(CONF_HEATING_LIQUID_LINE_TEMP): TEMPERATURE_SENSOR_SCHEMA,
+        cv.Optional(CONF_SATURATED_CONDENSER_TEMP): TEMPERATURE_SENSOR_SCHEMA,
+        cv.Optional(CONF_SUBCOOL_TEMPERATURE): TEMPERATURE_SENSOR_SCHEMA,
+        cv.Optional(CONF_HEAT_OF_EXTRACTION): sensor.sensor_schema(
+            unit_of_measurement="BTU/h",
+            accuracy_decimals=0,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        cv.Optional(CONF_HEAT_OF_REJECTION): sensor.sensor_schema(
+            unit_of_measurement="BTU/h",
+            accuracy_decimals=0,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        # Humidifier sensors
+        cv.Optional(CONF_HUMIDIFICATION_TARGET): sensor.sensor_schema(
+            unit_of_measurement=UNIT_PERCENT,
+            accuracy_decimals=0,
+            device_class=DEVICE_CLASS_HUMIDITY,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        cv.Optional(CONF_DEHUMIDIFICATION_TARGET): sensor.sensor_schema(
+            unit_of_measurement=UNIT_PERCENT,
+            accuracy_decimals=0,
+            device_class=DEVICE_CLASS_HUMIDITY,
             state_class=STATE_CLASS_MEASUREMENT,
         ),
     }
@@ -290,3 +392,88 @@ async def to_code(config):
     if CONF_ANTI_SHORT_CYCLE in config:
         sens = await sensor.new_sensor(config[CONF_ANTI_SHORT_CYCLE])
         cg.add(parent.set_anti_short_cycle_sensor(sens))
+
+    # Additional VS Drive sensors
+    if CONF_COMPRESSOR_DESIRED_SPEED in config:
+        sens = await sensor.new_sensor(config[CONF_COMPRESSOR_DESIRED_SPEED])
+        cg.add(parent.set_compressor_desired_speed_sensor(sens))
+
+    if CONF_DISCHARGE_TEMPERATURE in config:
+        sens = await sensor.new_sensor(config[CONF_DISCHARGE_TEMPERATURE])
+        cg.add(parent.set_discharge_temp_sensor(sens))
+
+    if CONF_SUCTION_TEMPERATURE in config:
+        sens = await sensor.new_sensor(config[CONF_SUCTION_TEMPERATURE])
+        cg.add(parent.set_suction_temp_sensor(sens))
+
+    if CONF_VS_DRIVE_TEMPERATURE in config:
+        sens = await sensor.new_sensor(config[CONF_VS_DRIVE_TEMPERATURE])
+        cg.add(parent.set_vs_drive_temp_sensor(sens))
+
+    if CONF_VS_INVERTER_TEMPERATURE in config:
+        sens = await sensor.new_sensor(config[CONF_VS_INVERTER_TEMPERATURE])
+        cg.add(parent.set_vs_inverter_temp_sensor(sens))
+
+    # Blower/ECM sensors
+    if CONF_BLOWER_SPEED in config:
+        sens = await sensor.new_sensor(config[CONF_BLOWER_SPEED])
+        cg.add(parent.set_blower_speed_sensor(sens))
+
+    if CONF_BLOWER_ONLY_SPEED in config:
+        sens = await sensor.new_sensor(config[CONF_BLOWER_ONLY_SPEED])
+        cg.add(parent.set_blower_only_speed_sensor(sens))
+
+    if CONF_LO_COMPRESSOR_SPEED in config:
+        sens = await sensor.new_sensor(config[CONF_LO_COMPRESSOR_SPEED])
+        cg.add(parent.set_lo_compressor_speed_sensor(sens))
+
+    if CONF_HI_COMPRESSOR_SPEED in config:
+        sens = await sensor.new_sensor(config[CONF_HI_COMPRESSOR_SPEED])
+        cg.add(parent.set_hi_compressor_speed_sensor(sens))
+
+    if CONF_AUX_HEAT_SPEED in config:
+        sens = await sensor.new_sensor(config[CONF_AUX_HEAT_SPEED])
+        cg.add(parent.set_aux_heat_speed_sensor(sens))
+
+    # VS Pump sensors
+    if CONF_PUMP_SPEED in config:
+        sens = await sensor.new_sensor(config[CONF_PUMP_SPEED])
+        cg.add(parent.set_pump_speed_sensor(sens))
+
+    if CONF_PUMP_MIN_SPEED in config:
+        sens = await sensor.new_sensor(config[CONF_PUMP_MIN_SPEED])
+        cg.add(parent.set_pump_min_speed_sensor(sens))
+
+    if CONF_PUMP_MAX_SPEED in config:
+        sens = await sensor.new_sensor(config[CONF_PUMP_MAX_SPEED])
+        cg.add(parent.set_pump_max_speed_sensor(sens))
+
+    # Refrigeration monitoring sensors
+    if CONF_HEATING_LIQUID_LINE_TEMP in config:
+        sens = await sensor.new_sensor(config[CONF_HEATING_LIQUID_LINE_TEMP])
+        cg.add(parent.set_heating_liquid_line_temp_sensor(sens))
+
+    if CONF_SATURATED_CONDENSER_TEMP in config:
+        sens = await sensor.new_sensor(config[CONF_SATURATED_CONDENSER_TEMP])
+        cg.add(parent.set_saturated_condenser_temp_sensor(sens))
+
+    if CONF_SUBCOOL_TEMPERATURE in config:
+        sens = await sensor.new_sensor(config[CONF_SUBCOOL_TEMPERATURE])
+        cg.add(parent.set_subcool_temp_sensor(sens))
+
+    if CONF_HEAT_OF_EXTRACTION in config:
+        sens = await sensor.new_sensor(config[CONF_HEAT_OF_EXTRACTION])
+        cg.add(parent.set_heat_of_extraction_sensor(sens))
+
+    if CONF_HEAT_OF_REJECTION in config:
+        sens = await sensor.new_sensor(config[CONF_HEAT_OF_REJECTION])
+        cg.add(parent.set_heat_of_rejection_sensor(sens))
+
+    # Humidifier sensors
+    if CONF_HUMIDIFICATION_TARGET in config:
+        sens = await sensor.new_sensor(config[CONF_HUMIDIFICATION_TARGET])
+        cg.add(parent.set_humidification_target_sensor(sens))
+
+    if CONF_DEHUMIDIFICATION_TARGET in config:
+        sens = await sensor.new_sensor(config[CONF_DEHUMIDIFICATION_TARGET])
+        cg.add(parent.set_dehumidification_target_sensor(sens))
