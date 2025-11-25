@@ -46,8 +46,14 @@ It is a C++ port of the [waterfurnace_aurora Ruby gem](https://github.com/ccutre
 ## Hardware Requirements
 
 1. **ESP32 or ESP8266 Development Board** (e.g., Wemos D1 Mini, NodeMCU, ESP32-DevKit)
-2. **TTL to RS485 Adapter** (MAX485 or similar 3.3V compatible module)
+2. **TTL to RS485 Adapter** with manual DE/RE flow control pins (see note below)
 3. **RJ45 Connector/Cable**: To connect to the AID Tool port on the heat pump
+
+### Recommended RS485 Module
+
+Use a MAX485 module with **exposed DE/RE pins** for manual flow control. A known working module is the [Alinan MAX485 RS485 Transceiver Module](https://www.amazon.com/dp/B00NIOLNAG).
+
+> **Important**: Avoid RS485 modules with "automatic flow control" that only have VCC/TXD/RXD/GND pins. These lack the DE/RE pins needed for reliable Modbus RTU timing and will cause communication errors.
 
 ### Wiring
 
