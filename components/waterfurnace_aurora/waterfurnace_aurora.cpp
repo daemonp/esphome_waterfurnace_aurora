@@ -144,9 +144,9 @@ void WaterFurnaceAurora::setup() {
   }
   
   // Check for IZ2 (IntelliZone 2) by reading register 812
-  // Value != 0 means IZ2 is installed
+  // Value of 3 means removed/missing (same as AXB detection)
   if (this->read_holding_registers(registers::IZ2_INSTALLED, 1, result) && !result.empty()) {
-    this->has_iz2_ = (result[0] != 0);
+    this->has_iz2_ = (result[0] != 3);
     if (this->has_iz2_) {
       // Read number of zones from register 483
       if (this->read_holding_registers(registers::IZ2_NUM_ZONES, 1, result) && !result.empty()) {

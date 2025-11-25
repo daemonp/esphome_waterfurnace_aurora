@@ -1,56 +1,73 @@
-# WaterFurnace Aurora ESPHome Package
+# WaterFurnace Aurora ESPHome - Local Development Configuration
 # 
-# This is a complete external package that can be included in your ESPHome configuration.
-# It provides all sensors, controls, and configuration options for WaterFurnace Aurora
-# geothermal heat pumps via RS-485 Modbus RTU.
+# This configuration is for local development and testing. It loads the
+# component from the local 'components' directory rather than GitHub.
 #
-# USAGE:
-#   packages:
-#     waterfurnace: !include waterfurnace_aurora.yaml
+# Hardware requirements:
+#   - ESP32 board (recommended) or ESP8266
+#   - RS-485 transceiver (MAX485, MAX3485, or similar)
+#   - Connection to Aurora ABC board RS-485 port
 #
-# Or from GitHub:
-#   packages:
-#     waterfurnace:
-#       url: https://github.com/ccutrer/waterfurnace_aurora
-#       ref: master
-#       file: esphome/waterfurnace_aurora.yaml
-#
-# REQUIRED SUBSTITUTIONS (set these before including):
-#   uart_tx_pin: GPIO pin for UART TX (e.g., GPIO17)
-#   uart_rx_pin: GPIO pin for UART RX (e.g., GPIO16)
-#   flow_control_pin: GPIO pin for RS-485 direction control (e.g., GPIO4)
-#
-# OPTIONAL SUBSTITUTIONS:
-#   modbus_address: Modbus slave address (default: "1")
-#   update_interval: How often to poll the heat pump (default: 5s)
+# Wiring (ESP32 -> MAX485 -> Aurora):
+#   ESP32 GPIO17 (TX) -> MAX485 DI
+#   ESP32 GPIO16 (RX) -> MAX485 RO  
+#   ESP32 GPIO4       -> MAX485 DE + RE (tied together)
+#   3.3V              -> MAX485 VCC
+#   GND               -> MAX485 GND
+#   MAX485 A          -> Aurora RS-485 A (+)
+#   MAX485 B          -> Aurora RS-485 B (-)
+#   GND               -> Aurora GND (shield)
 #
 # Serial settings: 19200 baud, 8 data bits, Even parity, 1 stop bit
-#
-# Hardware wiring (ESP32 -> MAX485 -> Aurora):
-#   ESP32 TX_PIN    -> MAX485 DI
-#   ESP32 RX_PIN    -> MAX485 RO  
-#   ESP32 FLOW_PIN  -> MAX485 DE + RE (tied together)
-#   3.3V            -> MAX485 VCC
-#   GND             -> MAX485 GND
-#   MAX485 A        -> Aurora RS-485 A (+)
-#   MAX485 B        -> Aurora RS-485 B (-)
-#   GND             -> Aurora GND (shield)
 
 substitutions:
-  # These must be set by the user
+  device_name: waterfurnace-aurora
+  friendly_name: "WaterFurnace Aurora"
+  # Hardware pins
   uart_tx_pin: GPIO17
   uart_rx_pin: GPIO16
   flow_control_pin: GPIO4
-  # Optional settings
+  # Modbus settings
   modbus_address: "1"
   update_interval: 5s
 
-external_components:
-  - source:
-      type: git
-      url: https://github.com/ccutrer/waterfurnace_aurora
-      ref: master
-    components: [ waterfurnace_aurora ]
+esphome:
+  name: ${device_name}
+  friendly_name: ${friendly_name}
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+# Enable logging
+logger:
+  level: DEBUG
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+# Enable OTA updates  
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  
+  # Enable fallback hotspot in case wifi connection fails
+  ap:
+    ssid: "${device_name} Fallback"
+    password: !secret ap_password
+
+captive_portal:
+
+# Web server for local access
+web_server:
+  port: 80
 
 # UART configuration for RS-485 communication
 # Aurora uses: 19200 baud, 8 data bits, Even parity, 1 stop bit
@@ -62,6 +79,12 @@ uart:
   parity: EVEN
   stop_bits: 1
 
+# External components - load from local directory for development
+external_components:
+  - source:
+      type: local
+      path: components
+
 # WaterFurnace Aurora component
 # RS-485 flow control is handled directly by the component
 waterfurnace_aurora:
@@ -70,6 +93,7 @@ waterfurnace_aurora:
   address: ${modbus_address}
   update_interval: ${update_interval}
   flow_control_pin: ${flow_control_pin}
+  read_retries: 2  # Number of retries on read failure (default 2)
 
 # =============================================================================
 # CLIMATE ENTITIES
@@ -94,26 +118,6 @@ climate:
   #   name: "Zone 2"
   #   aurora_id: aurora
   #   zone: 2
-  # - platform: waterfurnace_aurora
-  #   id: aurora_zone_3
-  #   name: "Zone 3"
-  #   aurora_id: aurora
-  #   zone: 3
-  # - platform: waterfurnace_aurora
-  #   id: aurora_zone_4
-  #   name: "Zone 4"
-  #   aurora_id: aurora
-  #   zone: 4
-  # - platform: waterfurnace_aurora
-  #   id: aurora_zone_5
-  #   name: "Zone 5"
-  #   aurora_id: aurora
-  #   zone: 5
-  # - platform: waterfurnace_aurora
-  #   id: aurora_zone_6
-  #   name: "Zone 6"
-  #   aurora_id: aurora
-  #   zone: 6
 
 # =============================================================================
 # CONTROLS - SWITCHES
@@ -161,7 +165,7 @@ number:
       name: "Dehumidification Target"
 
 # =============================================================================
-# SENSORS - TEMPERATURES
+# SENSORS
 # =============================================================================
 
 sensor:
@@ -296,6 +300,15 @@ sensor:
     fault_code:
       name: "Fault Code"
 
+  # WiFi signal strength
+  - platform: wifi_signal
+    name: "WiFi Signal"
+    update_interval: 60s
+
+  # Uptime sensor
+  - platform: uptime
+    name: "Uptime"
+
 # =============================================================================
 # BINARY SENSORS
 # =============================================================================
@@ -335,6 +348,10 @@ binary_sensor:
       device_class: problem
     load_shed:
       name: "Load Shed Active"
+
+  # Connection status
+  - platform: status
+    name: "Status"
 
 # =============================================================================
 # TEXT SENSORS
@@ -376,6 +393,10 @@ text_sensor:
     axb_inputs:
       name: "AXB Inputs"
 
+  # ESPHome version
+  - platform: version
+    name: "ESPHome Version"
+
 # =============================================================================
 # BUTTONS
 # =============================================================================
@@ -385,3 +406,6 @@ button:
     aurora_id: aurora
     clear_fault_history:
       name: "Clear Fault History"
+
+  - platform: restart
+    name: "Restart"
