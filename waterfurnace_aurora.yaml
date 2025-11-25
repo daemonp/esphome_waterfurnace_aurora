@@ -98,12 +98,18 @@ climate:
     name: "Heat Pump"
     aurora_id: aurora
 
-# Water heater entity for DHW (Domestic Hot Water)
-water_heater:
+# DHW (Domestic Hot Water) controls
+switch:
   - platform: waterfurnace_aurora
-    id: aurora_dhw
-    name: "Hot Water"
     aurora_id: aurora
+    dhw_enabled:
+      name: "DHW Enabled"
+
+number:
+  - platform: waterfurnace_aurora
+    aurora_id: aurora
+    dhw_setpoint:
+      name: "DHW Setpoint"
 
 # Additional sensors for monitoring
 sensor:

@@ -12,12 +12,15 @@ AuroraClimate = waterfurnace_aurora_ns.class_(
     "AuroraClimate", climate.Climate, cg.Component
 )
 
-CONFIG_SCHEMA = climate.CLIMATE_SCHEMA.extend(
-    {
-        cv.GenerateID(): cv.declare_id(AuroraClimate),
-        cv.GenerateID(CONF_AURORA_ID): cv.use_id(WaterFurnaceAurora),
-    }
-).extend(cv.COMPONENT_SCHEMA)
+CONFIG_SCHEMA = (
+    climate.climate_schema(AuroraClimate)
+    .extend(
+        {
+            cv.GenerateID(CONF_AURORA_ID): cv.use_id(WaterFurnaceAurora),
+        }
+    )
+    .extend(cv.COMPONENT_SCHEMA)
+)
 
 
 async def to_code(config):
