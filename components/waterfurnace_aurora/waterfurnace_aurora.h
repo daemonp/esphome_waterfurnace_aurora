@@ -36,175 +36,175 @@ enum FanMode : uint8_t {
 };
 
 // System outputs bitmask (register 30, from registers.rb SYSTEM_OUTPUTS)
-static const uint16_t OUTPUT_CC = 0x01;       // Compressor stage 1
-static const uint16_t OUTPUT_CC2 = 0x02;      // Compressor stage 2
-static const uint16_t OUTPUT_RV = 0x04;       // Reversing valve (cool instead of heat)
-static const uint16_t OUTPUT_BLOWER = 0x08;
-static const uint16_t OUTPUT_EH1 = 0x10;      // Aux heat 1
-static const uint16_t OUTPUT_EH2 = 0x20;      // Aux heat 2
-static const uint16_t OUTPUT_ACCESSORY = 0x200;
-static const uint16_t OUTPUT_LOCKOUT = 0x400;
-static const uint16_t OUTPUT_ALARM = 0x800;
+constexpr uint16_t OUTPUT_CC = 0x01;       // Compressor stage 1
+constexpr uint16_t OUTPUT_CC2 = 0x02;      // Compressor stage 2
+constexpr uint16_t OUTPUT_RV = 0x04;       // Reversing valve (cool instead of heat)
+constexpr uint16_t OUTPUT_BLOWER = 0x08;
+constexpr uint16_t OUTPUT_EH1 = 0x10;      // Aux heat 1
+constexpr uint16_t OUTPUT_EH2 = 0x20;      // Aux heat 2
+constexpr uint16_t OUTPUT_ACCESSORY = 0x200;
+constexpr uint16_t OUTPUT_LOCKOUT = 0x400;
+constexpr uint16_t OUTPUT_ALARM = 0x800;
 
 // AXB outputs bitmask (register 1104, from registers.rb AXB_OUTPUTS)
-static const uint16_t AXB_OUTPUT_DHW = 0x01;
-static const uint16_t AXB_OUTPUT_LOOP_PUMP = 0x02;
-static const uint16_t AXB_OUTPUT_DIVERTING_VALVE = 0x04;
+constexpr uint16_t AXB_OUTPUT_DHW = 0x01;
+constexpr uint16_t AXB_OUTPUT_LOOP_PUMP = 0x02;
+constexpr uint16_t AXB_OUTPUT_DIVERTING_VALVE = 0x04;
 
 // System status bitmask (register 31, from registers.rb status method)
-static const uint16_t STATUS_LPS = 0x80;          // Low pressure switch (bit 7)
-static const uint16_t STATUS_HPS = 0x100;         // High pressure switch (bit 8)
-static const uint16_t STATUS_Y1 = 0x01;
-static const uint16_t STATUS_Y2 = 0x02;
-static const uint16_t STATUS_W = 0x04;
-static const uint16_t STATUS_O = 0x08;
-static const uint16_t STATUS_G = 0x10;
-static const uint16_t STATUS_DH_RH = 0x20;
-static const uint16_t STATUS_EMERGENCY_SHUTDOWN = 0x40;
-static const uint16_t STATUS_LOAD_SHED = 0x200;
+constexpr uint16_t STATUS_LPS = 0x80;          // Low pressure switch (bit 7)
+constexpr uint16_t STATUS_HPS = 0x100;         // High pressure switch (bit 8)
+constexpr uint16_t STATUS_Y1 = 0x01;
+constexpr uint16_t STATUS_Y2 = 0x02;
+constexpr uint16_t STATUS_W = 0x04;
+constexpr uint16_t STATUS_O = 0x08;
+constexpr uint16_t STATUS_G = 0x10;
+constexpr uint16_t STATUS_DH_RH = 0x20;
+constexpr uint16_t STATUS_EMERGENCY_SHUTDOWN = 0x40;
+constexpr uint16_t STATUS_LOAD_SHED = 0x200;
 
 // VS Drive Derate flags (registers 214, 3223)
-static const uint16_t VS_DERATE_DRIVE_OVER_TEMP = 0x01;
-static const uint16_t VS_DERATE_LOW_SUCTION_PRESSURE = 0x04;
-static const uint16_t VS_DERATE_LOW_DISCHARGE_PRESSURE = 0x10;
-static const uint16_t VS_DERATE_HIGH_DISCHARGE_PRESSURE = 0x20;
-static const uint16_t VS_DERATE_OUTPUT_POWER_LIMIT = 0x40;
+constexpr uint16_t VS_DERATE_DRIVE_OVER_TEMP = 0x01;
+constexpr uint16_t VS_DERATE_LOW_SUCTION_PRESSURE = 0x04;
+constexpr uint16_t VS_DERATE_LOW_DISCHARGE_PRESSURE = 0x10;
+constexpr uint16_t VS_DERATE_HIGH_DISCHARGE_PRESSURE = 0x20;
+constexpr uint16_t VS_DERATE_OUTPUT_POWER_LIMIT = 0x40;
 
 // VS Drive Safe Mode flags (registers 216, 3225)
-static const uint16_t VS_SAFE_EEV_INDOOR_FAILED = 0x01;
-static const uint16_t VS_SAFE_EEV_OUTDOOR_FAILED = 0x02;
-static const uint16_t VS_SAFE_INVALID_AMBIENT_TEMP = 0x04;
+constexpr uint16_t VS_SAFE_EEV_INDOOR_FAILED = 0x01;
+constexpr uint16_t VS_SAFE_EEV_OUTDOOR_FAILED = 0x02;
+constexpr uint16_t VS_SAFE_INVALID_AMBIENT_TEMP = 0x04;
 
 // Key register addresses (from registers.rb)
 namespace registers {
   // System info
-  static const uint16_t ABC_VERSION = 2;
-  static const uint16_t COMPRESSOR_ANTI_SHORT_CYCLE = 6;
-  static const uint16_t LINE_VOLTAGE = 16;
-  static const uint16_t FP1_TEMP = 19;           // Cooling liquid line temp
-  static const uint16_t FP2_TEMP = 20;           // Air coil temp
-  static const uint16_t LAST_FAULT = 25;
-  static const uint16_t SYSTEM_OUTPUTS = 30;
-  static const uint16_t SYSTEM_STATUS = 31;
-  static const uint16_t MODEL_NUMBER = 92;       // 12 registers (92-103)
-  static const uint16_t SERIAL_NUMBER = 105;     // 5 registers (105-109)
-  static const uint16_t LINE_VOLTAGE_SETTING = 112;
+  constexpr uint16_t ABC_VERSION = 2;
+  constexpr uint16_t COMPRESSOR_ANTI_SHORT_CYCLE = 6;
+  constexpr uint16_t LINE_VOLTAGE = 16;
+  constexpr uint16_t FP1_TEMP = 19;           // Cooling liquid line temp
+  constexpr uint16_t FP2_TEMP = 20;           // Air coil temp
+  constexpr uint16_t LAST_FAULT = 25;
+  constexpr uint16_t SYSTEM_OUTPUTS = 30;
+  constexpr uint16_t SYSTEM_STATUS = 31;
+  constexpr uint16_t MODEL_NUMBER = 92;       // 12 registers (92-103)
+  constexpr uint16_t SERIAL_NUMBER = 105;     // 5 registers (105-109)
+  constexpr uint16_t LINE_VOLTAGE_SETTING = 112;
   
   // VS Drive details (from registers.rb)
-  static const uint16_t VS_DERATE = 214;         // Also at 3223
-  static const uint16_t VS_SAFE_MODE = 216;      // Also at 3225
-  static const uint16_t VS_ALARM1 = 217;         // Also at 3226
-  static const uint16_t VS_ALARM2 = 218;         // Also at 3227
+  constexpr uint16_t VS_DERATE = 214;         // Also at 3223
+  constexpr uint16_t VS_SAFE_MODE = 216;      // Also at 3225
+  constexpr uint16_t VS_ALARM1 = 217;         // Also at 3226
+  constexpr uint16_t VS_ALARM2 = 218;         // Also at 3227
   
   // Fault history (registers 601-699)
-  static const uint16_t FAULT_HISTORY_START = 601;
-  static const uint16_t FAULT_HISTORY_END = 699;
+  constexpr uint16_t FAULT_HISTORY_START = 601;
+  constexpr uint16_t FAULT_HISTORY_END = 699;
   
   // DHW (requires AXB)
-  static const uint16_t DHW_ENABLED = 400;
-  static const uint16_t DHW_SETPOINT = 401;
+  constexpr uint16_t DHW_ENABLED = 400;
+  constexpr uint16_t DHW_SETPOINT = 401;
   
   // Thermostat
-  static const uint16_t AMBIENT_TEMP = 502;
-  static const uint16_t ENTERING_AIR = 567;
-  static const uint16_t ENTERING_AIR_AWL = 740;
-  static const uint16_t RELATIVE_HUMIDITY = 741;
-  static const uint16_t OUTDOOR_TEMP = 742;
-  static const uint16_t HEATING_SETPOINT = 745;
-  static const uint16_t COOLING_SETPOINT = 746;
-  static const uint16_t AXB_INSTALLED = 806;
-  static const uint16_t LEAVING_AIR = 900;
+  constexpr uint16_t AMBIENT_TEMP = 502;
+  constexpr uint16_t ENTERING_AIR = 567;
+  constexpr uint16_t ENTERING_AIR_AWL = 740;
+  constexpr uint16_t RELATIVE_HUMIDITY = 741;
+  constexpr uint16_t OUTDOOR_TEMP = 742;
+  constexpr uint16_t HEATING_SETPOINT = 745;
+  constexpr uint16_t COOLING_SETPOINT = 746;
+  constexpr uint16_t AXB_INSTALLED = 806;
+  constexpr uint16_t LEAVING_AIR = 900;
   
   // AXB
-  static const uint16_t AXB_INPUTS = 1103;
-  static const uint16_t AXB_OUTPUTS = 1104;
-  static const uint16_t LEAVING_WATER = 1110;
-  static const uint16_t ENTERING_WATER = 1111;
-  static const uint16_t DHW_TEMP = 1114;
-  static const uint16_t DISCHARGE_PRESSURE = 1115;
-  static const uint16_t SUCTION_PRESSURE = 1116;
-  static const uint16_t WATERFLOW = 1117;
-  static const uint16_t LOOP_PRESSURE = 1119;
+  constexpr uint16_t AXB_INPUTS = 1103;
+  constexpr uint16_t AXB_OUTPUTS = 1104;
+  constexpr uint16_t LEAVING_WATER = 1110;
+  constexpr uint16_t ENTERING_WATER = 1111;
+  constexpr uint16_t DHW_TEMP = 1114;
+  constexpr uint16_t DISCHARGE_PRESSURE = 1115;
+  constexpr uint16_t SUCTION_PRESSURE = 1116;
+  constexpr uint16_t WATERFLOW = 1117;
+  constexpr uint16_t LOOP_PRESSURE = 1119;
   
   // Blower / ECM (from blower.rb)
-  static const uint16_t BLOWER_ONLY_SPEED = 340;
-  static const uint16_t LO_COMPRESSOR_ECM_SPEED = 341;
-  static const uint16_t HI_COMPRESSOR_ECM_SPEED = 342;
-  static const uint16_t ECM_SPEED = 344;
-  static const uint16_t AUX_HEAT_ECM_SPEED = 347;
+  constexpr uint16_t BLOWER_ONLY_SPEED = 340;
+  constexpr uint16_t LO_COMPRESSOR_ECM_SPEED = 341;
+  constexpr uint16_t HI_COMPRESSOR_ECM_SPEED = 342;
+  constexpr uint16_t ECM_SPEED = 344;
+  constexpr uint16_t AUX_HEAT_ECM_SPEED = 347;
   
   // VS Pump (from pump.rb)
-  static const uint16_t VS_PUMP_MIN = 321;
-  static const uint16_t VS_PUMP_MAX = 322;
-  static const uint16_t VS_PUMP_MANUAL = 323;
-  static const uint16_t VS_PUMP_SPEED = 325;
+  constexpr uint16_t VS_PUMP_MIN = 321;
+  constexpr uint16_t VS_PUMP_MAX = 322;
+  constexpr uint16_t VS_PUMP_MANUAL = 323;
+  constexpr uint16_t VS_PUMP_SPEED = 325;
   
   // Refrigeration monitoring (from compressor.rb)
-  static const uint16_t HEATING_LIQUID_LINE_TEMP = 1109;
-  static const uint16_t SATURATED_CONDENSER_TEMP = 1134;
-  static const uint16_t SUBCOOL_HEATING = 1135;
-  static const uint16_t SUBCOOL_COOLING = 1136;
+  constexpr uint16_t HEATING_LIQUID_LINE_TEMP = 1109;
+  constexpr uint16_t SATURATED_CONDENSER_TEMP = 1134;
+  constexpr uint16_t SUBCOOL_HEATING = 1135;
+  constexpr uint16_t SUBCOOL_COOLING = 1136;
   
   // Energy monitoring (32-bit values, high word first)
-  static const uint16_t COMPRESSOR_WATTS = 1146;
-  static const uint16_t BLOWER_WATTS = 1148;
-  static const uint16_t AUX_WATTS = 1150;
-  static const uint16_t TOTAL_WATTS = 1152;
-  static const uint16_t HEAT_OF_EXTRACTION = 1154;
-  static const uint16_t HEAT_OF_REJECTION = 1156;
-  static const uint16_t PUMP_WATTS = 1164;
+  constexpr uint16_t COMPRESSOR_WATTS = 1146;
+  constexpr uint16_t BLOWER_WATTS = 1148;
+  constexpr uint16_t AUX_WATTS = 1150;
+  constexpr uint16_t TOTAL_WATTS = 1152;
+  constexpr uint16_t HEAT_OF_EXTRACTION = 1154;
+  constexpr uint16_t HEAT_OF_REJECTION = 1156;
+  constexpr uint16_t PUMP_WATTS = 1164;
   
   // VS Drive
-  static const uint16_t COMPRESSOR_SPEED_DESIRED = 3000;
-  static const uint16_t COMPRESSOR_SPEED_ACTUAL = 3001;
-  static const uint16_t VS_DISCHARGE_PRESSURE = 3322;
-  static const uint16_t VS_SUCTION_PRESSURE = 3323;
-  static const uint16_t VS_DISCHARGE_TEMP = 3325;
-  static const uint16_t VS_AMBIENT_TEMP = 3326;
-  static const uint16_t VS_DRIVE_TEMP = 3327;
-  static const uint16_t VS_INVERTER_TEMP = 3522;
-  static const uint16_t VS_EEV_OPEN = 3808;
-  static const uint16_t VS_SUCTION_TEMP = 3903;
-  static const uint16_t VS_SUPERHEAT_TEMP = 3906;
+  constexpr uint16_t COMPRESSOR_SPEED_DESIRED = 3000;
+  constexpr uint16_t COMPRESSOR_SPEED_ACTUAL = 3001;
+  constexpr uint16_t VS_DISCHARGE_PRESSURE = 3322;
+  constexpr uint16_t VS_SUCTION_PRESSURE = 3323;
+  constexpr uint16_t VS_DISCHARGE_TEMP = 3325;
+  constexpr uint16_t VS_AMBIENT_TEMP = 3326;
+  constexpr uint16_t VS_DRIVE_TEMP = 3327;
+  constexpr uint16_t VS_INVERTER_TEMP = 3522;
+  constexpr uint16_t VS_EEV_OPEN = 3808;
+  constexpr uint16_t VS_SUCTION_TEMP = 3903;
+  constexpr uint16_t VS_SUPERHEAT_TEMP = 3906;
   
   // Thermostat config (read)
-  static const uint16_t FAN_CONFIG = 12005;
-  static const uint16_t HEATING_MODE_READ = 12006;
+  constexpr uint16_t FAN_CONFIG = 12005;
+  constexpr uint16_t HEATING_MODE_READ = 12006;
   
   // Humidistat (from humidistat.rb)
-  static const uint16_t HUMIDISTAT_SETTINGS = 12309;    // For non-IZ2
-  static const uint16_t HUMIDISTAT_TARGETS = 12310;     // For non-IZ2
-  static const uint16_t IZ2_HUMIDISTAT_SETTINGS = 21114;
-  static const uint16_t IZ2_HUMIDISTAT_MODE = 31109;
-  static const uint16_t IZ2_HUMIDISTAT_TARGETS = 31110;
+  constexpr uint16_t HUMIDISTAT_SETTINGS = 12309;    // For non-IZ2
+  constexpr uint16_t HUMIDISTAT_TARGETS = 12310;     // For non-IZ2
+  constexpr uint16_t IZ2_HUMIDISTAT_SETTINGS = 21114;
+  constexpr uint16_t IZ2_HUMIDISTAT_MODE = 31109;
+  constexpr uint16_t IZ2_HUMIDISTAT_TARGETS = 31110;
   
   // Thermostat config (write)
-  static const uint16_t HEATING_MODE_WRITE = 12606;
-  static const uint16_t HEATING_SETPOINT_WRITE = 12619;
-  static const uint16_t COOLING_SETPOINT_WRITE = 12620;
-  static const uint16_t FAN_MODE_WRITE = 12621;
+  constexpr uint16_t HEATING_MODE_WRITE = 12606;
+  constexpr uint16_t HEATING_SETPOINT_WRITE = 12619;
+  constexpr uint16_t COOLING_SETPOINT_WRITE = 12620;
+  constexpr uint16_t FAN_MODE_WRITE = 12621;
   
   // IZ2 Zone registers (base addresses, add (zone-1)*offset for each zone)
-  static const uint16_t IZ2_MODE_WRITE_BASE = 21202;      // +9 per zone
-  static const uint16_t IZ2_HEAT_SP_WRITE_BASE = 21203;
-  static const uint16_t IZ2_COOL_SP_WRITE_BASE = 21204;
-  static const uint16_t IZ2_FAN_MODE_WRITE_BASE = 21205;
-  static const uint16_t IZ2_FAN_ON_WRITE_BASE = 21206;
-  static const uint16_t IZ2_FAN_OFF_WRITE_BASE = 21207;
-  static const uint16_t IZ2_AMBIENT_BASE = 31007;         // +3 per zone
-  static const uint16_t IZ2_CONFIG1_BASE = 31008;
-  static const uint16_t IZ2_CONFIG2_BASE = 31009;
-  static const uint16_t IZ2_CONFIG3_BASE = 31200;         // +3 per zone
+  constexpr uint16_t IZ2_MODE_WRITE_BASE = 21202;      // +9 per zone
+  constexpr uint16_t IZ2_HEAT_SP_WRITE_BASE = 21203;
+  constexpr uint16_t IZ2_COOL_SP_WRITE_BASE = 21204;
+  constexpr uint16_t IZ2_FAN_MODE_WRITE_BASE = 21205;
+  constexpr uint16_t IZ2_FAN_ON_WRITE_BASE = 21206;
+  constexpr uint16_t IZ2_FAN_OFF_WRITE_BASE = 21207;
+  constexpr uint16_t IZ2_AMBIENT_BASE = 31007;         // +3 per zone
+  constexpr uint16_t IZ2_CONFIG1_BASE = 31008;
+  constexpr uint16_t IZ2_CONFIG2_BASE = 31009;
+  constexpr uint16_t IZ2_CONFIG3_BASE = 31200;         // +3 per zone
   
   // IZ2 system registers
-  static const uint16_t IZ2_INSTALLED = 812;
-  static const uint16_t IZ2_NUM_ZONES = 483;
-  static const uint16_t IZ2_OUTDOOR_TEMP = 31003;
-  static const uint16_t IZ2_DEMAND = 31005;
+  constexpr uint16_t IZ2_INSTALLED = 812;
+  constexpr uint16_t IZ2_NUM_ZONES = 483;
+  constexpr uint16_t IZ2_OUTDOOR_TEMP = 31003;
+  constexpr uint16_t IZ2_DEMAND = 31005;
 }
 
 // Maximum number of IZ2 zones
-static const uint8_t MAX_IZ2_ZONES = 6;
+constexpr uint8_t MAX_IZ2_ZONES = 6;
 
 // IZ2 Zone current mode/call (from registers.rb CALLS)
 enum ZoneCall : uint8_t {
@@ -232,9 +232,9 @@ enum ZoneSize : uint8_t {
 
 // Structure to hold IZ2 zone data
 struct IZ2ZoneData {
-  float ambient_temperature{NAN};
-  float heating_setpoint{NAN};
-  float cooling_setpoint{NAN};
+  float ambient_temperature{0.0f};
+  float heating_setpoint{0.0f};
+  float cooling_setpoint{0.0f};
   HeatingMode target_mode{HEATING_MODE_OFF};
   FanMode target_fan_mode{FAN_MODE_AUTO};
   ZoneCall current_call{ZONE_CALL_STANDBY};
@@ -465,12 +465,15 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   // Cached register values
   std::map<uint16_t, uint16_t> register_cache_;
   
+  // Pre-allocated vector for register addresses to reduce stack usage
+  std::vector<uint16_t> addresses_to_read_;
+  
   // State
-  float ambient_temp_{NAN};
-  float heating_setpoint_{NAN};
-  float cooling_setpoint_{NAN};
-  float dhw_temp_{NAN};
-  float dhw_setpoint_{NAN};
+  float ambient_temp_{0.0f};
+  float heating_setpoint_{0.0f};
+  float cooling_setpoint_{0.0f};
+  float dhw_temp_{0.0f};
+  float dhw_setpoint_{0.0f};
   bool dhw_enabled_{false};
   HeatingMode hvac_mode_{HEATING_MODE_OFF};
   FanMode fan_mode_{FAN_MODE_AUTO};
