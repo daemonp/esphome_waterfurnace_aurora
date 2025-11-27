@@ -4,29 +4,29 @@
 # component from the local 'components' directory rather than GitHub.
 #
 # Hardware requirements:
-#   - ESP32 board (recommended) or ESP8266
+#   - M5Stack Atom Lite (or other ESP32 board)
 #   - RS-485 transceiver (MAX485, MAX3485, or similar)
 #   - Connection to Aurora ABC board RS-485 port
 #
-# Wiring (ESP32 -> MAX485 -> Aurora):
-#   ESP32 GPIO17 (TX) -> MAX485 DI
-#   ESP32 GPIO16 (RX) -> MAX485 RO  
-#   ESP32 GPIO4       -> MAX485 DE + RE (tied together)
-#   3.3V              -> MAX485 VCC
-#   GND               -> MAX485 GND
-#   MAX485 A          -> Aurora RS-485 A (+)
-#   MAX485 B          -> Aurora RS-485 B (-)
-#   GND               -> Aurora GND (shield)
+# Wiring (M5Stack Atom Lite -> RS485 board -> Aurora):
+#   Atom GPIO26 (TX) -> RS485 DI (TX)
+#   Atom GPIO32 (RX) -> RS485 RO (RX)
+#   Atom GPIO33      -> RS485 DE + RE (flow control, directly to GPIO if no auto)
+#   3.3V/5V          -> RS485 VCC
+#   GND              -> RS485 GND
+#   RS485 A          -> Aurora RS-485 A (+)
+#   RS485 B          -> Aurora RS-485 B (-)
+#   GND              -> Aurora GND (shield)
 #
 # Serial settings: 19200 baud, 8 data bits, Even parity, 1 stop bit
 
 substitutions:
   device_name: waterfurnace-aurora
   friendly_name: "WaterFurnace Aurora"
-  # Hardware pins
-  uart_tx_pin: GPIO17
-  uart_rx_pin: GPIO16
-  flow_control_pin: GPIO4
+  # Hardware pins for M5Stack Atom Lite
+  uart_tx_pin: GPIO26
+  uart_rx_pin: GPIO32
+  flow_control_pin: GPIO33
   # Modbus settings
   modbus_address: "1"
   update_interval: 5s
@@ -36,23 +36,22 @@ esphome:
   friendly_name: ${friendly_name}
 
 esp32:
-  board: esp32dev
+  board: m5stack-atom
   framework:
     type: arduino
 
-# Enable logging
+# Enable logging (baud_rate 0 disables serial logging - needed for M5 Atom)
 logger:
   level: DEBUG
+  baud_rate: 0
 
 # Enable Home Assistant API
 api:
   encryption:
-    key: !secret api_encryption_key
 
 # Enable OTA updates  
 ota:
   - platform: esphome
-    password: !secret ota_password
 
 wifi:
   ssid: !secret wifi_ssid
@@ -61,7 +60,6 @@ wifi:
   # Enable fallback hotspot in case wifi connection fails
   ap:
     ssid: "${device_name} Fallback"
-    password: !secret ap_password
 
 captive_portal:
 
