@@ -454,6 +454,10 @@ For reference, here are the key registers used by this component:
 - Set `logger: baud_rate: 0` — the ESP8266 has only one UART and the logger will conflict with RS-485 communication
 - Ensure adequate power supply — the ESP8266 can be sensitive to voltage drops during WiFi + UART activity
 
+## Community Projects
+
+- [**Project Box for WaterFurnace Aurora**](https://github.com/benpeart/esphome_waterfurnace_aurora_projectbox) by [Ben Peart](https://github.com/benpeart) — Parts list, assembly instructions, and a 3D-printable project box to house the ESP8266 + MAX485 module.
+
 ## Credits
 
 Huge thanks to [Cody Cutrer (ccutrer)](https://github.com/ccutrer) for reverse engineering the protocol and creating the original Ruby implementation.
