@@ -119,15 +119,189 @@ std::string WaterFurnaceAurora::get_current_mode_string() {
   return "Standby";
 }
 
-// STUB setup to test
 void WaterFurnaceAurora::setup() {
-  ESP_LOGCONFIG(TAG, "Setting up WaterFurnace Aurora (STUB)...");
+  ESP_LOGCONFIG(TAG, "Setting up WaterFurnace Aurora...");
   
   // Initialize RS485 flow control pin if configured
   if (this->flow_control_pin_ != nullptr) {
     this->flow_control_pin_->setup();
     this->flow_control_pin_->digital_write(false);  // Start in RX mode
     ESP_LOGD(TAG, "RS485 flow control pin configured");
+  }
+  
+  // Brief delay to let the UART settle before we start communicating
+  delay(100);
+  
+  // Auto-detect hardware (AXB, VS Drive, IZ2) unless overridden via YAML
+  this->detect_hardware();
+  
+  // Read model and serial number
+  this->read_device_info();
+  
+  ESP_LOGI(TAG, "WaterFurnace Aurora setup complete");
+  ESP_LOGI(TAG, "  AXB: %s%s", this->has_axb_ ? "detected" : "not detected",
+           this->axb_override_ ? " (manual override)" : "");
+  ESP_LOGI(TAG, "  VS Drive: %s%s", this->has_vs_drive_ ? "detected" : "not detected",
+           this->vs_drive_override_ ? " (manual override)" : "");
+  ESP_LOGI(TAG, "  IZ2: %s%s", this->has_iz2_ ? "detected" : "not detected",
+           this->iz2_override_ ? " (manual override)" : "");
+  if (this->has_iz2_) {
+    ESP_LOGI(TAG, "  IZ2 Zones: %d%s", this->num_iz2_zones_,
+             this->iz2_zones_override_ ? " (manual override)" : "");
+  }
+  if (!this->model_number_.empty()) {
+    ESP_LOGI(TAG, "  Model: %s", this->model_number_.c_str());
+  }
+  if (!this->serial_number_.empty()) {
+    ESP_LOGI(TAG, "  Serial: %s", this->serial_number_.c_str());
+  }
+}
+
+void WaterFurnaceAurora::detect_hardware() {
+  // Ruby gem checks register 806 for AXB: value != 3 means present
+  // COMPONENT_STATUS: 1=active, 2=added, 3=removed, 0xffff=missing
+  
+  // Read hardware detection registers using function 0x42
+  std::vector<uint16_t> detect_addrs;
+  detect_addrs.reserve(10);
+  
+  if (!this->axb_override_) {
+    detect_addrs.push_back(registers::AXB_INSTALLED);  // 806
+  }
+  if (!this->iz2_override_) {
+    detect_addrs.push_back(registers::IZ2_INSTALLED);  // 812
+  }
+  if (!this->iz2_zones_override_) {
+    detect_addrs.push_back(registers::IZ2_NUM_ZONES);  // 483
+  }
+  // Read register 88 (ABC program) to help detect VS drive
+  if (!this->vs_drive_override_) {
+    detect_addrs.push_back(88);  // ABC Program (4 registers: 88-91)
+    detect_addrs.push_back(89);
+    detect_addrs.push_back(90);
+    detect_addrs.push_back(91);
+  }
+  
+  if (detect_addrs.empty()) {
+    ESP_LOGD(TAG, "All hardware flags set via YAML overrides, skipping auto-detection");
+    return;
+  }
+  
+  std::map<uint16_t, uint16_t> result;
+  if (!this->read_specific_registers(detect_addrs, result)) {
+    ESP_LOGW(TAG, "Failed to read hardware detection registers - will use defaults or overrides");
+    ESP_LOGW(TAG, "Check RS-485 wiring and ensure the heat pump is powered on");
+    return;
+  }
+  
+  // Detect AXB (register 806): present if value != 3 (3 = removed)
+  if (!this->axb_override_) {
+    auto it = result.find(registers::AXB_INSTALLED);
+    if (it != result.end()) {
+      // Per Ruby gem: COMPONENT_STATUS: 1=active, 2=added, 3=removed, 0xffff=missing
+      this->has_axb_ = (it->second != 3 && it->second != 0xFFFF);
+      ESP_LOGD(TAG, "AXB register 806 = %d -> %s", it->second, this->has_axb_ ? "present" : "absent");
+    } else {
+      ESP_LOGW(TAG, "AXB register 806 not in response");
+    }
+  }
+  
+  // Detect IZ2 (register 812): present if value != 3 (3 = removed)
+  if (!this->iz2_override_) {
+    auto it = result.find(812);
+    if (it != result.end()) {
+      this->has_iz2_ = (it->second != 3 && it->second != 0xFFFF);
+      ESP_LOGD(TAG, "IZ2 register 812 = %d -> %s", it->second, this->has_iz2_ ? "present" : "absent");
+    } else {
+      ESP_LOGW(TAG, "IZ2 register 812 not in response");
+    }
+  }
+  
+  // Read IZ2 zone count (register 483) - even if has_iz2 was overridden, auto-detect zone count
+  if (!this->iz2_zones_override_ && this->has_iz2_) {
+    auto it = result.find(registers::IZ2_NUM_ZONES);
+    if (it != result.end()) {
+      this->num_iz2_zones_ = std::min(static_cast<uint8_t>(it->second), static_cast<uint8_t>(MAX_IZ2_ZONES));
+      ESP_LOGD(TAG, "IZ2 zone count register 483 = %d -> %d zones", it->second, this->num_iz2_zones_);
+    } else {
+      ESP_LOGW(TAG, "IZ2 zone count register 483 not in response");
+    }
+  }
+  
+  // Detect VS Drive via ABC Program (register 88, 4 registers = 8 chars ASCII)
+  // Ruby gem: program names containing "VSP" or "SPLVS" indicate VS drive
+  // e.g. "ABCVSP", "ABCVSPR", "ABCSPLVS"
+  if (!this->vs_drive_override_) {
+    std::vector<uint16_t> prog_regs;
+    for (uint16_t r = 88; r <= 91; r++) {
+      auto it = result.find(r);
+      if (it != result.end()) {
+        prog_regs.push_back(it->second);
+      }
+    }
+    if (!prog_regs.empty()) {
+      std::string program = registers_to_string(prog_regs);
+      ESP_LOGD(TAG, "ABC Program: '%s'", program.c_str());
+      // Check if program name indicates VS drive
+      this->has_vs_drive_ = (program.find("VSP") != std::string::npos || 
+                              program.find("SPLVS") != std::string::npos);
+      ESP_LOGD(TAG, "VS Drive detection from program '%s' -> %s", 
+               program.c_str(), this->has_vs_drive_ ? "present" : "absent");
+    }
+    
+    // Fallback: if program name didn't match, try reading VS drive-specific 
+    // registers that only have meaningful values when a VS drive is present.
+    // Register 3322 (VS discharge pressure) and 3325 (VS discharge temp) should 
+    // have non-zero values when a VS drive is communicating.
+    if (!this->has_vs_drive_) {
+      std::vector<uint16_t> vs_probe = {3001, 3322, 3325};
+      std::map<uint16_t, uint16_t> vs_result;
+      if (this->read_specific_registers(vs_probe, vs_result)) {
+        auto it_speed = vs_result.find(3001);
+        auto it_press = vs_result.find(3322);
+        auto it_temp = vs_result.find(3325);
+        // Consider VS drive present if we got any non-zero VS-specific values
+        bool has_data = false;
+        if (it_press != vs_result.end() && it_press->second != 0) has_data = true;
+        if (it_temp != vs_result.end() && it_temp->second != 0) has_data = true;
+        if (it_speed != vs_result.end() && it_speed->second != 0) has_data = true;
+        if (has_data) {
+          this->has_vs_drive_ = true;
+          ESP_LOGD(TAG, "VS Drive detected via register probe (speed=%d, pressure=%d, temp=%d)",
+                   it_speed != vs_result.end() ? it_speed->second : 0,
+                   it_press != vs_result.end() ? it_press->second : 0,
+                   it_temp != vs_result.end() ? it_temp->second : 0);
+        }
+      } else {
+        ESP_LOGD(TAG, "VS Drive register probe failed - no VS drive");
+      }
+    }
+  }
+}
+
+void WaterFurnaceAurora::read_device_info() {
+  // Read model number (registers 92-103, 12 registers = 24 chars ASCII)
+  std::vector<uint16_t> model_result;
+  if (this->read_holding_registers(registers::MODEL_NUMBER, 12, model_result)) {
+    this->model_number_ = registers_to_string(model_result);
+    if (this->model_number_sensor_ != nullptr && !this->model_number_.empty()) {
+      this->model_number_sensor_->publish_state(this->model_number_);
+    }
+    ESP_LOGD(TAG, "Model number: '%s'", this->model_number_.c_str());
+  } else {
+    ESP_LOGW(TAG, "Failed to read model number");
+  }
+  
+  // Read serial number (registers 105-109, 5 registers = 10 chars ASCII)
+  std::vector<uint16_t> serial_result;
+  if (this->read_holding_registers(registers::SERIAL_NUMBER, 5, serial_result)) {
+    this->serial_number_ = registers_to_string(serial_result);
+    if (this->serial_number_sensor_ != nullptr && !this->serial_number_.empty()) {
+      this->serial_number_sensor_->publish_state(this->serial_number_);
+    }
+    ESP_LOGD(TAG, "Serial number: '%s'", this->serial_number_.c_str());
+  } else {
+    ESP_LOGW(TAG, "Failed to read serial number");
   }
 }
 
@@ -144,17 +318,22 @@ void WaterFurnaceAurora::dump_config() {
   ESP_LOGCONFIG(TAG, "WaterFurnace Aurora:");
   ESP_LOGCONFIG(TAG, "  Address: 0x%02X", this->address_);
   ESP_LOGCONFIG(TAG, "  Flow Control Pin: %s", this->flow_control_pin_ != nullptr ? "configured" : "not configured");
+  ESP_LOGCONFIG(TAG, "  Read Retries: %d", this->read_retries_);
   if (!this->model_number_.empty()) {
     ESP_LOGCONFIG(TAG, "  Model: %s", this->model_number_.c_str());
   }
   if (!this->serial_number_.empty()) {
     ESP_LOGCONFIG(TAG, "  Serial: %s", this->serial_number_.c_str());
   }
-  ESP_LOGCONFIG(TAG, "  AXB Present: %s", this->has_axb_ ? "yes" : "no");
-  ESP_LOGCONFIG(TAG, "  VS Drive: %s", this->has_vs_drive_ ? "yes" : "no");
-  ESP_LOGCONFIG(TAG, "  IZ2 Present: %s", this->has_iz2_ ? "yes" : "no");
+  ESP_LOGCONFIG(TAG, "  AXB Present: %s%s", this->has_axb_ ? "yes" : "no",
+                this->axb_override_ ? " (override)" : "");
+  ESP_LOGCONFIG(TAG, "  VS Drive: %s%s", this->has_vs_drive_ ? "yes" : "no",
+                this->vs_drive_override_ ? " (override)" : "");
+  ESP_LOGCONFIG(TAG, "  IZ2 Present: %s%s", this->has_iz2_ ? "yes" : "no",
+                this->iz2_override_ ? " (override)" : "");
   if (this->has_iz2_) {
-    ESP_LOGCONFIG(TAG, "  IZ2 Zones: %d", this->num_iz2_zones_);
+    ESP_LOGCONFIG(TAG, "  IZ2 Zones: %d%s", this->num_iz2_zones_,
+                  this->iz2_zones_override_ ? " (override)" : "");
   }
 }
 
@@ -716,6 +895,14 @@ void WaterFurnaceAurora::refresh_all_data() {
     if (this->dehumidification_target_sensor_ != nullptr) {
       uint8_t dehumidification_target = it->second & 0xFF;
       this->dehumidification_target_sensor_->publish_state(dehumidification_target);
+    }
+  }
+  
+  // Read fault history periodically (every ~60 seconds = 12 cycles at 5s interval)
+  if (this->fault_history_sensor_ != nullptr) {
+    if (++this->fault_history_counter_ >= 12) {
+      this->fault_history_counter_ = 0;
+      this->read_fault_history();
     }
   }
   
@@ -1413,14 +1600,15 @@ std::string WaterFurnaceAurora::registers_to_string(const std::vector<uint16_t> 
     char high_char = static_cast<char>(reg >> 8);
     char low_char = static_cast<char>(reg & 0xFF);
     
-    if (high_char == '\0' || high_char == ' ') break;
+    if (high_char == '\0') break;
     result += high_char;
     
-    if (low_char == '\0' || low_char == ' ') break;
+    if (low_char == '\0') break;
     result += low_char;
   }
   
-  while (!result.empty() && result.back() == ' ') {
+  // Strip trailing spaces (matches Ruby gem behavior)
+  while (!result.empty() && (result.back() == ' ' || result.back() == '\0')) {
     result.pop_back();
   }
   

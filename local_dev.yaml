@@ -85,6 +85,7 @@ external_components:
 
 # WaterFurnace Aurora component
 # RS-485 flow control is handled directly by the component
+# Hardware is auto-detected at startup. Use overrides below if auto-detection fails.
 waterfurnace_aurora:
   id: aurora
   uart_id: mod_bus
@@ -92,13 +93,21 @@ waterfurnace_aurora:
   update_interval: ${update_interval}
   flow_control_pin: ${flow_control_pin}
   read_retries: 2  # Number of retries on read failure (default 2)
+  # Hardware overrides (uncomment to force detection):
+  # has_axb: true        # Force AXB accessory board detection
+  # has_vs_drive: true   # Force VS drive detection (5/7-Series)
+  # has_iz2: true        # Force IntelliZone 2 detection
+  # num_iz2_zones: 3     # Force IZ2 zone count (1-6)
 
 # =============================================================================
 # CLIMATE ENTITIES
 # =============================================================================
 
 climate:
-  # Main thermostat (for non-IZ2 systems, or whole-system control)
+  # Main thermostat (for non-IZ2 systems only)
+  # IMPORTANT: If you have IntelliZone 2 (IZ2), comment out this main thermostat
+  # and uncomment the zone entries below. On IZ2 systems, the system-wide registers
+  # read by this entity contain IZ2 controller data, not actual temperatures.
   - platform: waterfurnace_aurora
     id: aurora_thermostat
     name: "Heat Pump"
@@ -106,6 +115,7 @@ climate:
 
   # IZ2 Zone climates (uncomment if you have IntelliZone 2)
   # Each zone appears as a separate climate entity in Home Assistant
+  # When using IZ2 zones, comment out the main "Heat Pump" thermostat above.
   # - platform: waterfurnace_aurora
   #   id: aurora_zone_1
   #   name: "Zone 1"

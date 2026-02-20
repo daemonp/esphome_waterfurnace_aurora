@@ -69,7 +69,10 @@ waterfurnace_aurora:
 # =============================================================================
 
 climate:
-  # Main thermostat (for non-IZ2 systems, or whole-system control)
+  # Main thermostat (for non-IZ2 systems only)
+  # IMPORTANT: If you have IntelliZone 2 (IZ2), comment out this main thermostat
+  # and uncomment the zone entries below. On IZ2 systems, the system-wide registers
+  # read by this entity contain IZ2 controller data, not actual temperatures.
   - platform: waterfurnace_aurora
     id: aurora_thermostat
     name: "Heat Pump"
@@ -77,6 +80,7 @@ climate:
 
   # IZ2 Zone climates (uncomment if you have IntelliZone 2)
   # Each zone appears as a separate climate entity in Home Assistant
+  # When using IZ2 zones, comment out the main "Heat Pump" thermostat above.
   # - platform: waterfurnace_aurora
   #   id: aurora_zone_1
   #   name: "Zone 1"

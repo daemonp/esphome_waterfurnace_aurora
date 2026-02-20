@@ -261,6 +261,12 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   void set_flow_control_pin(GPIOPin *pin) { this->flow_control_pin_ = pin; }
   void set_read_retries(uint8_t retries) { this->read_retries_ = retries; }
 
+  // Hardware override setters (skip auto-detection when set)
+  void set_has_axb_override(bool value) { this->has_axb_ = value; this->axb_override_ = true; }
+  void set_has_vs_drive_override(bool value) { this->has_vs_drive_ = value; this->vs_drive_override_ = true; }
+  void set_has_iz2_override(bool value) { this->has_iz2_ = value; this->iz2_override_ = true; }
+  void set_num_iz2_zones_override(uint8_t value) { this->num_iz2_zones_ = value; this->iz2_zones_override_ = true; }
+
   // Register sensors
   void set_entering_air_sensor(sensor::Sensor *sensor) { entering_air_sensor_ = sensor; }
   void set_leaving_air_sensor(sensor::Sensor *sensor) { leaving_air_sensor_ = sensor; }
@@ -443,6 +449,12 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   // Refresh data from device
   void refresh_all_data();
   
+  // Hardware auto-detection (called from setup)
+  void detect_hardware();
+  
+  // Read model and serial number (called from setup)
+  void read_device_info();
+  
   // Get mode/fault strings (from registers.rb FAULTS hash)
   std::string get_current_mode_string();
   static const char* get_fault_description(uint8_t code);
@@ -461,6 +473,12 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   
   // RS485 flow control pin (optional, for half-duplex RS485)
   GPIOPin *flow_control_pin_{nullptr};
+  
+  // Hardware override flags (true = user explicitly set via YAML, skip auto-detection)
+  bool axb_override_{false};
+  bool vs_drive_override_{false};
+  bool iz2_override_{false};
+  bool iz2_zones_override_{false};
   
   // Cached register values
   std::map<uint16_t, uint16_t> register_cache_;
@@ -486,6 +504,7 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   bool has_iz2_{false};
   uint8_t num_iz2_zones_{0};
   bool active_dehumidify_{false};
+  uint8_t fault_history_counter_{0};  // Counter to read fault history periodically
   
   // IZ2 Zone data
   IZ2ZoneData iz2_zones_[MAX_IZ2_ZONES];

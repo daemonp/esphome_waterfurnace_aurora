@@ -150,6 +150,19 @@ void AuroraClimate::update_state_() {
     return;
   }
 
+  // Warn if IZ2 is detected - the main climate entity reads system-wide registers
+  // which are not meaningful on IZ2 systems. Use zone climate entities instead.
+  if (this->parent_->has_iz2()) {
+    static bool warned = false;
+    if (!warned) {
+      ESP_LOGW(TAG, "IZ2 detected - the main climate entity reads system-wide registers");
+      ESP_LOGW(TAG, "which may show incorrect values on IZ2 systems.");
+      ESP_LOGW(TAG, "Use the zone climate entities (zone: 1, zone: 2, etc.) instead");
+      ESP_LOGW(TAG, "and consider removing or commenting out this main climate entity.");
+      warned = true;
+    }
+  }
+
   // Update current temperature
   float ambient = this->parent_->get_ambient_temperature();
   if (!std::isnan(ambient)) {

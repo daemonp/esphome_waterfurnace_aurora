@@ -123,12 +123,60 @@ wifi:
 | `modbus_address` | `1` | Modbus slave address of the Aurora ABC board |
 | `update_interval` | `5s` | How often to poll the heat pump for data |
 
+### Hardware Detection
+
+The component automatically detects the installed hardware at startup:
+- **AXB Accessory Board** — detected via register 806
+- **VS Drive** (5/7-Series) — detected via ABC program name and register 3001 probe
+- **IntelliZone 2** — detected via register 812, zone count from register 483
+
+Sensors that depend on hardware not present will show as "Unknown" in Home Assistant. If auto-detection fails or gives incorrect results, you can manually override these settings in the `waterfurnace_aurora` component configuration:
+
+```yaml
+waterfurnace_aurora:
+  id: aurora
+  uart_id: mod_bus
+  address: 1
+  flow_control_pin: GPIO4
+  # Manual hardware overrides (auto-detected if omitted)
+  has_axb: true
+  has_vs_drive: true
+  has_iz2: true
+  num_iz2_zones: 3
+```
+
+### ESP8266 Notes
+
+The ESP8266 (including D1 Mini / NodeMCU) is supported but requires special configuration:
+
+1. **Logger baud rate**: The ESP8266 has only one fully functional UART. You **must** set `logger: baud_rate: 0` to disable serial logging so the UART is available for RS-485 communication:
+
+   ```yaml
+   logger:
+     baud_rate: 0
+   ```
+
+2. **Pin selection**: The default GPIO pins (16/17) are ESP32 pins. For ESP8266, use appropriate pins (e.g., GPIO1/GPIO3 for hardware UART, or software serial pins).
+
+3. **Memory**: The ESP8266 has limited RAM. If you experience stability issues, consider disabling sensors you don't need by commenting them out in your YAML.
+
 ### IZ2 Zone Configuration
 
-If you have an IntelliZone 2 system, uncomment the zone climate entries in the YAML or add them manually:
+If you have an IntelliZone 2 system, you should:
+
+1. **Comment out** (or remove) the main "Heat Pump" climate entity — on IZ2 systems, it reads system-wide registers that contain IZ2 controller data, resulting in incorrect temperature values.
+2. **Uncomment** the zone climate entries matching your zone count.
 
 ```yaml
 climate:
+  # IMPORTANT: Comment out the main thermostat on IZ2 systems!
+  # It reads system-wide registers that show incorrect values when IZ2 is active.
+  # - platform: waterfurnace_aurora
+  #   id: aurora_thermostat
+  #   name: "Heat Pump"
+  #   aurora_id: aurora
+
+  # IZ2 Zone climates - uncomment zones matching your system
   - platform: waterfurnace_aurora
     id: aurora_zone_1
     name: "Zone 1"
@@ -139,8 +187,15 @@ climate:
     name: "Zone 2"
     aurora_id: aurora
     zone: 2
+  - platform: waterfurnace_aurora
+    id: aurora_zone_3
+    name: "Zone 3"
+    aurora_id: aurora
+    zone: 3
   # ... up to zone 6
 ```
+
+The component auto-detects IZ2 and the zone count. Each zone appears as a separate climate entity in Home Assistant with its own temperature, setpoints, mode, and fan controls.
 
 ## Exposed Entities
 
@@ -385,9 +440,19 @@ For reference, here are the key registers used by this component:
 - Check for loose connections
 - Ensure adequate power supply to RS485 module
 
-### Missing Sensors
-- Some sensors only appear if the required hardware is present (AXB, VS drive, IZ2)
-- Check logs for "AXB detected", "VS Drive detected", "IZ2 detected"
+### Missing Sensors / "Unknown" Values
+- Sensors show "Unknown" when the required hardware is not detected (AXB, VS Drive, IZ2)
+- Check logs at startup for hardware detection messages (e.g., "AXB: detected", "VS Drive: detected", "IZ2: detected")
+- If auto-detection fails, use the `has_axb`, `has_vs_drive`, `has_iz2`, and `num_iz2_zones` YAML overrides
+- On IZ2 systems, the main "Heat Pump" climate entity will show bogus values (e.g., 32°F current temp, 158°F setpoints) — use zone climate entities instead
+
+### IZ2 Climate Shows Incorrect Values
+- If you have an IntelliZone 2 system and the main thermostat shows wrong temperatures (e.g., 32°F, 158°F), this is because the system-wide registers contain IZ2 controller data
+- **Solution**: Comment out the main "Heat Pump" climate entity and use zone-specific climate entities (zone: 1, zone: 2, etc.)
+
+### ESP8266: No Communication or Watchdog Resets
+- Set `logger: baud_rate: 0` — the ESP8266 has only one UART and the logger will conflict with RS-485 communication
+- Ensure adequate power supply — the ESP8266 can be sensitive to voltage drops during WiFi + UART activity
 
 ## Credits
 
