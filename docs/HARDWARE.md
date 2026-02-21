@@ -12,43 +12,66 @@ Use a MAX485 module with **exposed DE/RE pins** for manual flow control. A known
 
 > **Important**: Avoid RS485 modules with "automatic flow control" that only have VCC/TXD/RXD/GND pins. These lack the DE/RE pins needed for reliable Modbus RTU timing and will cause communication errors.
 
-## AID Tool Port (RJ45) Pinout
+## AID Tool Port Pinout
 
-The AID Tool port on the front of your heat pump uses an RJ45 jack. The 8 pins carry **two completely different buses** — RS-485 data and 24VAC thermostat power:
+The AID Tool port on the front of your heat pump uses an RJ45 jack. The 8 pins carry **two completely different buses** — RS-485 data and 24VAC thermostat power. You **must** understand which is which before connecting anything.
 
-```
-        RJ45 Jack (looking at the port on the heat pump)
-    ┌─────────────────────────────┐
-    │  8  7  6  5  4  3  2  1    │
-    │  ┃  ┃  ┃  ┃  ┃  ┃  ┃  ┃   │
-    └──╂──╂──╂──╂──╂──╂──╂──╂───┘
-       │  │  │  │  │  │  │  │
-       │  │  │  │  │  │  │  └── Pin 1: RS-485 A+ (data)
-       │  │  │  │  │  │  └───── Pin 2: RS-485 B- (data)
-       │  │  │  │  │  └──────── Pin 3: RS-485 A+ (data)
-       │  │  │  │  └─────────── Pin 4: RS-485 B- (data)
-       │  │  │  └────────────── Pin 5: R  - 24VAC ⚡ DANGER
-       │  │  └───────────────── Pin 6: C  - 24VAC ⚡ DANGER
-       │  └──────────────────── Pin 7: R  - 24VAC ⚡ DANGER
-       └─────────────────────── Pin 8: C  - 24VAC ⚡ DANGER
-```
+### RJ45 Plug Pin Numbering
+
+When building your cable, you need to know how pin numbers map to wire positions. Looking at the RJ45 plug with the **clip facing away** from you and the contacts facing up:
 
 ```
-    ┌───────────────────────────────────────────────────────┐
-    │  Signal    Pins     Wire Color (T568B)    Use         │
-    ├───────────────────────────────────────────────────────┤
-    │  A+  ───  1, 3     White/Orange,          RS-485 data │
-    │                     White/Green            (connect)   │
-    │  B-  ───  2, 4     Orange, Blue           RS-485 data │
-    │                                            (connect)   │
-    │  R   ───  5, 7     White/Blue,            24VAC power │
-    │                     White/Brown            DO NOT USE  │
-    │  C   ───  6, 8     Green, Brown           24VAC power │
-    │                                            DO NOT USE  │
-    └───────────────────────────────────────────────────────┘
+         RJ45 Plug (clip facing away, contacts up)
+        ┌─────────────────────────┐
+        │                         │
+        │  ┌──┬──┬──┬──┬──┬──┬──┬──┐
+        │  │1 │2 │3 │4 │5 │6 │7 │8 │  ← pin numbers
+        │  └──┴──┴──┴──┴──┴──┴──┴──┘
+        │         contacts            │
+        │                             │
+        │          ┌──────┐           │
+        │          │ clip │           │
+        └──────────┴──────┴───────────┘
+                      │
+                   to cable
 ```
 
-> ### ⚠️ DANGER: 24VAC Power Pins (5, 6, 7, 8)
+### Heat Pump AID Tool Port
+
+Looking at the RJ45 **jack** on the heat pump (the port you plug into), the pin order is **mirrored** — pin 1 is on the right:
+
+```
+     Heat Pump AID Tool Port (looking at the jack)
+    ┌───────────────────────────────┐
+    │                               │
+    │  ┌──┬──┬──┬──┬──┬──┬──┬──┐   │
+    │  │8 │7 │6 │5 │4 │3 │2 │1 │   │
+    │  └──┴──┴──┴──┴──┴──┴──┴──┘   │
+    │         ╔══════════╗          │
+    │         ║ AID Tool ║          │
+    └─────────╚══════════╝──────────┘
+```
+
+When you plug in, pin 1 on the plug mates with pin 1 on the jack — the mirroring is handled by the connector geometry. Just make sure you have the right wires on the right pins.
+
+### Pin Assignment
+
+```
+    Pin   Signal   Wire Color (T568B)   Function
+    ───   ──────   ──────────────────   ─────────────────────────
+     1     A+      White/Orange         RS-485 data  ← CONNECT
+     2     B-      Orange               RS-485 data  ← CONNECT
+     3     A+      White/Green          RS-485 data  ← CONNECT
+     4     B-      Blue                 RS-485 data  ← CONNECT
+     5     R       White/Blue           24VAC power  ⚡ DO NOT USE
+     6     C       Green                24VAC power  ⚡ DO NOT USE
+     7     R       White/Brown          24VAC power  ⚡ DO NOT USE
+     8     C       Brown                24VAC power  ⚡ DO NOT USE
+```
+
+Pins 1 & 3 are both A+ (tied together), and pins 2 & 4 are both B- (tied together). This is redundant by design — you only need one pair, but connecting both is fine.
+
+> ### ⚠️ DANGER: 24VAC Power on Pins 5, 6, 7, 8
 >
 > Pins 5-8 carry **24VAC thermostat bus power** (C and R lines). These are **NOT** data pins.
 >
@@ -57,26 +80,58 @@ The AID Tool port on the front of your heat pump uses an RJ45 jack. The 8 pins c
 > - **Best case**: You blow the 3A automotive fuse inside the heat pump (replaceable, but you'll need to find it)
 > - **Worst case**: You destroy the ABC (Aurora Base Control) board — a very expensive repair on a $40K+ heat pump
 >
-> **Only connect pins 1-4** (RS-485 data). Leave pins 5-8 completely unconnected and insulated. If you're cutting an ethernet cable, strip and connect only the white/orange, orange, white/green, and blue wires. Cut the remaining four wires short and tape/shrink-wrap them so they can't accidentally touch anything.
+> If you're cutting an ethernet cable, strip and connect only the white/orange, orange, white/green, and blue wires. **Cut the remaining four wires short and tape or heat-shrink them** so they can't accidentally touch anything.
 
-## Wiring
+## Building the Cable
 
-Connect **only the RS-485 data pins** (1-4) from the AID Tool port to your RS485 adapter, then the adapter to your ESP:
+The easiest approach: take a standard ethernet cable (T568B), cut off one end, and connect only the four data wires. Leave the RJ45 plug on the other end to plug into the heat pump.
+
+```
+    RJ45 Plug                                              MAX485
+   (to heat pump)          Ethernet Cable                  Module
+  ┌──────────┐                                          ┌──────────┐
+  │ Pin 1 A+ ├──── White/Orange ──┐                     │          │
+  │ Pin 2 B- ├──── Orange ────────┤                     │          │
+  │ Pin 3 A+ ├──── White/Green ───┼── twist together ──►│ A / +    │
+  │ Pin 4 B- ├──── Blue ──────────┼── twist together ──►│ B / -    │
+  │          │                    │                     │          │
+  │ Pin 5  R ├──╌╌ White/Blue     │                     │          │
+  │ Pin 6  C ├──╌╌ Green        CUT, TAPE & INSULATE    │          │
+  │ Pin 7  R ├──╌╌ White/Brown  ⚡ DO NOT CONNECT ⚡    │          │
+  │ Pin 8  C ├──╌╌ Brown          │                     │          │
+  └──────────┘                    │                     │          │
+                                                        │ DI (TX) ─┤──► ESP GPIO_TX
+                                                        │ RO (RX) ─┤──► ESP GPIO_RX
+                                                        │ DE ──┬───┤──► ESP GPIO_FLOW
+                                                        │ RE ──┘   │
+                                                        │ VCC ─────┤──► ESP 3.3V
+                                                        │ GND ─────┤──► ESP GND
+                                                        └──────────┘
+```
+
+**Cable assembly steps:**
+
+1. Take a standard ethernet patch cable (T568B crimping)
+2. Cut off one end, leaving the RJ45 plug on the heat pump end
+3. Strip back the outer jacket ~2 inches
+4. Identify the wires by color:
+   - **Connect**: White/Orange + White/Green (both A+) → twist together → RS485 module **A / +**
+   - **Connect**: Orange + Blue (both B-) → twist together → RS485 module **B / -**
+   - **Cut short & insulate**: White/Blue, Green, White/Brown, Brown (24VAC — **DANGER**)
+5. Plug the RJ45 end into the AID Tool port on the heat pump
+
+## Wiring Summary
 
 | Heat Pump (RJ45) | Wire Color (T568B) | RS485 Adapter | ESP32/8266 |
 | :--- | :--- | :--- | :--- |
-| Pin 1 (RS485 A+) | White/Orange | A / + | - |
-| Pin 2 (RS485 B-) | Orange | B / - | - |
-| Pin 3 (RS485 A+) | White/Green | A / + | - |
-| Pin 4 (RS485 B-) | Blue | B / - | - |
-| Pin 5-8 | *(cut and insulate)* | **DO NOT CONNECT** | **DO NOT CONNECT** |
+| Pin 1, 3 (RS485 A+) | White/Orange, White/Green | A / + | - |
+| Pin 2, 4 (RS485 B-) | Orange, Blue | B / - | - |
+| Pin 5-8 (24VAC) | *(cut and insulate!)* | **DO NOT CONNECT** | **DO NOT CONNECT** |
 | - | - | DI (TX) | GPIO_TX |
 | - | - | RO (RX) | GPIO_RX |
-| - | - | DE/RE | GPIO_FLOW |
+| - | - | DE + RE (tied) | GPIO_FLOW |
 | - | - | VCC | 3.3V / 5V |
 | - | - | GND | GND |
-
-The easiest approach is to take a standard ethernet cable, cut off one end, and identify the wires by color (T568B standard). Connect only the four data wires and leave the other four completely disconnected.
 
 ## Flow Control
 
