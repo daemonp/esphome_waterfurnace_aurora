@@ -2,7 +2,7 @@
 
 A native ESPHome custom component for controlling and monitoring WaterFurnace geothermal heat pumps. This component communicates directly with the Aurora Base Control (ABC) board via RS-485 Modbus RTU, bypassing the need for expensive Symphony/AWL hardware or complex Raspberry Pi bridges.
 
-It is a C++ port of the [waterfurnace_aurora Ruby gem](https://github.com/ccutrer/waterfurnace_aurora), optimized for ESP32/ESP8266 devices.
+It is a esphome/C++ port of the [waterfurnace_aurora Ruby gem](https://github.com/ccutrer/waterfurnace_aurora), optimized for ESP32/ESP8266 devices.
 
 ## Supported Systems
 
@@ -51,33 +51,11 @@ It is a C++ port of the [waterfurnace_aurora Ruby gem](https://github.com/ccutre
 
 ## Hardware Requirements
 
-1. **ESP32 or ESP8266 Development Board** (e.g., Wemos D1 Mini, NodeMCU, ESP32-DevKit)
-2. **TTL to RS485 Adapter** with manual DE/RE flow control pins (see note below)
-3. **RJ45 Connector/Cable**: To connect to the AID Tool port on the heat pump
+You need an **ESP32 or ESP8266**, a **MAX485 RS485 transceiver** with DE/RE flow control pins, and an **RJ45 cable** to connect to the heat pump's AID Tool port.
 
-### Recommended RS485 Module
+> **Important**: Use a MAX485 module with **exposed DE/RE pins**. Avoid "automatic flow control" modules — they lack the timing control needed for reliable Modbus RTU.
 
-Use a MAX485 module with **exposed DE/RE pins** for manual flow control. A known working module is the [Alinan MAX485 RS485 Transceiver Module](https://www.amazon.com/dp/B00NIOLNAG).
-
-> **Important**: Avoid RS485 modules with "automatic flow control" that only have VCC/TXD/RXD/GND pins. These lack the DE/RE pins needed for reliable Modbus RTU timing and will cause communication errors.
-
-### Wiring
-
-Connect the RS485 adapter to the ESP and the Heat Pump's AID Tool port (RJ45).
-
-| Heat Pump (RJ45) | Wire Color (T568B) | RS485 Adapter | ESP32/8266 |
-| :--- | :--- | :--- | :--- |
-| Pin 1 (RS485+) | White/Orange | A / + | - |
-| Pin 2 (RS485-) | Orange | B / - | - |
-| Pin 3 (RS485+) | White/Green | A / + | - |
-| Pin 4 (RS485-) | Blue | B / - | - |
-| - | - | DI (TX) | GPIO_TX |
-| - | - | RO (RX) | GPIO_RX |
-| - | - | DE/RE | GPIO_FLOW |
-| - | - | VCC | 3.3V / 5V |
-| - | - | GND | GND |
-
-> **Note**: The DE/RE pins on most RS485 modules need to be tied together and connected to a GPIO for flow control. The component automatically switches this pin HIGH during transmit and LOW during receive.
+For detailed wiring diagrams, pin connections, RS485 module recommendations, and ESP8266-specific notes, see **[Hardware Setup & Wiring](docs/HARDWARE.md)**.
 
 ## Installation & Configuration
 
@@ -132,7 +110,7 @@ wifi:
 
 ### Hardware Detection
 
-The component automatically detects the installed hardware at startup:
+The component automatically detects installed hardware at startup:
 - **AXB Accessory Board** — detected via register 806
 - **VS Drive** (5/7-Series) — detected via ABC program name (registers 88-91 for "VSP"/"SPLVS") with fallback probe of VS-specific registers (3001, 3322, 3325)
 - **IntelliZone 2** — detected via register 812, zone count from register 483
@@ -158,18 +136,7 @@ waterfurnace_aurora:
 
 ### ESP8266 Notes
 
-The ESP8266 (including D1 Mini / NodeMCU) is supported but requires special configuration:
-
-1. **Logger baud rate**: The ESP8266 has only one fully functional UART. You **must** set `logger: baud_rate: 0` to disable serial logging so the UART is available for RS-485 communication:
-
-   ```yaml
-   logger:
-     baud_rate: 0
-   ```
-
-2. **Pin selection**: The default GPIO pins (16/17) are ESP32 pins. For ESP8266, use appropriate pins (e.g., GPIO1/GPIO3 for hardware UART, or software serial pins).
-
-3. **Memory**: The ESP8266 has limited RAM. If you experience stability issues, consider disabling sensors you don't need by commenting them out in your YAML.
+The ESP8266 is supported but you **must** set `logger: baud_rate: 0` to free the UART for RS-485. See **[Hardware Setup](docs/HARDWARE.md#esp8266-notes)** for full details.
 
 ### IZ2 Zone Configuration
 
@@ -210,313 +177,19 @@ The component auto-detects IZ2 and the zone count. Each zone appears as a separa
 
 ## Exposed Entities
 
-### Sensors
+The component creates 50+ sensors, 12 binary sensors, 14 text sensors, 11 number controls, switches, buttons, and climate entities. Here's a summary:
 
-| Sensor | Unit | Description | Register |
-| :--- | :--- | :--- | :--- |
-| `entering_air_temperature` | °F | Air temperature entering the unit | 567/740 |
-| `leaving_air_temperature` | °F | Air temperature leaving the unit | 900 |
-| `ambient_temperature` | °F | Room/zone temperature | 502 |
-| `outdoor_temperature` | °F | Outdoor temperature (AWL) | 742 |
-| `entering_water_temperature` | °F | Loop water entering the unit | 1111 |
-| `leaving_water_temperature` | °F | Loop water leaving the unit | 1110 |
-| `heating_setpoint` | °F | Current heating setpoint | 745 |
-| `cooling_setpoint` | °F | Current cooling setpoint | 746 |
-| `humidity` | % | Relative humidity | 741 |
-| `compressor_speed` | RPM | Actual compressor speed (VS) | 3001 |
-| `compressor_desired_speed` | RPM | Target compressor speed (VS) | 3000 |
-| `discharge_pressure` | psi | Refrigerant discharge pressure | 3322 |
-| `suction_pressure` | psi | Refrigerant suction pressure | 3323 |
-| `superheat_temperature` | °F | Superheat temperature | 3906 |
-| `eev_open_percentage` | % | Electronic expansion valve opening | 3808 |
-| `line_voltage` | V | Incoming line voltage | 16 |
-| `total_watts` | W | Total system power consumption | 1152-1153 |
-| `compressor_watts` | W | Compressor power consumption | 1146-1147 |
-| `blower_watts` | W | Blower power consumption | 1148-1149 |
-| `aux_heat_watts` | W | Auxiliary heat power consumption | 1150-1151 |
-| `pump_watts` | W | Loop pump power consumption | 1164-1165 |
-| `waterflow` | GPM | Loop water flow rate | 1117 |
-| `loop_pressure` | psi | Loop pressure | 1119 |
-| `dhw_temperature` | °F | Domestic hot water temperature | 1114 |
-| `dhw_setpoint` | °F | DHW setpoint | 401 |
-| `fault_code` | - | Current/last fault code | 25 |
-| `fp1_temperature` | °F | Freeze protection sensor 1 (liquid line) | 19 |
-| `fp2_temperature` | °F | Freeze protection sensor 2 (air coil) | 20 |
-| `anti_short_cycle` | s | Anti-short-cycle countdown | 6 |
-| `discharge_temperature` | °F | Compressor discharge temperature | 3325 |
-| `suction_temperature` | °F | Compressor suction temperature | 3903 |
-| `vs_drive_temperature` | °F | VS drive board temperature | 3327 |
-| `vs_inverter_temperature` | °F | VS inverter temperature | 3522 |
-| `blower_speed` | - | Current ECM blower speed | 344 |
-| `pump_speed` | % | Current VS pump speed | 325 |
-| `heating_liquid_line_temperature` | °F | Heating mode liquid line temp | 1109 |
-| `saturated_condenser_temperature` | °F | Saturated condenser temperature | 1134 |
-| `subcool_temperature` | °F | Subcooling temperature | 1135/1136 |
-| `heat_of_extraction` | BTU/h | Heat extracted from loop | 1154-1155 |
-| `heat_of_rejection` | BTU/h | Heat rejected to loop | 1156-1157 |
-| `cop` | - | Coefficient of Performance (heating or cooling) | Derived |
-| `water_delta_t` | °F | Water temperature delta (leaving - entering) | Derived |
-| `approach_temperature` | °F | Heat exchanger approach temperature | Derived |
-| `vs_fan_speed` | % | VS drive fan speed (5/7-Series) | 3524 |
-| `vs_ambient_temperature` | °F | VS compressor ambient temperature (5/7-Series) | 3326 |
-| `vs_compressor_watts` | W | VS drive compressor power (5/7-Series) | 3422-3423 |
-| `saturated_evaporator_discharge_temperature` | °F | Saturated evaporator discharge temp | 3905 |
-| `aux_heat_stage` | - | Aux heat stage (0=off, 1=EH1, 2=EH1+EH2) | Derived (reg 30) |
-| `blower_only_speed` | - | Blower-only ECM speed setting | 340 |
-| `lo_compressor_speed` | - | Low compressor ECM speed setting | 341 |
-| `hi_compressor_speed` | - | High compressor ECM speed setting | 342 |
-| `aux_heat_speed` | - | Aux heat ECM speed setting | 347 |
-| `pump_min_speed` | % | VS pump minimum speed setting | 321 |
-| `pump_max_speed` | % | VS pump maximum speed setting | 322 |
-| `humidification_target` | % | Humidification target | 12310/31110 |
-| `dehumidification_target` | % | Dehumidification target | 12310/31110 |
-| `line_voltage_setting` | V | Configured line voltage setting | 112 |
-
-#### Derived Sensor Details
-
-**COP (Coefficient of Performance)** — Computed on-device each cycle:
-- **Heating mode**: `Heat_of_Rejection / (Total_Watts * 3.412)`
-- **Cooling mode**: `Heat_of_Extraction / (Total_Watts * 3.412)`
-- Returns `0.0` when the compressor is off. Values are clamped to the 0.5–15.0 range; outliers are rejected as sensor noise.
-
-**Subcool Temperature** — Automatically selects the correct register based on the current operating mode: register 1135 during heating, register 1136 during cooling (based on reversing valve state).
-
-**Approach Temperature** — Heat exchanger approach:
-- **Heating mode**: `Leaving Water - Saturated Condenser`
-- **Cooling mode**: `Saturated Condenser - Entering Water`
-
-### Binary Sensors
-
-| Sensor | Description | Source |
+| Category | Count | Examples |
 | :--- | :--- | :--- |
-| `compressor_running` | Compressor is running | Register 30 (CC/CC2 bits) |
-| `blower_running` | Blower is running | Register 30 (BLOWER bit) |
-| `aux_heat_running` | Auxiliary heat is active | Register 30 (EH1/EH2 bits) |
-| `dhw_running` | DHW mode is active | Register 1104 (DHW bit) |
-| `loop_pump_running` | Loop pump is running | Register 1104 (LOOP_PUMP bit) |
-| `lockout` | System is in lockout | Register 25 (bit 15) |
-| `low_pressure_switch` | LPS has tripped | Register 31 (bit 7) |
-| `high_pressure_switch` | HPS has tripped | Register 31 (bit 8) |
-| `emergency_shutdown` | Emergency shutdown active | Register 31 (bit 6) |
-| `load_shed` | Load shed/demand response active | Register 31 (bit 9) |
-| `humidifier_running` | Humidifier is running | Register 30 (ACCESSORY bit) |
-| `dehumidifier_running` | Dehumidifier/active dehum | Register 362 / 1104 |
+| **Sensors** | ~55 | Temperatures, pressures, power, speeds, COP, water flow |
+| **Binary Sensors** | 12 | Compressor, blower, aux heat, lockout, LPS/HPS |
+| **Text Sensors** | 14 | Operating mode, fault description, model/serial, VS drive status |
+| **Numbers** | 11 | DHW setpoint, ECM speeds, pump speeds, fan timing, humidity targets |
+| **Switches** | 1 | DHW enable/disable |
+| **Buttons** | 1 | Clear fault history |
+| **Climate** | 1-7 | Main thermostat + up to 6 IZ2 zones |
 
-### Text Sensors
-
-| Sensor | Description |
-| :--- | :--- |
-| `current_mode` | Current operating mode (see values below) |
-| `hvac_mode` | Configured HVAC mode (Off, Auto, Cool, Heat, E-Heat) |
-| `fan_mode` | Configured fan mode (Auto, Continuous, Intermittent) |
-| `fault_description` | Human-readable fault description |
-| `fault_history` | Up to 10 past faults with descriptions (semicolon-separated) |
-| `model_number` | Heat pump model number (registers 92-103) |
-| `serial_number` | Heat pump serial number (registers 105-109) |
-| `vs_derate` | VS Drive derate status flags (5/7-Series) |
-| `vs_safe_mode` | VS Drive safe mode status flags (5/7-Series) |
-| `vs_alarm` | VS Drive alarm codes (5/7-Series) |
-| `axb_inputs` | AXB DIP switch input states |
-| `humidifier_mode` | Humidifier mode (Auto or Manual) |
-| `dehumidifier_mode` | Dehumidifier mode (Auto or Manual) |
-| `pump_type` | Detected pump type (e.g., "VS Pump", "FC1", "Open Loop") |
-
-#### `current_mode` Values
-
-The `current_mode` text sensor reports one of the following values:
-
-| Value | Description |
-| :--- | :--- |
-| `Standby` | System idle, no demand |
-| `Heating` | Compressor running in heating mode |
-| `Cooling` | Compressor running in cooling mode |
-| `Heating + Aux` | Heating with auxiliary electric heat |
-| `Emergency Heat` | Electric heat only, compressor locked out |
-| `Dehumidify` | Active dehumidification |
-| `Fan Only` | Blower running, no compressor |
-| `Waiting` | Anti-short-cycle countdown active |
-| `Lockout` | System locked out due to fault |
-
-### Controls (Numbers)
-
-| Control | Range | Description |
-| :--- | :--- | :--- |
-| `dhw_setpoint` | 100-140°F | DHW temperature setpoint |
-| `blower_only_speed` | 1-12 | ECM blower speed for fan-only mode |
-| `lo_compressor_speed` | 1-12 | ECM blower speed for low compressor |
-| `hi_compressor_speed` | 1-12 | ECM blower speed for high compressor |
-| `aux_heat_speed` | 1-12 | ECM blower speed for aux heat |
-| `pump_min_speed` | 1-100% | VS pump minimum speed |
-| `pump_max_speed` | 1-100% | VS pump maximum speed |
-| `fan_intermittent_on` | 0-25 min | Fan on time (intermittent mode) |
-| `fan_intermittent_off` | 5-40 min | Fan off time (intermittent mode) |
-| `humidification_target` | 15-50% | Humidification setpoint |
-| `dehumidification_target` | 35-65% | Dehumidification setpoint |
-
-### Switches
-
-| Switch | Description |
-| :--- | :--- |
-| `dhw_enabled` | Enable/disable domestic hot water |
-
-### Buttons
-
-| Button | Description |
-| :--- | :--- |
-| `clear_fault_history` | Clear the fault history log |
-
-## Protocol Details
-
-This component implements a custom Modbus client. Standard Modbus libraries cannot read the Aurora registers efficiently because WaterFurnace uses proprietary function codes:
-
-| Function Code | Name | Description |
-| :--- | :--- | :--- |
-| `0x03` | Read Holding Registers | Standard Modbus read (used for setup) |
-| `0x06` | Write Single Register | Standard Modbus write |
-| `0x41` ('A') | Read Ranges | Read multiple register ranges in one request |
-| `0x42` ('B') | Read Specific | Read arbitrary non-sequential registers |
-
-The custom function codes allow fetching 50+ data points in just a few transactions, keeping the bus responsive and reducing latency.
-
-### Communication Settings
-
-- **Baud Rate**: 19200
-- **Parity**: Even
-- **Stop Bits**: 1
-- **Default Address**: 1
-
-### Read Retry Logic
-
-The component implements automatic retry logic (default 2 retries) for communication failures, matching the behavior of the Ruby gem. This can be configured via the `read_retries` parameter.
-
-### Adaptive Polling
-
-To reduce RS-485 bus load and improve responsiveness, the component uses three-tier adaptive polling. The `update_interval` setting controls the base (fast) tier; the other tiers are multiples of it.
-
-| Tier | Default Interval | Data Polled |
-| :--- | :--- | :--- |
-| **Fast** | Every cycle (~5s) | Temperatures, compressor speed, power consumption, VS drive telemetry, water flow, blower/pump speed, IZ2 zone data |
-| **Medium** | Every 6th cycle (~30s) | Setpoints, mode config, DHW settings, line voltage, ECM/pump speed settings, VS drive status flags (derate/safe/alarm), humidistat settings, AXB inputs, loop pressure |
-| **Slow** | Every 60th cycle (~5 min) | Fault history (registers 601-699) |
-
-Fast-tier data includes everything that changes in real-time during operation. Medium-tier data only changes on user action or fault events. Slow-tier data is historical and rarely changes.
-
-## Fault Codes
-
-The component decodes fault codes into human-readable descriptions:
-
-| Code | Description |
-| :--- | :--- |
-| 1 | Input Error |
-| 2 | High Pressure |
-| 3 | Low Pressure |
-| 4 | Freeze Detect FP2 |
-| 5 | Freeze Detect FP1 |
-| 7 | Condensate Overflow |
-| 8 | Over/Under Voltage |
-| 9 | AirF/RPM |
-| 10 | Compressor Monitor |
-| 11 | FP1/2 Sensor Error |
-| 12 | RefPerfrm Error |
-| 13 | Non-Critical AXB Sensor Error |
-| 14 | Critical AXB Sensor Error |
-| 15 | Hot Water Limit |
-| 16 | VS Pump Error |
-| 17 | Communicating Thermostat Error |
-| 18 | Non-Critical Communications Error |
-| 19 | Critical Communications Error |
-| 21 | Low Loop Pressure |
-| 22 | Communicating ECM Error |
-| 41-61 | VS Drive Faults |
-| 71-74 | EEV2 Faults |
-| 99 | System Reset |
-
-## Key Register Map
-
-For reference, here are the key registers used by this component:
-
-### System Registers
-| Register | Description |
-| :--- | :--- |
-| 2 | ABC Version |
-| 6 | Anti-Short-Cycle Countdown |
-| 16 | Line Voltage |
-| 19 | FP1 Temperature (Liquid Line) |
-| 20 | FP2 Temperature (Air Coil) |
-| 25 | Last Fault (bit 15 = lockout) |
-| 30 | System Outputs (compressor, blower, aux, etc.) |
-| 31 | System Status (LPS, HPS, emergency, load shed) |
-| 88-91 | ABC Program Name (VS detection) |
-| 92-103 | Model Number (12 registers, ASCII) |
-| 105-109 | Serial Number (5 registers, ASCII) |
-| 112 | Line Voltage Setting |
-| 321-322 | VS Pump Min/Max Speed Settings |
-| 340-342, 347 | ECM Blower Speed Settings |
-| 404 | Blower Type (PSC/ECM/5-Speed) |
-| 412 | Energy Monitor Level |
-| 413 | Pump Type |
-| 601-699 | Fault History (up to 10 faults) |
-| 801 | AWL Thermostat Version |
-| 807 | AWL AXB Version |
-| 813 | AWL IZ2 Version |
-
-### Thermostat Registers
-| Register | Description |
-| :--- | :--- |
-| 502 | Ambient Temperature |
-| 567 | Entering Air Temperature |
-| 740 | Entering Air Temperature (AWL) |
-| 741 | Relative Humidity |
-| 742 | Outdoor Temperature |
-| 745 | Heating Setpoint |
-| 746 | Cooling Setpoint |
-| 900 | Leaving Air Temperature |
-
-### AXB Registers (Accessory Board)
-| Register | Description |
-| :--- | :--- |
-| 400 | DHW Enabled |
-| 401 | DHW Setpoint |
-| 806 | AXB Installed Status |
-| 1103 | AXB DIP Switch Settings |
-| 1104 | AXB Outputs (DHW, loop pump, etc.) |
-| 1109 | Heating Liquid Line Temperature |
-| 1110 | Leaving Water Temperature |
-| 1111 | Entering Water Temperature |
-| 1114 | DHW Temperature |
-| 1115 | Discharge Pressure |
-| 1116 | Suction Pressure |
-| 1117 | Water Flow |
-| 1119 | Loop Pressure |
-
-### VS Drive Registers (5/7-Series)
-| Register | Description |
-| :--- | :--- |
-| 3000 | Compressor Desired Speed |
-| 3001 | Compressor Actual Speed |
-| 3322 | Discharge Pressure |
-| 3323 | Suction Pressure |
-| 3325 | Discharge Temperature |
-| 3326 | Compressor Ambient Temperature |
-| 3327 | Drive Temperature |
-| 3422-3423 | VS Compressor Power (32-bit) |
-| 3522 | Inverter Temperature |
-| 3524 | Fan Speed |
-| 3808 | EEV Open Percentage |
-| 3903 | Suction Temperature |
-| 3905 | Saturated Evaporator Discharge Temp |
-| 3906 | Superheat Temperature |
-
-### IZ2 Zone Registers
-| Base Register | Offset | Description |
-| :--- | :--- | :--- |
-| 31007 | +3/zone | Zone Ambient Temperature |
-| 31008 | +3/zone | Zone Config 1 (fan, cooling SP) |
-| 31009 | +3/zone | Zone Config 2 (mode, heating SP) |
-| 31200 | +3/zone | Zone Config 3 (priority, size) |
-| 21202 | +9/zone | Zone Mode Write |
-| 21203 | +9/zone | Zone Heating SP Write |
-| 21204 | +9/zone | Zone Cooling SP Write |
+For the complete list of every entity with registers and descriptions, see **[Exposed Entities](docs/ENTITIES.md)**.
 
 ## Troubleshooting
 
@@ -544,6 +217,28 @@ For reference, here are the key registers used by this component:
 ### ESP8266: No Communication or Watchdog Resets
 - Set `logger: baud_rate: 0` — the ESP8266 has only one UART and the logger will conflict with RS-485 communication
 - Ensure adequate power supply — the ESP8266 can be sensitive to voltage drops during WiFi + UART activity
+
+## Why Not ESPHome's Built-in Modbus Controller?
+
+ESPHome ships with a [`modbus_controller`](https://esphome.io/components/modbus_controller) component that works great for standard Modbus devices. This component doesn't use it because the WaterFurnace Aurora protocol isn't standard Modbus:
+
+- **Proprietary function codes** — The Aurora ABC board supports custom function codes `0x42` (read a list of arbitrary non-contiguous registers) and `0x41` (read multiple contiguous ranges), neither of which `modbus_controller` supports. Function `0x42` is the primary read method: it fetches 50-100 scattered registers in a single transaction.
+
+- **Bus efficiency** — Without `0x42`, you'd need 15-30+ individual `0x03` reads per poll cycle to cover addresses spanning from `6` to `31460`. At 19200 baud that would overwhelm the ABC board and blow past its 100-register-per-operation limit.
+
+- **Split read/write addresses** — The Aurora uses different registers for reading vs. writing the same parameter (e.g., heating setpoint is read from register `745` but written to `12619`). The `modbus_controller` Number/Select/Switch components assume a single address for both directions.
+
+- **Three-tier adaptive polling** — The component polls fast-changing data every 5 s, configuration data every 30 s, and fault history every 5 min. `modbus_controller` offers only a single `update_interval` per controller.
+
+In short, the Aurora's proprietary extensions make a custom Modbus stack the only practical approach. For protocol details, see **[Protocol & Register Reference](docs/REGISTERS.md)**.
+
+## Further Reading
+
+| Document | Description |
+| :--- | :--- |
+| **[Hardware Setup & Wiring](docs/HARDWARE.md)** | RS485 module selection, wiring diagrams, ESP8266 notes |
+| **[Exposed Entities](docs/ENTITIES.md)** | Complete list of all sensors, controls, and climate entities |
+| **[Protocol & Register Reference](docs/REGISTERS.md)** | Modbus protocol details, adaptive polling, register map, fault codes |
 
 ## Community Projects
 
