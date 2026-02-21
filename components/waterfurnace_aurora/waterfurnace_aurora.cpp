@@ -9,115 +9,6 @@ namespace waterfurnace_aurora {
 
 static const char *const TAG = "waterfurnace_aurora";
 
-// WaterFurnace custom function codes (from lib/aurora/modbus/slave.rb)
-static const uint8_t FUNC_READ_RANGES = 0x41;      // 'A' - read multiple ranges
-static const uint8_t FUNC_READ_SPECIFIC = 0x42;   // 'B' - read specific addresses
-static const uint8_t FUNC_READ_HOLDING = 0x03;    // Standard read holding registers
-static const uint8_t FUNC_WRITE_SINGLE = 0x06;    // Standard write single register
-
-// REAL get_fault_description - 67 case switch statement
-const char* WaterFurnaceAurora::get_fault_description(uint8_t code) {
-  switch (code) {
-    case 0: return "No Fault";
-    case 1: return "Input Error";
-    case 2: return "High Pressure";
-    case 3: return "Low Pressure";
-    case 4: return "Freeze Detect FP2";
-    case 5: return "Freeze Detect FP1";
-    case 7: return "Condensate Overflow";
-    case 8: return "Over/Under Voltage";
-    case 9: return "AirF/RPM";
-    case 10: return "Compressor Monitor";
-    case 11: return "FP1/2 Sensor Error";
-    case 12: return "RefPerfrm Error";
-    case 13: return "Non-Critical AXB Sensor Error";
-    case 14: return "Critical AXB Sensor Error";
-    case 15: return "Hot Water Limit";
-    case 16: return "VS Pump Error";
-    case 17: return "Communicating Thermostat Error";
-    case 18: return "Non-Critical Communications Error";
-    case 19: return "Critical Communications Error";
-    case 21: return "Low Loop Pressure";
-    case 22: return "Communicating ECM Error";
-    case 23: return "HA Alarm 1";
-    case 24: return "HA Alarm 2";
-    case 25: return "AxbEev Error";
-    case 41: return "High Drive Temp";
-    case 42: return "High Discharge Temp";
-    case 43: return "Low Suction Pressure";
-    case 44: return "Low Condensing Pressure";
-    case 45: return "High Condensing Pressure";
-    case 46: return "Output Power Limit";
-    case 47: return "EEV ID Comm Error";
-    case 48: return "EEV OD Comm Error";
-    case 49: return "Cabinet Temperature Sensor";
-    case 51: return "Discharge Temp Sensor";
-    case 52: return "Suction Pressure Sensor";
-    case 53: return "Condensing Pressure Sensor";
-    case 54: return "Low Supply Voltage";
-    case 55: return "Out of Envelope";
-    case 56: return "Drive Over Current";
-    case 57: return "Drive Over/Under Voltage";
-    case 58: return "High Drive Temp";
-    case 59: return "Internal Drive Error";
-    case 61: return "Multiple Safe Mode";
-    case 71: return "Loss of Charge";
-    case 72: return "Suction Temperature Sensor";
-    case 73: return "Leaving Air Temperature Sensor";
-    case 74: return "Maximum Operating Pressure";
-    case 99: return "System Reset";
-    default: return "Unknown Fault";
-  }
-}
-
-const char* WaterFurnaceAurora::get_hvac_mode_string(HeatingMode mode) {
-  switch (mode) {
-    case HeatingMode::OFF: return "Off";
-    case HeatingMode::AUTO: return "Auto";
-    case HeatingMode::COOL: return "Cool";
-    case HeatingMode::HEAT: return "Heat";
-    case HeatingMode::EHEAT: return "Emergency Heat";
-    default: return "Unknown";
-  }
-}
-
-const char* WaterFurnaceAurora::get_fan_mode_string(FanMode mode) {
-  switch (mode) {
-    case FanMode::AUTO: return "Auto";
-    case FanMode::CONTINUOUS: return "Continuous";
-    case FanMode::INTERMITTENT: return "Intermittent";
-    default: return "Unknown";
-  }
-}
-
-const char* WaterFurnaceAurora::get_pump_type_string(PumpType type) {
-  switch (type) {
-    case PumpType::OPEN_LOOP: return "Open Loop";
-    case PumpType::FC1: return "FC1";
-    case PumpType::FC2: return "FC2";
-    case PumpType::VS_PUMP: return "VS Pump";
-    case PumpType::VS_PUMP_26_99: return "VS Pump + 26-99";
-    case PumpType::VS_PUMP_UPS26_99: return "VS Pump + UPS26-99";
-    case PumpType::FC1_GLNP: return "FC1_GLNP";
-    case PumpType::FC2_GLNP: return "FC2_GLNP";
-    default: return "Other";
-  }
-}
-
-// IZ2 blower desired speed conversion (from registers.rb iz2_fan_desired method)
-// Maps IZ2 speed codes to percentage: 1=25%, 2=40%, 3=55%, 4=70%, 5=85%, 6=100%
-uint8_t WaterFurnaceAurora::iz2_fan_desired(uint16_t value) {
-  switch (value) {
-    case 1: return 25;
-    case 2: return 40;
-    case 3: return 55;
-    case 4: return 70;
-    case 5: return 85;
-    case 6: return 100;
-    default: return static_cast<uint8_t>(value);
-  }
-}
-
 std::string WaterFurnaceAurora::get_current_mode_string() {
   if (this->system_outputs_ & OUTPUT_LOCKOUT) {
     return "Lockout";
@@ -252,7 +143,6 @@ void WaterFurnaceAurora::detect_hardware() {
   if (!this->axb_override_) {
     const uint16_t *val = reg_find(result, registers::AXB_INSTALLED);
     if (val) {
-      // Per Ruby gem: COMPONENT_STATUS: 1=active, 2=added, 3=removed, 0xffff=missing
       this->has_axb_ = (*val != 3 && *val != 0xFFFF);
       ESP_LOGD(TAG, "AXB register 806 = %d -> %s", *val, this->has_axb_ ? "present" : "absent");
     } else {
@@ -271,7 +161,7 @@ void WaterFurnaceAurora::detect_hardware() {
     }
   }
   
-  // Read IZ2 zone count (register 483) - even if has_iz2 was overridden, auto-detect zone count
+  // Read IZ2 zone count (register 483)
   if (!this->iz2_zones_override_ && this->has_iz2_) {
     const uint16_t *val = reg_find(result, registers::IZ2_NUM_ZONES);
     if (val) {
@@ -324,7 +214,7 @@ void WaterFurnaceAurora::detect_hardware() {
              this->energy_monitor_level_ == 0 ? "None" : this->energy_monitor_level_ == 1 ? "Compressor Monitor" : "Energy Monitor");
   }
   
-  // Detect pump type (register 413, from registers.rb PUMP_TYPE)
+  // Detect pump type (register 413)
   const uint16_t *val_pump = reg_find(result, registers::PUMP_TYPE);
   if (val_pump) {
     uint16_t pval = *val_pump;
@@ -337,8 +227,6 @@ void WaterFurnaceAurora::detect_hardware() {
   }
   
   // Detect VS Drive via ABC Program (register 88, 4 registers = 8 chars ASCII)
-  // Ruby gem: program names containing "VSP" or "SPLVS" indicate VS drive
-  // e.g. "ABCVSP", "ABCVSPR", "ABCSPLVS"
   if (!this->vs_drive_override_) {
     std::vector<uint16_t> prog_regs;
     for (uint16_t r = 88; r <= 91; r++) {
@@ -350,17 +238,13 @@ void WaterFurnaceAurora::detect_hardware() {
     if (!prog_regs.empty()) {
       std::string program = registers_to_string(prog_regs);
       ESP_LOGD(TAG, "ABC Program: '%s'", program.c_str());
-      // Check if program name indicates VS drive
       this->has_vs_drive_ = (program.find("VSP") != std::string::npos || 
                               program.find("SPLVS") != std::string::npos);
       ESP_LOGD(TAG, "VS Drive detection from program '%s' -> %s", 
                program.c_str(), this->has_vs_drive_ ? "present" : "absent");
     }
     
-    // Fallback: if program name didn't match, try reading VS drive-specific 
-    // registers that only have meaningful values when a VS drive is present.
-    // Register 3322 (VS discharge pressure) and 3325 (VS discharge temp) should 
-    // have non-zero values when a VS drive is communicating.
+    // Fallback: probe VS drive-specific registers
     if (!this->has_vs_drive_) {
       std::vector<uint16_t> vs_probe = {3001, 3322, 3325};
       RegisterMap vs_result;
@@ -368,7 +252,6 @@ void WaterFurnaceAurora::detect_hardware() {
         const uint16_t *v_speed = reg_find(vs_result, 3001);
         const uint16_t *v_press = reg_find(vs_result, 3322);
         const uint16_t *v_temp = reg_find(vs_result, 3325);
-        // Consider VS drive present if we got any non-zero VS-specific values
         bool has_data = false;
         if (v_press && *v_press != 0) has_data = true;
         if (v_temp && *v_temp != 0) has_data = true;
@@ -470,7 +353,6 @@ bool WaterFurnaceAurora::validate_zone_number(uint8_t zone_number) const {
   return true;
 }
 
-// REAL refresh_all_data - using class member to avoid stack overflow
 // Adaptive polling tiers to reduce RS-485 bus contention:
 //   Tier 0 (every cycle, ~5s): System outputs, temps, speeds, watts, pressures
 //   Tier 1 (every 6th cycle, ~30s): Setpoints, mode config, humidistat, DHW settings
@@ -479,109 +361,106 @@ void WaterFurnaceAurora::refresh_all_data() {
   bool medium_poll = (this->poll_tier_counter_ % 6) == 0;
   bool slow_poll = (this->poll_tier_counter_ % 60) == 0;
   
-  // Use class member instead of local variable to avoid stack overflow
-  // Clear and reuse the pre-allocated vector
   this->addresses_to_read_.clear();
   if (this->addresses_to_read_.capacity() < 100) {
     this->addresses_to_read_.reserve(100);
   }
   
   // === TIER 0: Fast registers — every cycle (~5s) ===
-  // These change in real-time during heat pump operation
   
   // Core system state
-  this->addresses_to_read_.push_back(registers::COMPRESSOR_ANTI_SHORT_CYCLE);  // 6
-  this->addresses_to_read_.push_back(registers::LAST_FAULT);                    // 25
-  this->addresses_to_read_.push_back(registers::SYSTEM_OUTPUTS);                // 30
-  this->addresses_to_read_.push_back(registers::SYSTEM_STATUS);                 // 31
+  this->addresses_to_read_.push_back(registers::COMPRESSOR_ANTI_SHORT_CYCLE);
+  this->addresses_to_read_.push_back(registers::LAST_FAULT);
+  this->addresses_to_read_.push_back(registers::SYSTEM_OUTPUTS);
+  this->addresses_to_read_.push_back(registers::SYSTEM_STATUS);
   
-  // Temperatures (change continuously during operation)
-  this->addresses_to_read_.push_back(registers::FP1_TEMP);                      // 19
-  this->addresses_to_read_.push_back(registers::FP2_TEMP);                      // 20
-  this->addresses_to_read_.push_back(registers::AMBIENT_TEMP);                  // 502
+  // Temperatures
+  this->addresses_to_read_.push_back(registers::FP1_TEMP);
+  this->addresses_to_read_.push_back(registers::FP2_TEMP);
+  this->addresses_to_read_.push_back(registers::AMBIENT_TEMP);
   
   if (this->awl_axb()) {
-    this->addresses_to_read_.push_back(registers::ENTERING_AIR_AWL);            // 740
-    this->addresses_to_read_.push_back(registers::LEAVING_AIR);                 // 900
+    this->addresses_to_read_.push_back(registers::ENTERING_AIR_AWL);
+    this->addresses_to_read_.push_back(registers::LEAVING_AIR);
   } else {
-    this->addresses_to_read_.push_back(registers::ENTERING_AIR);                // 567
+    this->addresses_to_read_.push_back(registers::ENTERING_AIR);
   }
   if (this->awl_communicating()) {
-    this->addresses_to_read_.push_back(registers::RELATIVE_HUMIDITY);           // 741
-    this->addresses_to_read_.push_back(registers::OUTDOOR_TEMP);                // 742
+    this->addresses_to_read_.push_back(registers::RELATIVE_HUMIDITY);
+    this->addresses_to_read_.push_back(registers::OUTDOOR_TEMP);
   }
   if (this->has_axb_) {
-    this->addresses_to_read_.push_back(registers::AXB_OUTPUTS);                 // 1104
-    this->addresses_to_read_.push_back(registers::LEAVING_WATER);               // 1110
-    this->addresses_to_read_.push_back(registers::ENTERING_WATER);              // 1111
-    this->addresses_to_read_.push_back(registers::WATERFLOW);                   // 1117
+    this->addresses_to_read_.push_back(registers::AXB_OUTPUTS);
+    this->addresses_to_read_.push_back(registers::LEAVING_WATER);
+    this->addresses_to_read_.push_back(registers::ENTERING_WATER);
+    this->addresses_to_read_.push_back(registers::WATERFLOW);
   }
   
-  // Refrigeration monitoring (changes with compressor operation)
+  // Refrigeration monitoring
   if (this->refrigeration_monitoring()) {
-    this->addresses_to_read_.push_back(registers::HEATING_LIQUID_LINE_TEMP);    // 1109
-    this->addresses_to_read_.push_back(registers::SATURATED_CONDENSER_TEMP);    // 1134
-    this->addresses_to_read_.push_back(registers::SUBCOOL_HEATING);             // 1135
-    this->addresses_to_read_.push_back(registers::SUBCOOL_COOLING);             // 1136
-    this->addresses_to_read_.push_back(registers::HEAT_OF_EXTRACTION);          // 1154
-    this->addresses_to_read_.push_back(registers::HEAT_OF_EXTRACTION + 1);      // 1155
-    this->addresses_to_read_.push_back(registers::HEAT_OF_REJECTION);           // 1156
-    this->addresses_to_read_.push_back(registers::HEAT_OF_REJECTION + 1);       // 1157
+    this->addresses_to_read_.push_back(registers::HEATING_LIQUID_LINE_TEMP);
+    this->addresses_to_read_.push_back(registers::SATURATED_CONDENSER_TEMP);
+    this->addresses_to_read_.push_back(registers::SUBCOOL_HEATING);
+    this->addresses_to_read_.push_back(registers::SUBCOOL_COOLING);
+    this->addresses_to_read_.push_back(registers::HEAT_OF_EXTRACTION);
+    this->addresses_to_read_.push_back(registers::HEAT_OF_EXTRACTION + 1);
+    this->addresses_to_read_.push_back(registers::HEAT_OF_REJECTION);
+    this->addresses_to_read_.push_back(registers::HEAT_OF_REJECTION + 1);
   }
   
-  // Energy monitoring (changes with load)
+  // Energy monitoring
   if (this->energy_monitoring()) {
-    this->addresses_to_read_.push_back(registers::LINE_VOLTAGE);                // 16
-    this->addresses_to_read_.push_back(registers::COMPRESSOR_WATTS);            // 1146
-    this->addresses_to_read_.push_back(registers::COMPRESSOR_WATTS + 1);        // 1147
-    this->addresses_to_read_.push_back(registers::BLOWER_WATTS);                // 1148
-    this->addresses_to_read_.push_back(registers::BLOWER_WATTS + 1);            // 1149
-    this->addresses_to_read_.push_back(registers::AUX_WATTS);                   // 1150
-    this->addresses_to_read_.push_back(registers::AUX_WATTS + 1);              // 1151
-    this->addresses_to_read_.push_back(registers::TOTAL_WATTS);                 // 1152
-    this->addresses_to_read_.push_back(registers::TOTAL_WATTS + 1);             // 1153
-    this->addresses_to_read_.push_back(registers::PUMP_WATTS);                  // 1164
-    this->addresses_to_read_.push_back(registers::PUMP_WATTS + 1);              // 1165
+    this->addresses_to_read_.push_back(registers::LINE_VOLTAGE);
+    this->addresses_to_read_.push_back(registers::COMPRESSOR_WATTS);
+    this->addresses_to_read_.push_back(registers::COMPRESSOR_WATTS + 1);
+    this->addresses_to_read_.push_back(registers::BLOWER_WATTS);
+    this->addresses_to_read_.push_back(registers::BLOWER_WATTS + 1);
+    this->addresses_to_read_.push_back(registers::AUX_WATTS);
+    this->addresses_to_read_.push_back(registers::AUX_WATTS + 1);
+    this->addresses_to_read_.push_back(registers::TOTAL_WATTS);
+    this->addresses_to_read_.push_back(registers::TOTAL_WATTS + 1);
+    this->addresses_to_read_.push_back(registers::PUMP_WATTS);
+    this->addresses_to_read_.push_back(registers::PUMP_WATTS + 1);
   }
   
-  // Blower speed (changes with operating state)
+  // Blower speed
   if (this->is_ecm_blower()) {
-    this->addresses_to_read_.push_back(registers::ECM_SPEED);                   // 344
+    this->addresses_to_read_.push_back(registers::ECM_SPEED);
   } else if (this->blower_type_ == BlowerType::FIVE_SPEED) {
-    this->addresses_to_read_.push_back(registers::ECM_SPEED);                   // 344
+    this->addresses_to_read_.push_back(registers::ECM_SPEED);
   }
   
   // VS Drive real-time telemetry
   if (this->has_vs_drive_) {
-    this->addresses_to_read_.push_back(registers::ACTIVE_DEHUMIDIFY);            // 362
-    this->addresses_to_read_.push_back(registers::COMPRESSOR_SPEED_DESIRED);    // 3000
-    this->addresses_to_read_.push_back(registers::COMPRESSOR_SPEED_ACTUAL);     // 3001
-    this->addresses_to_read_.push_back(registers::VS_DISCHARGE_PRESSURE);       // 3322
-    this->addresses_to_read_.push_back(registers::VS_SUCTION_PRESSURE);         // 3323
-    this->addresses_to_read_.push_back(registers::VS_DISCHARGE_TEMP);           // 3325
-    this->addresses_to_read_.push_back(registers::VS_AMBIENT_TEMP);             // 3326
-    this->addresses_to_read_.push_back(registers::VS_DRIVE_TEMP);               // 3327
-    this->addresses_to_read_.push_back(registers::VS_INVERTER_TEMP);            // 3522
-    this->addresses_to_read_.push_back(registers::VS_COMPRESSOR_WATTS);          // 3422
-    this->addresses_to_read_.push_back(registers::VS_COMPRESSOR_WATTS + 1);     // 3423
-    this->addresses_to_read_.push_back(registers::VS_FAN_SPEED);                // 3524
-    this->addresses_to_read_.push_back(registers::VS_EEV_OPEN);                 // 3808
-    this->addresses_to_read_.push_back(registers::VS_SUCTION_TEMP);             // 3903
-    this->addresses_to_read_.push_back(registers::VS_SAT_EVAP_DISCHARGE_TEMP);  // 3905
-    this->addresses_to_read_.push_back(registers::VS_SUPERHEAT_TEMP);           // 3906
+    this->addresses_to_read_.push_back(registers::ACTIVE_DEHUMIDIFY);
+    this->addresses_to_read_.push_back(registers::COMPRESSOR_SPEED_DESIRED);
+    this->addresses_to_read_.push_back(registers::COMPRESSOR_SPEED_ACTUAL);
+    this->addresses_to_read_.push_back(registers::VS_DISCHARGE_PRESSURE);
+    this->addresses_to_read_.push_back(registers::VS_SUCTION_PRESSURE);
+    this->addresses_to_read_.push_back(registers::VS_DISCHARGE_TEMP);
+    this->addresses_to_read_.push_back(registers::VS_AMBIENT_TEMP);
+    this->addresses_to_read_.push_back(registers::VS_DRIVE_TEMP);
+    this->addresses_to_read_.push_back(registers::VS_INVERTER_TEMP);
+    this->addresses_to_read_.push_back(registers::VS_COMPRESSOR_WATTS);
+    this->addresses_to_read_.push_back(registers::VS_COMPRESSOR_WATTS + 1);
+    this->addresses_to_read_.push_back(registers::VS_FAN_SPEED);
+    this->addresses_to_read_.push_back(registers::VS_EEV_OPEN);
+    this->addresses_to_read_.push_back(registers::VS_SUCTION_TEMP);
+    this->addresses_to_read_.push_back(registers::VS_SAT_EVAP_DISCHARGE_TEMP);
+    this->addresses_to_read_.push_back(registers::VS_SUPERHEAT_TEMP);
   }
   
-  // VS pump speed (changes with load)
+  // VS pump speed
   if (this->has_axb_ && this->awl_axb()) {
-    this->addresses_to_read_.push_back(registers::VS_PUMP_SPEED);               // 325
+    this->addresses_to_read_.push_back(registers::VS_PUMP_SPEED);
   }
   
-  // IZ2 Zone data (zone temps and call states change in real-time)
+  // IZ2 Zone data
   if (this->has_iz2_ && this->num_iz2_zones_ > 0) {
-    this->addresses_to_read_.push_back(registers::IZ2_OUTDOOR_TEMP);            // 31003
-    this->addresses_to_read_.push_back(registers::IZ2_DEMAND);                  // 31005
-    this->addresses_to_read_.push_back(registers::IZ2_COMPRESSOR_SPEED_DESIRED); // 564
-    this->addresses_to_read_.push_back(registers::IZ2_BLOWER_SPEED_DESIRED);     // 565
+    this->addresses_to_read_.push_back(registers::IZ2_OUTDOOR_TEMP);
+    this->addresses_to_read_.push_back(registers::IZ2_DEMAND);
+    this->addresses_to_read_.push_back(registers::IZ2_COMPRESSOR_SPEED_DESIRED);
+    this->addresses_to_read_.push_back(registers::IZ2_BLOWER_SPEED_DESIRED);
     
     for (uint8_t zone = 1; zone <= this->num_iz2_zones_; zone++) {
       this->addresses_to_read_.push_back(registers::IZ2_AMBIENT_BASE + ((zone - 1) * 3));
@@ -592,60 +471,49 @@ void WaterFurnaceAurora::refresh_all_data() {
   }
   
   // === TIER 1: Medium registers — every 6th cycle (~30s) ===
-  // These only change on user action or system configuration changes
   if (medium_poll) {
     ESP_LOGD(TAG, "Medium poll cycle — reading setpoints, config, humidistat");
     
-    // Line voltage setting (system config, rarely changes)
-    this->addresses_to_read_.push_back(registers::LINE_VOLTAGE_SETTING);        // 112
+    this->addresses_to_read_.push_back(registers::LINE_VOLTAGE_SETTING);
+    this->addresses_to_read_.push_back(registers::HEATING_SETPOINT);
+    this->addresses_to_read_.push_back(registers::COOLING_SETPOINT);
+    this->addresses_to_read_.push_back(registers::FAN_CONFIG);
+    this->addresses_to_read_.push_back(registers::HEATING_MODE_READ);
     
-    // Setpoints (change on user action)
-    this->addresses_to_read_.push_back(registers::HEATING_SETPOINT);            // 745
-    this->addresses_to_read_.push_back(registers::COOLING_SETPOINT);            // 746
-    
-    // Mode configuration (change on user action)
-    this->addresses_to_read_.push_back(registers::FAN_CONFIG);                  // 12005
-    this->addresses_to_read_.push_back(registers::HEATING_MODE_READ);           // 12006
-    
-    // DHW settings (change on user action)
     if (this->has_axb_) {
-      this->addresses_to_read_.push_back(registers::DHW_ENABLED);               // 400
-      this->addresses_to_read_.push_back(registers::DHW_SETPOINT);              // 401
-      this->addresses_to_read_.push_back(registers::DHW_TEMP);                  // 1114
-      this->addresses_to_read_.push_back(registers::LOOP_PRESSURE);             // 1119
-      this->addresses_to_read_.push_back(registers::AXB_INPUTS);                // 1103
+      this->addresses_to_read_.push_back(registers::DHW_ENABLED);
+      this->addresses_to_read_.push_back(registers::DHW_SETPOINT);
+      this->addresses_to_read_.push_back(registers::DHW_TEMP);
+      this->addresses_to_read_.push_back(registers::LOOP_PRESSURE);
+      this->addresses_to_read_.push_back(registers::AXB_INPUTS);
     }
     
-    // Blower ECM speed settings (configurable, not real-time readings)
     if (this->is_ecm_blower()) {
-      this->addresses_to_read_.push_back(registers::BLOWER_ONLY_SPEED);         // 340
-      this->addresses_to_read_.push_back(registers::LO_COMPRESSOR_ECM_SPEED);   // 341
-      this->addresses_to_read_.push_back(registers::HI_COMPRESSOR_ECM_SPEED);   // 342
-      this->addresses_to_read_.push_back(registers::AUX_HEAT_ECM_SPEED);        // 347
+      this->addresses_to_read_.push_back(registers::BLOWER_ONLY_SPEED);
+      this->addresses_to_read_.push_back(registers::LO_COMPRESSOR_ECM_SPEED);
+      this->addresses_to_read_.push_back(registers::HI_COMPRESSOR_ECM_SPEED);
+      this->addresses_to_read_.push_back(registers::AUX_HEAT_ECM_SPEED);
     }
     
-    // VS Pump min/max settings
     if (this->has_axb_) {
-      this->addresses_to_read_.push_back(registers::VS_PUMP_MIN);               // 321
-      this->addresses_to_read_.push_back(registers::VS_PUMP_MAX);               // 322
+      this->addresses_to_read_.push_back(registers::VS_PUMP_MIN);
+      this->addresses_to_read_.push_back(registers::VS_PUMP_MAX);
     }
     
-    // VS Drive status flags (change on fault events, not every cycle)
     if (this->has_vs_drive_) {
-      this->addresses_to_read_.push_back(registers::VS_DERATE);                 // 214
-      this->addresses_to_read_.push_back(registers::VS_SAFE_MODE);              // 216
-      this->addresses_to_read_.push_back(registers::VS_ALARM1);                 // 217
-      this->addresses_to_read_.push_back(registers::VS_ALARM2);                 // 218
+      this->addresses_to_read_.push_back(registers::VS_DERATE);
+      this->addresses_to_read_.push_back(registers::VS_SAFE_MODE);
+      this->addresses_to_read_.push_back(registers::VS_ALARM1);
+      this->addresses_to_read_.push_back(registers::VS_ALARM2);
     }
     
-    // Humidistat — IZ2 uses different registers per Ruby gem's humidistat.rb
     if (this->has_iz2_ && this->awl_communicating()) {
-      this->addresses_to_read_.push_back(registers::IZ2_HUMIDISTAT_SETTINGS);   // 21114
-      this->addresses_to_read_.push_back(registers::IZ2_HUMIDISTAT_MODE);       // 31109
-      this->addresses_to_read_.push_back(registers::IZ2_HUMIDISTAT_TARGETS);    // 31110
+      this->addresses_to_read_.push_back(registers::IZ2_HUMIDISTAT_SETTINGS);
+      this->addresses_to_read_.push_back(registers::IZ2_HUMIDISTAT_MODE);
+      this->addresses_to_read_.push_back(registers::IZ2_HUMIDISTAT_TARGETS);
     } else {
-      this->addresses_to_read_.push_back(registers::HUMIDISTAT_SETTINGS);       // 12309
-      this->addresses_to_read_.push_back(registers::HUMIDISTAT_TARGETS);        // 12310
+      this->addresses_to_read_.push_back(registers::HUMIDISTAT_SETTINGS);
+      this->addresses_to_read_.push_back(registers::HUMIDISTAT_TARGETS);
     }
   }
   
@@ -661,9 +529,8 @@ void WaterFurnaceAurora::refresh_all_data() {
   this->status_clear_warning();
   this->status_clear_error();
   
-  // Store in cache — move instead of copy to avoid double allocation
+  // Store in cache
   this->register_cache_ = std::move(result);
-  // Use register_cache_ from here (result is moved-from)
   const RegisterMap &regs = this->register_cache_;
   
   // Parse and publish system status
@@ -699,7 +566,6 @@ void WaterFurnaceAurora::refresh_all_data() {
       if (this->aux_heat_sensor_ != nullptr) {
         this->aux_heat_sensor_->publish_state((this->system_outputs_ & (OUTPUT_EH1 | OUTPUT_EH2)) != 0);
       }
-      // Aux heat stage: 2 if EH2 set, 1 if only EH1 set, 0 if neither (matches Ruby gem aux_heat.rb)
       if (this->aux_heat_stage_sensor_ != nullptr) {
         uint8_t stage = (this->system_outputs_ & OUTPUT_EH2) ? 2
                       : (this->system_outputs_ & OUTPUT_EH1) ? 1
@@ -766,7 +632,7 @@ void WaterFurnaceAurora::refresh_all_data() {
   this->publish_text_if_changed(this->current_mode_sensor_, this->cached_mode_string_,
                                  this->get_current_mode_string());
   
-  // Temperatures — use publish helpers for simple sensor publications
+  // Temperatures
   {
     const uint16_t *val_amb = reg_find(regs, registers::AMBIENT_TEMP);
     if (val_amb) {
@@ -787,7 +653,7 @@ void WaterFurnaceAurora::refresh_all_data() {
   // Humidity
   this->publish_sensor(regs, registers::RELATIVE_HUMIDITY, this->humidity_sensor_);
   
-  // Setpoints — also update cached state for climate entities
+  // Setpoints
   {
     const uint16_t *val_hsp = reg_find(regs, registers::HEATING_SETPOINT);
     if (val_hsp) {
@@ -865,7 +731,7 @@ void WaterFurnaceAurora::refresh_all_data() {
   // Line voltage
   this->publish_sensor(regs, registers::LINE_VOLTAGE, this->line_voltage_sensor_);
   
-  // Power — 32-bit unsigned values from register pairs
+  // Power
   this->publish_sensor_uint32(regs, registers::TOTAL_WATTS, this->total_watts_sensor_);
   this->publish_sensor_uint32(regs, registers::COMPRESSOR_WATTS, this->compressor_watts_sensor_);
   this->publish_sensor_uint32(regs, registers::BLOWER_WATTS, this->blower_watts_sensor_);
@@ -888,7 +754,6 @@ void WaterFurnaceAurora::refresh_all_data() {
   this->publish_sensor(regs, registers::VS_EEV_OPEN, this->eev_open_sensor_);
   this->publish_sensor_signed_tenths(regs, registers::VS_SUPERHEAT_TEMP, this->superheat_sensor_);
   
-  // Additional VS Drive sensors
   this->publish_sensor(regs, registers::COMPRESSOR_SPEED_DESIRED, this->compressor_desired_speed_sensor_);
   this->publish_sensor_signed_tenths(regs, registers::VS_DISCHARGE_TEMP, this->discharge_temp_sensor_);
   this->publish_sensor_signed_tenths(regs, registers::VS_SUCTION_TEMP, this->suction_temp_sensor_);
@@ -899,7 +764,7 @@ void WaterFurnaceAurora::refresh_all_data() {
   this->publish_sensor_uint32(regs, registers::VS_COMPRESSOR_WATTS, this->vs_compressor_watts_sensor_);
   this->publish_sensor_signed_tenths(regs, registers::VS_SAT_EVAP_DISCHARGE_TEMP, this->sat_evap_discharge_temp_sensor_);
   
-  // VS Drive derate status (register 214)
+  // VS Drive derate status
   {
     const uint16_t *val = reg_find(regs, registers::VS_DERATE);
     if (val) {
@@ -908,7 +773,7 @@ void WaterFurnaceAurora::refresh_all_data() {
     }
   }
   
-  // VS Drive safe mode status (register 216)
+  // VS Drive safe mode status
   {
     const uint16_t *val = reg_find(regs, registers::VS_SAFE_MODE);
     if (val) {
@@ -917,7 +782,7 @@ void WaterFurnaceAurora::refresh_all_data() {
     }
   }
   
-  // VS Drive alarm status (registers 217-218)
+  // VS Drive alarm status
   {
     const uint16_t *val_a1 = reg_find(regs, registers::VS_ALARM1);
     const uint16_t *val_a2 = reg_find(regs, registers::VS_ALARM2);
@@ -961,7 +826,7 @@ void WaterFurnaceAurora::refresh_all_data() {
     }
   }
   
-  // Heat of extraction/rejection (32-bit, signed)
+  // Heat of extraction/rejection
   this->publish_sensor_int32(regs, registers::HEAT_OF_EXTRACTION, this->heat_of_extraction_sensor_);
   this->publish_sensor_int32(regs, registers::HEAT_OF_REJECTION, this->heat_of_rejection_sensor_);
   
@@ -977,17 +842,15 @@ void WaterFurnaceAurora::refresh_all_data() {
     this->dehumidifier_running_sensor_->publish_state(dehumidifier_running);
   }
   
-  // Humidistat — mode and targets (IZ2 vs non-IZ2 per Ruby gem humidistat.rb)
+  // Humidistat
   {
-    // Determine which registers to read based on IZ2 presence
     uint16_t mode_reg = (this->has_iz2_ && this->awl_communicating())
-                            ? registers::IZ2_HUMIDISTAT_MODE      // 31109
-                            : registers::HUMIDISTAT_SETTINGS;     // 12309
+                            ? registers::IZ2_HUMIDISTAT_MODE
+                            : registers::HUMIDISTAT_SETTINGS;
     uint16_t target_reg = (this->has_iz2_ && this->awl_communicating())
-                              ? registers::IZ2_HUMIDISTAT_TARGETS // 31110
-                              : registers::HUMIDISTAT_TARGETS;    // 12310
+                              ? registers::IZ2_HUMIDISTAT_TARGETS
+                              : registers::HUMIDISTAT_TARGETS;
 
-    // Parse mode bitmask: 0x8000 = auto humidification, 0x4000 = auto dehumidification
     const uint16_t *val_mode = reg_find(regs, mode_reg);
     if (val_mode) {
       this->publish_text_if_changed(this->humidifier_mode_sensor_, this->cached_humidifier_mode_,
@@ -996,7 +859,6 @@ void WaterFurnaceAurora::refresh_all_data() {
                                      (*val_mode & 0x4000) ? "Auto" : "Manual");
     }
 
-    // Parse targets: high byte = humidification, low byte = dehumidification
     const uint16_t *val_targets = reg_find(regs, target_reg);
     if (val_targets) {
       if (this->humidification_target_sensor_ != nullptr) {
@@ -1013,64 +875,41 @@ void WaterFurnaceAurora::refresh_all_data() {
     this->read_fault_history();
   }
   
-  // Parse IZ2 zone data
+  // Parse IZ2 zone data — now uses iz2_extract_* helpers from registers.h
   if (this->has_iz2_ && this->num_iz2_zones_ > 0) {
     for (uint8_t zone = 1; zone <= this->num_iz2_zones_; zone++) {
       IZ2ZoneData& zone_data = this->iz2_zones_[zone - 1];
       
-      // Ambient temperature
       const uint16_t *val_amb = reg_find(regs, registers::IZ2_AMBIENT_BASE + ((zone - 1) * 3));
       if (val_amb) {
         zone_data.ambient_temperature = to_signed_tenths(*val_amb);
       }
       
-      // Config1
       const uint16_t *val_c1 = reg_find(regs, registers::IZ2_CONFIG1_BASE + ((zone - 1) * 3));
       if (val_c1) {
         uint16_t config1 = *val_c1;
-        
-        if (config1 & 0x80) {
-          zone_data.target_fan_mode = FanMode::CONTINUOUS;
-        } else if (config1 & 0x100) {
-          zone_data.target_fan_mode = FanMode::INTERMITTENT;
-        } else {
-          zone_data.target_fan_mode = FanMode::AUTO;
-        }
-        
-        zone_data.fan_on_time = ((config1 >> 9) & 0x7) * 5;
-        zone_data.fan_off_time = (((config1 >> 12) & 0x7) + 1) * 5;
-        zone_data.cooling_setpoint = ((config1 & 0x7e) >> 1) + 36.0f;
+        zone_data.target_fan_mode = iz2_extract_fan_mode(config1);
+        zone_data.fan_on_time = iz2_extract_fan_on_time(config1);
+        zone_data.fan_off_time = iz2_extract_fan_off_time(config1);
+        zone_data.cooling_setpoint = iz2_extract_cooling_setpoint(config1);
       }
       
-      // Config2
       const uint16_t *val_c2 = reg_find(regs, registers::IZ2_CONFIG2_BASE + ((zone - 1) * 3));
       if (val_c2 && val_c1) {
         uint16_t config2 = *val_c2;
         uint16_t config1 = *val_c1;
-        
-        uint8_t call_val = (config2 >> 1) & 0x7;
-        zone_data.current_call = static_cast<ZoneCall>(call_val);
-        
-        uint8_t mode_val = (config2 >> 8) & 0x3;
-        zone_data.target_mode = static_cast<HeatingMode>(mode_val);
-        
-        zone_data.damper_open = (config2 & 0x10) != 0;
-        
-        uint8_t carry = config1 & 0x01;
-        zone_data.heating_setpoint = ((carry << 5) | ((config2 & 0xf800) >> 11)) + 36.0f;
+        zone_data.current_call = iz2_extract_current_call(config2);
+        zone_data.target_mode = iz2_extract_mode(config2);
+        zone_data.damper_open = iz2_extract_damper_open(config2);
+        zone_data.heating_setpoint = iz2_extract_heating_setpoint(config1, config2);
       }
       
-      // Config3
       const uint16_t *val_c3 = reg_find(regs, registers::IZ2_CONFIG3_BASE + ((zone - 1) * 3));
       if (val_c3) {
         uint16_t config3 = *val_c3;
-        
-        zone_data.priority = (config3 & 0x20) ? ZonePriority::ECONOMY : ZonePriority::COMFORT;
-        
-        uint8_t size_val = (config3 >> 3) & 0x3;
-        zone_data.size = static_cast<ZoneSize>(size_val);
-        
-        zone_data.normalized_size = (config3 >> 8) & 0xFF;
+        zone_data.priority = iz2_extract_priority(config3);
+        zone_data.size = iz2_extract_size(config3);
+        zone_data.normalized_size = iz2_extract_normalized_size(config3);
       }
       
       ESP_LOGV(TAG, "Zone %d: temp=%.1f, heat_sp=%.1f, cool_sp=%.1f, mode=%d, call=%d, damper=%s",
@@ -1079,10 +918,9 @@ void WaterFurnaceAurora::refresh_all_data() {
                zone_data.damper_open ? "open" : "closed");
     }
     
-    // IZ2 desired compressor speed (register 564, raw integer like reg 3000)
+    // IZ2 desired speeds
     this->publish_sensor(regs, registers::IZ2_COMPRESSOR_SPEED_DESIRED, this->iz2_compressor_speed_sensor_);
     
-    // IZ2 desired blower speed (register 565, converted from code 1-6 to percentage 25-100%)
     {
       const uint16_t *val = reg_find(regs, registers::IZ2_BLOWER_SPEED_DESIRED);
       if (val && this->iz2_blower_speed_sensor_ != nullptr) {
@@ -1091,19 +929,16 @@ void WaterFurnaceAurora::refresh_all_data() {
     }
   }
   
-  // Compute and publish derived sensors (COP, delta-T, approach temperature)
-  // These go beyond the Ruby gem — computed on-device from raw register values.
+  // Derived sensors (COP, delta-T, approach temperature)
   this->publish_derived_sensors(regs);
   
-  // Notify all registered listeners (sub-entities) that data has been updated.
-  // This replaces the 5-second polling loop in each sub-entity, matching the
-  // Ruby gem's "parent polls, pushes to children" pattern.
+  // Notify all registered listeners
   for (auto &listener : this->listeners_) {
     listener();
   }
 }
 
-// REAL Control methods
+// Control methods
 bool WaterFurnaceAurora::set_heating_setpoint(float temp) {
   if (temp < 40.0f || temp > 90.0f) {
     ESP_LOGW(TAG, "Heating setpoint %.1f out of range (40-90)", temp);
@@ -1220,13 +1055,12 @@ bool WaterFurnaceAurora::set_humidification_target(uint8_t percent) {
     ESP_LOGW(TAG, "Humidification target %d out of range (15-50)", percent);
     return false;
   }
-  // Read current targets to preserve the dehumidification value
   uint16_t read_reg = (this->has_iz2_ && this->awl_communicating())
-                          ? registers::IZ2_HUMIDISTAT_TARGETS    // 31110
-                          : registers::HUMIDISTAT_TARGETS;       // 12310
+                          ? registers::IZ2_HUMIDISTAT_TARGETS
+                          : registers::HUMIDISTAT_TARGETS;
   uint16_t write_reg = (this->has_iz2_ && this->awl_communicating())
-                           ? registers::IZ2_HUMIDISTAT_TARGETS_WRITE  // 21115
-                           : registers::HUMIDISTAT_TARGETS;           // 12310
+                           ? registers::IZ2_HUMIDISTAT_TARGETS_WRITE
+                           : registers::HUMIDISTAT_TARGETS;
   std::vector<uint16_t> result;
   if (!this->read_holding_registers(read_reg, 1, result) || result.empty()) {
     ESP_LOGW(TAG, "Failed to read current humidistat targets");
@@ -1242,13 +1076,12 @@ bool WaterFurnaceAurora::set_dehumidification_target(uint8_t percent) {
     ESP_LOGW(TAG, "Dehumidification target %d out of range (35-65)", percent);
     return false;
   }
-  // Read current targets to preserve the humidification value
   uint16_t read_reg = (this->has_iz2_ && this->awl_communicating())
-                          ? registers::IZ2_HUMIDISTAT_TARGETS    // 31110
-                          : registers::HUMIDISTAT_TARGETS;       // 12310
+                          ? registers::IZ2_HUMIDISTAT_TARGETS
+                          : registers::HUMIDISTAT_TARGETS;
   uint16_t write_reg = (this->has_iz2_ && this->awl_communicating())
-                           ? registers::IZ2_HUMIDISTAT_TARGETS_WRITE  // 21115
-                           : registers::HUMIDISTAT_TARGETS;           // 12310
+                           ? registers::IZ2_HUMIDISTAT_TARGETS_WRITE
+                           : registers::HUMIDISTAT_TARGETS;
   std::vector<uint16_t> result;
   if (!this->read_holding_registers(read_reg, 1, result) || result.empty()) {
     ESP_LOGW(TAG, "Failed to read current humidistat targets");
@@ -1264,7 +1097,7 @@ bool WaterFurnaceAurora::clear_fault_history() {
   return this->write_holding_register(registers::CLEAR_FAULT_HISTORY, registers::CLEAR_FAULT_MAGIC);
 }
 
-// REAL IZ2 Zone controls
+// IZ2 Zone controls
 bool WaterFurnaceAurora::set_zone_heating_setpoint(uint8_t zone_number, float temp) {
   if (!this->validate_zone_number(zone_number)) return false;
   if (temp < 40.0f || temp > 90.0f) {
@@ -1319,88 +1152,50 @@ bool WaterFurnaceAurora::set_zone_fan_intermittent_off(uint8_t zone_number, uint
   return this->write_holding_register(reg, minutes);
 }
 
-// REAL Modbus communication functions
+// Modbus communication — uses protocol module for CRC and frame building.
+// Still blocking for now; async state machine is Phase 3.
 
-// WaterFurnace custom protocol: Function 0x42 ('B') - Read specific registers
 bool WaterFurnaceAurora::read_specific_registers(const std::vector<uint16_t> &addresses,
                                                    RegisterMap &result) {
   result.clear();
+  if (addresses.empty()) return true;
   
-  if (addresses.empty()) {
-    return true;
+  // Build frame using protocol module
+  auto request = protocol::build_read_registers_request(this->address_, addresses);
+  if (request.empty()) {
+    ESP_LOGW(TAG, "Failed to build 0x42 request (too many registers?)");
+    return false;
   }
   
-  // Pre-allocate request buffer to avoid stack growth
-  // Size: 1 (addr) + 1 (func) + addresses*2 + 2 (CRC)
-  std::vector<uint8_t> request;
-  request.reserve(4 + addresses.size() * 2);
-  
-  // Pre-allocate response buffer
   std::vector<uint8_t> response;
   response.reserve(256);
   
-  // Retry loop (like Ruby's read_retries: 2)
   for (uint8_t attempt = 0; attempt <= this->read_retries_; attempt++) {
     if (attempt > 0) {
       ESP_LOGD(TAG, "Retry %d for 0x42 read", attempt);
       delay(50);
-      yield();  // Give RTOS time
+      yield();
     }
-    
-    // Build request: address + function + list of register addresses
-    request.clear();
-    request.push_back(this->address_);
-    request.push_back(FUNC_READ_SPECIFIC);  // 0x42 = 'B'
-    
-    for (uint16_t addr : addresses) {
-      request.push_back(addr >> 8);
-      request.push_back(addr & 0xFF);
-    }
-    
-    // Add CRC
-    uint16_t crc = this->calculate_crc(request.data(), request.size());
-    request.push_back(crc & 0xFF);
-    request.push_back(crc >> 8);
     
     ESP_LOGV(TAG, "Sent 0x42 request for %d registers", addresses.size());
     
-    // Send and wait for response - use shorter timeout (500ms) to fail faster when no hardware
     if (!this->send_and_receive(request.data(), request.size(), response, 500)) {
-      yield();  // Give RTOS time before retry
+      yield();
       continue;
     }
     
-    // Parse response
-    if (response.size() < 5) {
-      ESP_LOGW(TAG, "Response too short: %d bytes", response.size());
+    // Parse response using protocol module
+    auto parsed = protocol::parse_frame(response.data(), response.size(), addresses);
+    if (parsed.is_error) {
+      ESP_LOGW(TAG, "0x42 response error (code 0x%02X)", parsed.error_code);
       continue;
     }
     
-    if (response[0] != this->address_) {
-      ESP_LOGW(TAG, "Wrong address in response: 0x%02X", response[0]);
-      continue;
+    // Convert ParsedResponse to RegisterMap (sorted)
+    result.reserve(parsed.registers.size());
+    for (const auto &rv : parsed.registers) {
+      result.emplace_back(rv.address, rv.value);
     }
-    
-    if (response[1] != FUNC_READ_SPECIFIC) {
-      ESP_LOGW(TAG, "Wrong function in response: 0x%02X", response[1]);
-      continue;
-    }
-    
-    uint8_t byte_count = response[2];
-    if (response.size() < static_cast<size_t>(3 + byte_count + 2)) {
-      ESP_LOGW(TAG, "Response truncated: expected %d, got %d", 3 + byte_count + 2, response.size());
-      continue;
-    }
-    
-    // Parse register values — build sorted vector for O(log n) lookup
-    size_t data_start = 3;
-    size_t count = std::min(addresses.size(), static_cast<size_t>(byte_count / 2));
-    result.reserve(count);
-    for (size_t i = 0; i < count; i++) {
-      uint16_t value = (response[data_start + i * 2] << 8) | response[data_start + i * 2 + 1];
-      result.emplace_back(addresses[i], value);
-    }
-    // Sort by register address for binary search
     std::sort(result.begin(), result.end(),
         [](const std::pair<uint16_t, uint16_t> &a, const std::pair<uint16_t, uint16_t> &b) {
           return a.first < b.first;
@@ -1414,20 +1209,14 @@ bool WaterFurnaceAurora::read_specific_registers(const std::vector<uint16_t> &ad
   return false;
 }
 
-// Function 0x41 ('A') - Read multiple register ranges
 bool WaterFurnaceAurora::read_register_ranges(const std::vector<std::pair<uint16_t, uint16_t>> &ranges,
                                                 RegisterMap &result) {
   result.clear();
+  if (ranges.empty()) return true;
   
-  if (ranges.empty()) {
-    return true;
-  }
+  auto request = protocol::build_read_ranges_request(this->address_, ranges);
+  if (request.empty()) return false;
   
-  // Pre-allocate request buffer: 1 (addr) + 1 (func) + ranges*4 + 2 (CRC)
-  std::vector<uint8_t> request;
-  request.reserve(4 + ranges.size() * 4);
-  
-  // Retry loop (matching read_specific_registers and Ruby gem's read_retries: 2)
   for (uint8_t attempt = 0; attempt <= this->read_retries_; attempt++) {
     if (attempt > 0) {
       ESP_LOGD(TAG, "Retry %d for 0x41 read", attempt);
@@ -1435,58 +1224,29 @@ bool WaterFurnaceAurora::read_register_ranges(const std::vector<std::pair<uint16
       yield();
     }
     
-    // Build request
-    request.clear();
-    request.push_back(this->address_);
-    request.push_back(FUNC_READ_RANGES);  // 0x41 = 'A'
-    
-    for (const auto &range : ranges) {
-      request.push_back(range.first >> 8);
-      request.push_back(range.first & 0xFF);
-      request.push_back(range.second >> 8);
-      request.push_back(range.second & 0xFF);
-    }
-    
-    // Add CRC
-    uint16_t crc = this->calculate_crc(request.data(), request.size());
-    request.push_back(crc & 0xFF);
-    request.push_back(crc >> 8);
-    
-    // Send request and wait for response
     std::vector<uint8_t> response;
     if (!this->send_and_receive(request.data(), request.size(), response, 2000)) {
       yield();
       continue;
     }
     
-    // Parse response — validate address and function code
-    if (response.size() < 5) {
-      ESP_LOGW(TAG, "Response too short for 0x41 read: %d bytes", response.size());
-      continue;
-    }
-    
-    if (response[0] != this->address_) {
-      ESP_LOGW(TAG, "Wrong address in 0x41 response: 0x%02X (expected 0x%02X)", response[0], this->address_);
-      continue;
-    }
-    
-    if (response[1] != FUNC_READ_RANGES) {
-      ESP_LOGW(TAG, "Wrong function in 0x41 response: 0x%02X", response[1]);
-      continue;
-    }
-    
-    uint8_t byte_count = response[2];
-    size_t data_start = 3;
-    size_t data_idx = 0;
-    
-    // Map response data back to register addresses — ranges are already sequential
+    // Build expected addresses from ranges for parse_frame
+    std::vector<uint16_t> expected_addrs;
     for (const auto &range : ranges) {
-      for (uint16_t i = 0; i < range.second && (data_idx * 2) < byte_count; i++) {
-        uint16_t value = (response[data_start + data_idx * 2] << 8) | 
-                         response[data_start + data_idx * 2 + 1];
-        result.emplace_back(range.first + i, value);
-        data_idx++;
+      for (uint16_t i = 0; i < range.second; i++) {
+        expected_addrs.push_back(range.first + i);
       }
+    }
+    
+    auto parsed = protocol::parse_frame(response.data(), response.size(), expected_addrs);
+    if (parsed.is_error) {
+      ESP_LOGW(TAG, "0x41 response error (code 0x%02X)", parsed.error_code);
+      continue;
+    }
+    
+    result.reserve(parsed.registers.size());
+    for (const auto &rv : parsed.registers) {
+      result.emplace_back(rv.address, rv.value);
     }
     // Ranges produce sequential addresses — result is already sorted
     return true;
@@ -1496,57 +1256,39 @@ bool WaterFurnaceAurora::read_register_ranges(const std::vector<std::pair<uint16
   return false;
 }
 
-// Standard Modbus function 0x03 - Read holding registers
 bool WaterFurnaceAurora::read_holding_registers(uint16_t start_addr, uint16_t count, 
                                                   std::vector<uint16_t> &result) {
   result.clear();
   
-  // Retry loop
+  auto request = protocol::build_read_holding_request(this->address_, start_addr, count);
+  
   for (uint8_t attempt = 0; attempt <= this->read_retries_; attempt++) {
     if (attempt > 0) {
       ESP_LOGD(TAG, "Retry %d for 0x03 read at %d", attempt, start_addr);
       delay(50);
     }
     
-    // Build request
-    uint8_t request[8];
-    request[0] = this->address_;
-    request[1] = FUNC_READ_HOLDING;
-    request[2] = start_addr >> 8;
-    request[3] = start_addr & 0xFF;
-    request[4] = count >> 8;
-    request[5] = count & 0xFF;
-    
-    uint16_t crc = this->calculate_crc(request, 6);
-    request[6] = crc & 0xFF;
-    request[7] = crc >> 8;
-    
-    // Send request and wait for response
     std::vector<uint8_t> response;
-    if (!this->send_and_receive(request, 8, response, 1000)) {
+    if (!this->send_and_receive(request.data(), request.size(), response, 1000)) {
       continue;
     }
     
-    // Parse response — validate address and function code (matches read_specific_registers)
-    if (response.size() < 5) {
-      ESP_LOGW(TAG, "Response too short for 0x03 read: %d bytes", response.size());
+    // Build expected addresses
+    std::vector<uint16_t> expected_addrs;
+    expected_addrs.reserve(count);
+    for (uint16_t i = 0; i < count; i++) {
+      expected_addrs.push_back(start_addr + i);
+    }
+    
+    auto parsed = protocol::parse_frame(response.data(), response.size(), expected_addrs);
+    if (parsed.is_error) {
+      ESP_LOGW(TAG, "0x03 response error at %d (code 0x%02X)", start_addr, parsed.error_code);
       continue;
     }
     
-    if (response[0] != this->address_) {
-      ESP_LOGW(TAG, "Wrong address in 0x03 response: 0x%02X (expected 0x%02X)", response[0], this->address_);
-      continue;
-    }
-    
-    if (response[1] != FUNC_READ_HOLDING) {
-      ESP_LOGW(TAG, "Wrong function in 0x03 response: 0x%02X", response[1]);
-      continue;
-    }
-    
-    uint8_t byte_count = response[2];
-    for (size_t i = 0; i < byte_count; i += 2) {
-      uint16_t value = (response[3 + i] << 8) | response[3 + i + 1];
-      result.push_back(value);
+    result.reserve(parsed.registers.size());
+    for (const auto &rv : parsed.registers) {
+      result.push_back(rv.value);
     }
     
     return true;
@@ -1556,29 +1298,16 @@ bool WaterFurnaceAurora::read_holding_registers(uint16_t start_addr, uint16_t co
   return false;
 }
 
-// Standard Modbus function 0x06 - Write single register
 bool WaterFurnaceAurora::write_holding_register(uint16_t addr, uint16_t value) {
-  // Build request
-  uint8_t request[8];
-  request[0] = this->address_;
-  request[1] = FUNC_WRITE_SINGLE;
-  request[2] = addr >> 8;
-  request[3] = addr & 0xFF;
-  request[4] = value >> 8;
-  request[5] = value & 0xFF;
-  
-  uint16_t crc = this->calculate_crc(request, 6);
-  request[6] = crc & 0xFF;
-  request[7] = crc >> 8;
+  auto request = protocol::build_write_single_request(this->address_, addr, value);
   
   ESP_LOGD(TAG, "Writing register %d = %d", addr, value);
   
-  // Send request and wait for response (echo of request)
   std::vector<uint8_t> response;
-  return this->send_and_receive(request, 8, response, 1000);
+  return this->send_and_receive(request.data(), request.size(), response, 1000);
 }
 
-// Shared Modbus transport: clear bus, TX, send, flush, delay, RX, wait for response
+// Shared Modbus transport
 bool WaterFurnaceAurora::send_and_receive(const uint8_t *request, size_t request_len,
                                            std::vector<uint8_t> &response, uint32_t timeout_ms) {
   // Clear any pending data on the bus
@@ -1607,81 +1336,35 @@ bool WaterFurnaceAurora::send_and_receive(const uint8_t *request, size_t request
   return this->wait_for_response(response, timeout_ms);
 }
 
-// Standard Modbus CRC-16 calculation
-uint16_t WaterFurnaceAurora::calculate_crc(const uint8_t *data, size_t len) {
-  uint16_t crc = 0xFFFF;
-  for (size_t i = 0; i < len; i++) {
-    crc ^= data[i];
-    for (uint8_t j = 0; j < 8; j++) {
-      if (crc & 0x0001) {
-        crc >>= 1;
-        crc ^= 0xA001;
-      } else {
-        crc >>= 1;
-      }
-    }
-  }
-  return crc;
-}
-
 bool WaterFurnaceAurora::wait_for_response(std::vector<uint8_t> &response, uint32_t timeout_ms) {
   response.clear();
-  response.reserve(256);  // Pre-allocate to avoid reallocation
+  response.reserve(256);
   uint32_t start = millis();
   uint32_t yield_counter = 0;
   
   while (millis() - start < timeout_ms) {
-    // Yield periodically to prevent watchdog timeout
     if (++yield_counter % 50 == 0) {
       yield();
     }
     
-    while (this->available() && response.size() < 512) {
+    while (this->available() && response.size() < protocol::MAX_FRAME_SIZE) {
       response.push_back(this->read());
     }
-    if (response.size() >= 512) {
-      ESP_LOGW(TAG, "Response buffer overflow (>=512 bytes) - bus noise?");
+    if (response.size() >= protocol::MAX_FRAME_SIZE) {
+      ESP_LOGW(TAG, "Response buffer overflow (>=%d bytes) - bus noise?", protocol::MAX_FRAME_SIZE);
       return false;
     }
     
-    // Check if we have a complete response
-    if (response.size() >= 5) {
-      if (response[0] == this->address_) {
-        uint8_t func = response[1];
-        
-        // Check for exception response (high bit set)
-        if (func & 0x80) {
-          ESP_LOGW(TAG, "Modbus exception: function 0x%02X, code 0x%02X", func, response[2]);
+    // Use protocol module to determine expected frame size
+    if (response.size() >= 2) {
+      size_t expected = protocol::expected_frame_size(response.data(), response.size());
+      if (expected > 0 && response.size() >= expected) {
+        // Frame is complete — validate CRC
+        if (protocol::validate_frame_crc(response.data(), expected)) {
+          return true;
+        } else {
+          ESP_LOGW(TAG, "CRC mismatch in response");
           return false;
-        }
-        
-        // For read functions (0x03, 0x41, 0x42), check if complete
-        if (func == FUNC_READ_HOLDING || func == FUNC_READ_RANGES || func == FUNC_READ_SPECIFIC) {
-          uint8_t byte_count = response[2];
-          size_t expected_len = 3 + byte_count + 2;
-          if (response.size() >= expected_len) {
-            // Verify CRC
-            uint16_t received_crc = (response[expected_len - 1] << 8) | response[expected_len - 2];
-            uint16_t calc_crc = this->calculate_crc(response.data(), expected_len - 2);
-            if (received_crc == calc_crc) {
-              return true;
-            } else {
-              ESP_LOGW(TAG, "CRC mismatch: received 0x%04X, calculated 0x%04X", received_crc, calc_crc);
-              return false;
-            }
-          }
-        }
-        
-        // For write single register (function 6), response is echo of request (8 bytes)
-        if (func == FUNC_WRITE_SINGLE && response.size() >= 8) {
-          uint16_t received_crc = (response[7] << 8) | response[6];
-          uint16_t calc_crc = this->calculate_crc(response.data(), 6);
-          if (received_crc == calc_crc) {
-            return true;
-          } else {
-            ESP_LOGW(TAG, "Write CRC mismatch");
-            return false;
-          }
         }
       }
     }
@@ -1693,233 +1376,11 @@ bool WaterFurnaceAurora::wait_for_response(std::vector<uint8_t> &response, uint3
   return false;
 }
 
-// REAL Data conversion helpers
-float WaterFurnaceAurora::to_signed_tenths(uint16_t value) {
-  int16_t signed_val = static_cast<int16_t>(value);
-  return signed_val / 10.0f;
-}
-
-float WaterFurnaceAurora::to_tenths(uint16_t value) {
-  return value / 10.0f;
-}
-
-uint32_t WaterFurnaceAurora::to_uint32(uint16_t high, uint16_t low) {
-  return (static_cast<uint32_t>(high) << 16) | low;
-}
-
-int32_t WaterFurnaceAurora::to_int32(uint16_t high, uint16_t low) {
-  return static_cast<int32_t>(to_uint32(high, low));
-}
-
-std::string WaterFurnaceAurora::registers_to_string(const std::vector<uint16_t> &regs) {
-  std::string result;
-  result.reserve(regs.size() * 2);
-  
-  for (uint16_t reg : regs) {
-    char high_char = static_cast<char>(reg >> 8);
-    char low_char = static_cast<char>(reg & 0xFF);
-    
-    if (high_char == '\0') break;
-    result += high_char;
-    
-    if (low_char == '\0') break;
-    result += low_char;
-  }
-  
-  // Strip trailing spaces (matches Ruby gem behavior)
-  while (!result.empty() && (result.back() == ' ' || result.back() == '\0')) {
-    result.pop_back();
-  }
-  
-  return result;
-}
-
-// String helpers - REAL IMPLEMENTATIONS
-std::string WaterFurnaceAurora::get_vs_derate_string(uint16_t value) {
-  if (value == 0) return "None";
-  
-  std::string result;
-  result.reserve(64);
-  if (value & VS_DERATE_DRIVE_OVER_TEMP) {
-    if (!result.empty()) result += ", ";
-    result += "Drive Over Temp";
-  }
-  if (value & VS_DERATE_LOW_SUCTION_PRESSURE) {
-    if (!result.empty()) result += ", ";
-    result += "Low Suction Pressure";
-  }
-  if (value & VS_DERATE_LOW_DISCHARGE_PRESSURE) {
-    if (!result.empty()) result += ", ";
-    result += "Low Discharge Pressure";
-  }
-  if (value & VS_DERATE_HIGH_DISCHARGE_PRESSURE) {
-    if (!result.empty()) result += ", ";
-    result += "High Discharge Pressure";
-  }
-  if (value & VS_DERATE_OUTPUT_POWER_LIMIT) {
-    if (!result.empty()) result += ", ";
-    result += "Output Power Limit";
-  }
-  
-  return result.empty() ? "Unknown" : result;
-}
-
-std::string WaterFurnaceAurora::get_vs_safe_mode_string(uint16_t value) {
-  if (value == 0) return "None";
-  
-  std::string result;
-  result.reserve(64);
-  if (value & VS_SAFE_EEV_INDOOR_FAILED) {
-    if (!result.empty()) result += ", ";
-    result += "EEV Indoor Failed";
-  }
-  if (value & VS_SAFE_EEV_OUTDOOR_FAILED) {
-    if (!result.empty()) result += ", ";
-    result += "EEV Outdoor Failed";
-  }
-  if (value & VS_SAFE_INVALID_AMBIENT_TEMP) {
-    if (!result.empty()) result += ", ";
-    result += "Invalid Ambient Temp";
-  }
-  
-  return result.empty() ? "Unknown" : result;
-}
-
-std::string WaterFurnaceAurora::get_vs_alarm_string(uint16_t alarm1, uint16_t alarm2) {
-  if (alarm1 == 0 && alarm2 == 0) return "None";
-  
-  std::string result;
-  result.reserve(128);
-  
-  // Alarm1 flags
-  if (alarm1 & 0x8000) {
-    if (!result.empty()) result += ", ";
-    result += "Internal Error";
-  }
-  
-  // Alarm2 flags
-  if (alarm2 & 0x0001) {
-    if (!result.empty()) result += ", ";
-    result += "Multi Safe Modes";
-  }
-  if (alarm2 & 0x0002) {
-    if (!result.empty()) result += ", ";
-    result += "Out of Envelope";
-  }
-  if (alarm2 & 0x0004) {
-    if (!result.empty()) result += ", ";
-    result += "Over Current";
-  }
-  if (alarm2 & 0x0008) {
-    if (!result.empty()) result += ", ";
-    result += "Over Voltage";
-  }
-  if (alarm2 & 0x0010) {
-    if (!result.empty()) result += ", ";
-    result += "Drive Over Temp";
-  }
-  if (alarm2 & 0x0020) {
-    if (!result.empty()) result += ", ";
-    result += "Under Voltage";
-  }
-  if (alarm2 & 0x0040) {
-    if (!result.empty()) result += ", ";
-    result += "High Discharge Temp";
-  }
-  if (alarm2 & 0x0080) {
-    if (!result.empty()) result += ", ";
-    result += "Invalid Discharge Temp";
-  }
-  if (alarm2 & 0x0100) {
-    if (!result.empty()) result += ", ";
-    result += "OEM Comms Timeout";
-  }
-  if (alarm2 & 0x0200) {
-    if (!result.empty()) result += ", ";
-    result += "MOC Safety";
-  }
-  if (alarm2 & 0x0400) {
-    if (!result.empty()) result += ", ";
-    result += "DC Under Voltage";
-  }
-  if (alarm2 & 0x0800) {
-    if (!result.empty()) result += ", ";
-    result += "Invalid Suction Pressure";
-  }
-  if (alarm2 & 0x1000) {
-    if (!result.empty()) result += ", ";
-    result += "Invalid Discharge Pressure";
-  }
-  if (alarm2 & 0x2000) {
-    if (!result.empty()) result += ", ";
-    result += "Low Discharge Pressure";
-  }
-  
-  return result.empty() ? "Unknown" : result;
-}
-
-std::string WaterFurnaceAurora::get_axb_inputs_string(uint16_t value) {
-  std::string result;
-  result.reserve(64);
-  
-  if (value & 0x001) {
-    if (!result.empty()) result += ", ";
-    result += "SmartGrid";
-  }
-  if (value & 0x002) {
-    if (!result.empty()) result += ", ";
-    result += "HA1";
-  }
-  if (value & 0x004) {
-    if (!result.empty()) result += ", ";
-    result += "HA2";
-  }
-  if (value & 0x008) {
-    if (!result.empty()) result += ", ";
-    result += "PumpSlave";
-  }
-  
-  // MB Address: bit 4 determines address 3 or 4
-  if (!result.empty()) result += ", ";
-  result += "Addr=";
-  result += (value & 0x010) ? "3" : "4";
-  
-  // Accessory relay 2 mode (bits 7-8)
-  if (!result.empty()) result += ", ";
-  result += "Acc2=";
-  bool bit7 = (value & 0x080) != 0;
-  bool bit8 = (value & 0x100) != 0;
-  if (bit7 && bit8) {
-    result += "Blower";
-  } else if (bit8) {
-    result += "LowCapComp";
-  } else if (bit7) {
-    result += "HighCapComp";
-  } else {
-    result += "Dehum";
-  }
-  
-  return result;
-}
-
-// Derived sensors — computed on-device from raw register values.
-// These go beyond the Ruby gem, leveraging our low-level access.
-//
-// COP = Heat of Rejection (or Extraction) / Total Watts
-//   Heating COP = Heat of Rejection (BTU/h) / (Total Watts * 3.412 BTU/Wh)
-//   Cooling COP = Heat of Extraction (BTU/h) / (Total Watts * 3.412 BTU/Wh)
-// Only meaningful when compressor is running and power > 0.
-//
-// Water Delta-T = Leaving Water - Entering Water
-//   Positive in heating mode (heat added to water), negative in cooling.
-//
-// Approach Temperature = how close the heat exchanger approaches ideal
-//   Heating: Leaving Water - Saturated Condenser Temp
-//   Cooling: Saturated Condenser Temp - Entering Water
+// Derived sensors
 constexpr float BTU_PER_WATT_HOUR = 3.412f;
 
 void WaterFurnaceAurora::publish_derived_sensors(const RegisterMap &regs) {
-  // Water delta-T (requires AXB with leaving/entering water temps)
+  // Water delta-T
   if (this->water_delta_t_sensor_ != nullptr) {
     const uint16_t *val_lw = reg_find(regs, registers::LEAVING_WATER);
     const uint16_t *val_ew = reg_find(regs, registers::ENTERING_WATER);
@@ -1930,7 +1391,7 @@ void WaterFurnaceAurora::publish_derived_sensors(const RegisterMap &regs) {
     }
   }
   
-  // COP — only valid when compressor is running and we have non-zero power
+  // COP
   if (this->cop_sensor_ != nullptr) {
     bool compressor_running = (this->system_outputs_ & (OUTPUT_CC | OUTPUT_CC2)) != 0;
     if (compressor_running) {
@@ -1940,15 +1401,12 @@ void WaterFurnaceAurora::publish_derived_sensors(const RegisterMap &regs) {
         uint32_t total_watts = to_uint32(*tw_h, *tw_l);
         if (total_watts > 0) {
           bool is_cooling = (this->system_outputs_ & OUTPUT_RV) != 0;
-          // Select heat of extraction (cooling) or rejection (heating)
           uint16_t heat_reg = is_cooling ? registers::HEAT_OF_EXTRACTION : registers::HEAT_OF_REJECTION;
           const uint16_t *heat_h = reg_find(regs, heat_reg);
           const uint16_t *heat_l = reg_find(regs, heat_reg + 1);
           if (heat_h && heat_l) {
             int32_t heat_btu = to_int32(*heat_h, *heat_l);
-            // COP = BTU/h output / BTU/h input; input = watts * 3.412 BTU/Wh
             float cop = static_cast<float>(std::abs(heat_btu)) / (static_cast<float>(total_watts) * BTU_PER_WATT_HOUR);
-            // Sanity check: COP should be 1-10 for geothermal; reject outliers
             if (cop >= 0.5f && cop <= 15.0f) {
               this->cop_sensor_->publish_state(cop);
             }
@@ -1956,12 +1414,11 @@ void WaterFurnaceAurora::publish_derived_sensors(const RegisterMap &regs) {
         }
       }
     } else {
-      // Compressor off — publish 0 COP
       this->cop_sensor_->publish_state(0.0f);
     }
   }
   
-  // Approach temperature (requires refrigeration monitoring)
+  // Approach temperature
   if (this->approach_temp_sensor_ != nullptr) {
     const uint16_t *val_lw = reg_find(regs, registers::LEAVING_WATER);
     const uint16_t *val_ew = reg_find(regs, registers::ENTERING_WATER);
@@ -1970,11 +1427,9 @@ void WaterFurnaceAurora::publish_derived_sensors(const RegisterMap &regs) {
       float sat_cond = to_signed_tenths(*val_sc);
       bool is_cooling = (this->system_outputs_ & OUTPUT_RV) != 0;
       if (is_cooling && val_ew) {
-        // Cooling: approach = saturated condenser - entering water
         float entering = to_signed_tenths(*val_ew);
         this->approach_temp_sensor_->publish_state(sat_cond - entering);
       } else if (!is_cooling && val_lw) {
-        // Heating: approach = leaving water - saturated condenser
         float leaving = to_signed_tenths(*val_lw);
         this->approach_temp_sensor_->publish_state(leaving - sat_cond);
       }
@@ -1982,7 +1437,7 @@ void WaterFurnaceAurora::publish_derived_sensors(const RegisterMap &regs) {
   }
 }
 
-// REAL read_fault_history
+// Fault history
 void WaterFurnaceAurora::read_fault_history() {
   if (this->fault_history_sensor_ == nullptr) {
     return;

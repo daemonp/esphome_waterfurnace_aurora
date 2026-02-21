@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  unit-tests:
+    name: Unit Tests (Catch2)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run unit tests
+        run: make test
+        working-directory: tests
+
+  esphome-compile:
+    name: ESPHome Compile (${{ matrix.esphome }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        esphome: [stable, beta]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ESPHome (${{ matrix.esphome }})
+        run: |
+          if [ "${{ matrix.esphome }}" = "stable" ]; then
+            pip install esphome
+          elif [ "${{ matrix.esphome }}" = "beta" ]; then
+            pip install --pre esphome
+          fi
+
+      - name: Compile test configuration
+        run: esphome compile tests/waterfurnace-test.yaml

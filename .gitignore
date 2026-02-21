@@ -5,3 +5,15 @@
 /secrets.yaml
 .venv/
 __pycache__/
+
+# Test binaries (Catch2)
+tests/test_protocol
+tests/test_registers
+
+# Reference project (checked out for comparison only)
+rw-wf/
+
+# Local-only files
+home.yaml
+mise.toml
+CODEREVIEW-esphome.md

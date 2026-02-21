@@ -1,0 +1,166 @@
+# Minimal test configuration for CI compilation checks.
+# This exercises all platforms (sensor, binary_sensor, text_sensor, climate,
+# number, switch, button) with the local component source but does NOT
+# require secrets, WiFi, or real hardware.
+
+esphome:
+  name: waterfurnace-test
+  friendly_name: "WaterFurnace Test"
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+logger:
+  level: DEBUG
+  baud_rate: 0
+
+# Minimal networking stub so ESPHome is happy
+wifi:
+  ssid: "test_ssid"
+  password: "test_password"
+  manual_ip:
+    static_ip: 192.168.1.100
+    gateway: 192.168.1.1
+    subnet: 255.255.255.0
+
+api:
+  encryption:
+    key: "dGVzdGtleXRlc3RrZXl0ZXN0a2V5dGVzdGtleTE="
+
+ota:
+  - platform: esphome
+
+external_components:
+  - source:
+      type: local
+      path: ../components
+
+uart:
+  id: mod_bus
+  tx_pin: GPIO17
+  rx_pin: GPIO16
+  baud_rate: 19200
+  parity: EVEN
+  stop_bits: 1
+
+waterfurnace_aurora:
+  id: aurora
+  uart_id: mod_bus
+  address: 1
+  update_interval: 10s
+  flow_control_pin: GPIO4
+
+# --- Climate (main thermostat) ---
+climate:
+  - platform: waterfurnace_aurora
+    id: aurora_thermostat
+    name: "Test Heat Pump"
+    aurora_id: aurora
+
+# --- Switch ---
+switch:
+  - platform: waterfurnace_aurora
+    aurora_id: aurora
+    dhw_enabled:
+      name: "Test DHW Enabled"
+
+# --- Number controls ---
+number:
+  - platform: waterfurnace_aurora
+    aurora_id: aurora
+    dhw_setpoint:
+      name: "Test DHW Setpoint"
+    blower_only_speed:
+      name: "Test Blower Only Speed"
+    lo_compressor_speed:
+      name: "Test Lo Compressor Speed"
+    hi_compressor_speed:
+      name: "Test Hi Compressor Speed"
+    aux_heat_speed:
+      name: "Test Aux Heat Speed"
+    pump_min_speed:
+      name: "Test Pump Min Speed"
+    pump_max_speed:
+      name: "Test Pump Max Speed"
+    fan_intermittent_on:
+      name: "Test Fan On Time"
+    fan_intermittent_off:
+      name: "Test Fan Off Time"
+    humidification_target:
+      name: "Test Humidification Target"
+    dehumidification_target:
+      name: "Test Dehumidification Target"
+
+# --- Sensors (representative subset — covers all conversion types) ---
+sensor:
+  - platform: waterfurnace_aurora
+    aurora_id: aurora
+    entering_air_temperature:
+      name: "Test Entering Air Temp"
+    leaving_air_temperature:
+      name: "Test Leaving Air Temp"
+    entering_water_temperature:
+      name: "Test Entering Water Temp"
+    leaving_water_temperature:
+      name: "Test Leaving Water Temp"
+    compressor_speed:
+      name: "Test Compressor Speed"
+    discharge_pressure:
+      name: "Test Discharge Pressure"
+    line_voltage:
+      name: "Test Line Voltage"
+    total_watts:
+      name: "Test Total Power"
+    compressor_watts:
+      name: "Test Compressor Power"
+    blower_watts:
+      name: "Test Blower Power"
+    waterflow:
+      name: "Test Water Flow"
+    blower_speed:
+      name: "Test Blower Speed"
+    pump_speed:
+      name: "Test Pump Speed"
+    fault_code:
+      name: "Test Fault Code"
+    cop:
+      name: "Test COP"
+    water_delta_t:
+      name: "Test Water Delta-T"
+    humidity:
+      name: "Test Humidity"
+
+# --- Binary sensors ---
+binary_sensor:
+  - platform: waterfurnace_aurora
+    aurora_id: aurora
+    compressor_running:
+      name: "Test Compressor Running"
+    blower_running:
+      name: "Test Blower Running"
+    lockout:
+      name: "Test Lockout"
+
+# --- Text sensors ---
+text_sensor:
+  - platform: waterfurnace_aurora
+    aurora_id: aurora
+    current_mode:
+      name: "Test Current Mode"
+    hvac_mode:
+      name: "Test HVAC Mode"
+    fan_mode:
+      name: "Test Fan Mode"
+    fault_description:
+      name: "Test Fault Description"
+    model_number:
+      name: "Test Model Number"
+
+# --- Buttons ---
+button:
+  - platform: waterfurnace_aurora
+    aurora_id: aurora
+    clear_fault_history:
+      name: "Test Clear Fault History"
