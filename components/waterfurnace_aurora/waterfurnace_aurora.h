@@ -202,6 +202,10 @@ namespace registers {
   // VS Drive / active dehumidification
   constexpr uint16_t ACTIVE_DEHUMIDIFY = 362;
   
+  // IZ2 system-wide desired speeds (from compressor.rb / blower.rb)
+  constexpr uint16_t IZ2_COMPRESSOR_SPEED_DESIRED = 564;
+  constexpr uint16_t IZ2_BLOWER_SPEED_DESIRED = 565;
+
   // IZ2 Zone registers (base addresses, add (zone-1)*offset for each zone)
   constexpr uint16_t IZ2_MODE_WRITE_BASE = 21202;      // +9 per zone
   constexpr uint16_t IZ2_HEAT_SP_WRITE_BASE = 21203;
@@ -258,6 +262,19 @@ enum class BlowerType : uint8_t {
   ECM_208 = 1,
   ECM_265 = 2,
   FIVE_SPEED = 3
+};
+
+// Pump type (register 413, from registers.rb PUMP_TYPE)
+enum class PumpType : uint8_t {
+  OPEN_LOOP = 0,
+  FC1 = 1,
+  FC2 = 2,
+  VS_PUMP = 3,
+  VS_PUMP_26_99 = 4,
+  VS_PUMP_UPS26_99 = 5,
+  FC1_GLNP = 6,
+  FC2_GLNP = 7,
+  OTHER = 255
 };
 
 // Maximum number of IZ2 zones
@@ -373,6 +390,10 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   void set_sat_evap_discharge_temp_sensor(sensor::Sensor *sensor) { sat_evap_discharge_temp_sensor_ = sensor; }
   void set_aux_heat_stage_sensor(sensor::Sensor *sensor) { aux_heat_stage_sensor_ = sensor; }
 
+  // IZ2 desired speed sensors (from compressor.rb / blower.rb)
+  void set_iz2_compressor_speed_sensor(sensor::Sensor *sensor) { iz2_compressor_speed_sensor_ = sensor; }
+  void set_iz2_blower_speed_sensor(sensor::Sensor *sensor) { iz2_blower_speed_sensor_ = sensor; }
+
   // Derived sensors — computed on-device from raw register values.
   // These go beyond the Ruby gem which only publishes raw values.
   void set_cop_sensor(sensor::Sensor *sensor) { cop_sensor_ = sensor; }
@@ -430,6 +451,7 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   void set_axb_inputs_sensor(text_sensor::TextSensor *sensor) { axb_inputs_sensor_ = sensor; }
   void set_humidifier_mode_sensor(text_sensor::TextSensor *sensor) { humidifier_mode_sensor_ = sensor; }
   void set_dehumidifier_mode_sensor(text_sensor::TextSensor *sensor) { dehumidifier_mode_sensor_ = sensor; }
+  void set_pump_type_sensor(text_sensor::TextSensor *sensor) { pump_type_sensor_ = sensor; }
 
   // Control methods (called by climate/water_heater components)
   bool set_heating_setpoint(float temp);
@@ -563,8 +585,14 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   bool awl_iz2() const { return has_iz2_ && iz2_version_ >= 2.0f; }
   bool awl_communicating() const { return awl_thermostat() || awl_iz2(); }
   bool is_ecm_blower() const { return blower_type_ == BlowerType::ECM_208 || blower_type_ == BlowerType::ECM_265; }
+  bool is_vs_pump() const { return pump_type_ == PumpType::VS_PUMP || pump_type_ == PumpType::VS_PUMP_26_99 || pump_type_ == PumpType::VS_PUMP_UPS26_99; }
   bool refrigeration_monitoring() const { return energy_monitor_level_ >= 1; }
   bool energy_monitoring() const { return energy_monitor_level_ >= 2; }
+  static const char* get_pump_type_string(PumpType type);
+  
+  // IZ2 blower speed conversion (from registers.rb iz2_fan_desired)
+  // Maps IZ2 speed codes 1-6 to percentages: 25%, 40%, 55%, 70%, 85%, 100%
+  static uint8_t iz2_fan_desired(uint16_t value);
 
   // Sensor publication helpers — DRY extraction for the 50+ find-and-publish patterns.
   // Ruby gem equivalent: REGISTER_CONVERTERS hash mapping lambdas to register arrays.
@@ -684,6 +712,7 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
 
   // Hardware type detection (from Ruby gem abc_client.rb)
   BlowerType blower_type_{BlowerType::PSC};
+  PumpType pump_type_{PumpType::OTHER};
   uint8_t energy_monitor_level_{0};  // 0=None, 1=Compressor Monitor, 2=Energy Monitor
   
   // IZ2 Zone data
@@ -733,6 +762,10 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   sensor::Sensor *vs_compressor_watts_sensor_{nullptr};
   sensor::Sensor *sat_evap_discharge_temp_sensor_{nullptr};
   sensor::Sensor *aux_heat_stage_sensor_{nullptr};
+  
+  // IZ2 desired speed sensors
+  sensor::Sensor *iz2_compressor_speed_sensor_{nullptr};
+  sensor::Sensor *iz2_blower_speed_sensor_{nullptr};
   
   // Derived sensors (computed on-device, not in Ruby gem)
   sensor::Sensor *cop_sensor_{nullptr};
@@ -790,6 +823,7 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   text_sensor::TextSensor *axb_inputs_sensor_{nullptr};
   text_sensor::TextSensor *humidifier_mode_sensor_{nullptr};
   text_sensor::TextSensor *dehumidifier_mode_sensor_{nullptr};
+  text_sensor::TextSensor *pump_type_sensor_{nullptr};
   
   // Observer callbacks — sub-entities register to be notified on data update
   std::vector<std::function<void()>> listeners_;

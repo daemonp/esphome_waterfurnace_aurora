@@ -321,6 +321,12 @@ sensor:
     fault_code:
       name: "Fault Code"
     
+    # IZ2 desired speed sensors (uncomment if you have IntelliZone 2)
+    # iz2_compressor_speed:
+    #   name: "IZ2 Desired Compressor Speed"
+    # iz2_blower_speed:
+    #   name: "IZ2 Desired Blower Speed"
+    
     # Derived sensors (computed on-device)
     cop:
       name: "Coefficient of Performance"
@@ -421,6 +427,10 @@ text_sensor:
     # AXB status
     axb_inputs:
       name: "AXB Inputs"
+    
+    # Hardware info
+    pump_type:
+      name: "Pump Type"
 
   # ESPHome version
   - platform: version

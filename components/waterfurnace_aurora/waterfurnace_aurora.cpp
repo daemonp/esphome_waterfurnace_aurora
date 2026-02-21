@@ -90,6 +90,34 @@ const char* WaterFurnaceAurora::get_fan_mode_string(FanMode mode) {
   }
 }
 
+const char* WaterFurnaceAurora::get_pump_type_string(PumpType type) {
+  switch (type) {
+    case PumpType::OPEN_LOOP: return "Open Loop";
+    case PumpType::FC1: return "FC1";
+    case PumpType::FC2: return "FC2";
+    case PumpType::VS_PUMP: return "VS Pump";
+    case PumpType::VS_PUMP_26_99: return "VS Pump + 26-99";
+    case PumpType::VS_PUMP_UPS26_99: return "VS Pump + UPS26-99";
+    case PumpType::FC1_GLNP: return "FC1_GLNP";
+    case PumpType::FC2_GLNP: return "FC2_GLNP";
+    default: return "Other";
+  }
+}
+
+// IZ2 blower desired speed conversion (from registers.rb iz2_fan_desired method)
+// Maps IZ2 speed codes to percentage: 1=25%, 2=40%, 3=55%, 4=70%, 5=85%, 6=100%
+uint8_t WaterFurnaceAurora::iz2_fan_desired(uint16_t value) {
+  switch (value) {
+    case 1: return 25;
+    case 2: return 40;
+    case 3: return 55;
+    case 4: return 70;
+    case 5: return 85;
+    case 6: return 100;
+    default: return static_cast<uint8_t>(value);
+  }
+}
+
 std::string WaterFurnaceAurora::get_current_mode_string() {
   if (this->system_outputs_ & OUTPUT_LOCKOUT) {
     return "Lockout";
@@ -141,6 +169,11 @@ void WaterFurnaceAurora::setup() {
     this->status_set_error(LOG_STR("No response from heat pump - check RS-485 wiring"));
   }
   
+  // Publish pump type (detected once during setup, won't change at runtime)
+  if (this->pump_type_sensor_ != nullptr) {
+    this->pump_type_sensor_->publish_state(get_pump_type_string(this->pump_type_));
+  }
+  
   ESP_LOGI(TAG, "WaterFurnace Aurora setup complete");
   ESP_LOGI(TAG, "  AXB: %s%s (v%.2f, AWL: %s)", this->has_axb_ ? "detected" : "not detected",
            this->axb_override_ ? " (manual override)" : "",
@@ -158,6 +191,7 @@ void WaterFurnaceAurora::setup() {
            this->awl_thermostat() ? "yes" : "no");
   ESP_LOGI(TAG, "  Blower: %s", this->blower_type_ == BlowerType::PSC ? "PSC" :
            this->blower_type_ == BlowerType::FIVE_SPEED ? "5-Speed" : "ECM");
+  ESP_LOGI(TAG, "  Pump: %s", get_pump_type_string(this->pump_type_));
   ESP_LOGI(TAG, "  Energy Monitor: %s",
            this->energy_monitor_level_ == 0 ? "None" :
            this->energy_monitor_level_ == 1 ? "Compressor Monitor" : "Energy Monitor");
@@ -290,6 +324,18 @@ void WaterFurnaceAurora::detect_hardware() {
              this->energy_monitor_level_ == 0 ? "None" : this->energy_monitor_level_ == 1 ? "Compressor Monitor" : "Energy Monitor");
   }
   
+  // Detect pump type (register 413, from registers.rb PUMP_TYPE)
+  const uint16_t *val_pump = reg_find(result, registers::PUMP_TYPE);
+  if (val_pump) {
+    uint16_t pval = *val_pump;
+    if (pval <= 7) {
+      this->pump_type_ = static_cast<PumpType>(pval);
+    } else {
+      this->pump_type_ = PumpType::OTHER;
+    }
+    ESP_LOGD(TAG, "Pump type register 413 = %d -> %s", pval, get_pump_type_string(this->pump_type_));
+  }
+  
   // Detect VS Drive via ABC Program (register 88, 4 registers = 8 chars ASCII)
   // Ruby gem: program names containing "VSP" or "SPLVS" indicate VS drive
   // e.g. "ABCVSP", "ABCVSPR", "ABCSPLVS"
@@ -402,6 +448,7 @@ void WaterFurnaceAurora::dump_config() {
   }
   ESP_LOGCONFIG(TAG, "  Blower: %s", this->blower_type_ == BlowerType::PSC ? "PSC" :
                 this->blower_type_ == BlowerType::FIVE_SPEED ? "5-Speed" : "ECM");
+  ESP_LOGCONFIG(TAG, "  Pump: %s", get_pump_type_string(this->pump_type_));
   ESP_LOGCONFIG(TAG, "  Energy Monitor: %s",
                 this->energy_monitor_level_ == 0 ? "None" :
                 this->energy_monitor_level_ == 1 ? "Compressor Monitor" : "Energy Monitor");
@@ -533,6 +580,8 @@ void WaterFurnaceAurora::refresh_all_data() {
   if (this->has_iz2_ && this->num_iz2_zones_ > 0) {
     this->addresses_to_read_.push_back(registers::IZ2_OUTDOOR_TEMP);            // 31003
     this->addresses_to_read_.push_back(registers::IZ2_DEMAND);                  // 31005
+    this->addresses_to_read_.push_back(registers::IZ2_COMPRESSOR_SPEED_DESIRED); // 564
+    this->addresses_to_read_.push_back(registers::IZ2_BLOWER_SPEED_DESIRED);     // 565
     
     for (uint8_t zone = 1; zone <= this->num_iz2_zones_; zone++) {
       this->addresses_to_read_.push_back(registers::IZ2_AMBIENT_BASE + ((zone - 1) * 3));
@@ -1028,6 +1077,17 @@ void WaterFurnaceAurora::refresh_all_data() {
                zone, zone_data.ambient_temperature, zone_data.heating_setpoint, 
                zone_data.cooling_setpoint, zone_data.target_mode, zone_data.current_call,
                zone_data.damper_open ? "open" : "closed");
+    }
+    
+    // IZ2 desired compressor speed (register 564, raw integer like reg 3000)
+    this->publish_sensor(regs, registers::IZ2_COMPRESSOR_SPEED_DESIRED, this->iz2_compressor_speed_sensor_);
+    
+    // IZ2 desired blower speed (register 565, converted from code 1-6 to percentage 25-100%)
+    {
+      const uint16_t *val = reg_find(regs, registers::IZ2_BLOWER_SPEED_DESIRED);
+      if (val && this->iz2_blower_speed_sensor_ != nullptr) {
+        this->iz2_blower_speed_sensor_->publish_state(iz2_fan_desired(*val));
+      }
     }
   }
   

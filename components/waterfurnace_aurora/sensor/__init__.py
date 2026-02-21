@@ -87,6 +87,10 @@ CONF_AUX_HEAT_STAGE = "aux_heat_stage"
 CONF_HUMIDIFICATION_TARGET = "humidification_target"
 CONF_DEHUMIDIFICATION_TARGET = "dehumidification_target"
 
+# IZ2 desired speed sensors (from compressor.rb / blower.rb)
+CONF_IZ2_COMPRESSOR_SPEED = "iz2_compressor_speed"
+CONF_IZ2_BLOWER_SPEED = "iz2_blower_speed"
+
 # Derived sensors (computed on-device, beyond Ruby gem)
 CONF_COP = "cop"
 CONF_WATER_DELTA_T = "water_delta_t"
@@ -281,6 +285,16 @@ CONFIG_SCHEMA = cv.Schema(
             unit_of_measurement=UNIT_PERCENT,
             accuracy_decimals=0,
             device_class=DEVICE_CLASS_HUMIDITY,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        # IZ2 desired speed sensors
+        cv.Optional(CONF_IZ2_COMPRESSOR_SPEED): sensor.sensor_schema(
+            accuracy_decimals=0,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        cv.Optional(CONF_IZ2_BLOWER_SPEED): sensor.sensor_schema(
+            unit_of_measurement=UNIT_PERCENT,
+            accuracy_decimals=0,
             state_class=STATE_CLASS_MEASUREMENT,
         ),
         # Derived sensors (computed on-device)
@@ -530,6 +544,15 @@ async def to_code(config):
     if CONF_DEHUMIDIFICATION_TARGET in config:
         sens = await sensor.new_sensor(config[CONF_DEHUMIDIFICATION_TARGET])
         cg.add(parent.set_dehumidification_target_sensor(sens))
+
+    # IZ2 desired speed sensors
+    if CONF_IZ2_COMPRESSOR_SPEED in config:
+        sens = await sensor.new_sensor(config[CONF_IZ2_COMPRESSOR_SPEED])
+        cg.add(parent.set_iz2_compressor_speed_sensor(sens))
+
+    if CONF_IZ2_BLOWER_SPEED in config:
+        sens = await sensor.new_sensor(config[CONF_IZ2_BLOWER_SPEED])
+        cg.add(parent.set_iz2_blower_speed_sensor(sens))
 
     # Derived sensors (computed on-device)
     if CONF_COP in config:
