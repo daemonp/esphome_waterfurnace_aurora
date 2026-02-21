@@ -629,7 +629,6 @@ void WaterFurnaceAurora::finish_setup_() {
 
 void WaterFurnaceAurora::build_poll_addresses_() {
   bool medium_poll = (this->poll_tier_counter_ % 6) == 0;
-  bool slow_poll = (this->poll_tier_counter_ % 60) == 0;
   
   this->addresses_to_read_.clear();
   if (this->addresses_to_read_.capacity() < 100) {
@@ -783,9 +782,6 @@ void WaterFurnaceAurora::start_poll_cycle_() {
     ESP_LOGD(TAG, "No registers to poll");
     return;
   }
-  
-  // Check if we need to read fault history this cycle (tier 2)
-  bool slow_poll = (this->poll_tier_counter_ % 60) == 0;
   
   auto frame = protocol::build_read_registers_request(this->address_, this->addresses_to_read_);
   if (frame.empty()) {
