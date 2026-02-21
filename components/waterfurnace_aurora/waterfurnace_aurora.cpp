@@ -419,6 +419,12 @@ void WaterFurnaceAurora::dump_config() {
   ESP_LOGCONFIG(TAG, "  Energy Monitor: %s",
                 this->energy_monitor_level_ == 0 ? "None" :
                 this->energy_monitor_level_ == 1 ? "Compressor Monitor" : "Energy Monitor");
+  if (this->cop_sensor_ != nullptr && this->energy_monitor_level_ < 2) {
+    ESP_LOGW(TAG, "  COP sensor configured but unit reports energy_monitor_level=%d; "
+                  "TOTAL_WATTS and heat registers will be polled but values may be "
+                  "unreliable without a hardware energy monitor",
+             this->energy_monitor_level_);
+  }
 }
 
 // ============================================================================
@@ -775,6 +781,21 @@ void WaterFurnaceAurora::build_poll_addresses_() {
     this->addresses_to_read_.push_back(registers::TOTAL_WATTS + 1);
     this->addresses_to_read_.push_back(registers::PUMP_WATTS);
     this->addresses_to_read_.push_back(registers::PUMP_WATTS + 1);
+  }
+  
+  // COP requires TOTAL_WATTS + heat registers regardless of energy_monitor_level.
+  // When those blocks above didn't already add them, add just what COP needs.
+  if (this->cop_sensor_ != nullptr) {
+    if (!this->energy_monitoring()) {
+      this->addresses_to_read_.push_back(registers::TOTAL_WATTS);
+      this->addresses_to_read_.push_back(registers::TOTAL_WATTS + 1);
+    }
+    if (!this->refrigeration_monitoring()) {
+      this->addresses_to_read_.push_back(registers::HEAT_OF_EXTRACTION);
+      this->addresses_to_read_.push_back(registers::HEAT_OF_EXTRACTION + 1);
+      this->addresses_to_read_.push_back(registers::HEAT_OF_REJECTION);
+      this->addresses_to_read_.push_back(registers::HEAT_OF_REJECTION + 1);
+    }
   }
   
   if (this->is_ecm_blower() || this->blower_type_ == BlowerType::FIVE_SPEED) {
@@ -1636,7 +1657,7 @@ void WaterFurnaceAurora::publish_derived_sensors(const RegisterMap &regs) {
     }
   }
   
-  // COP
+  // COP = useful heat output / electrical energy input
   if (this->cop_sensor_ != nullptr) {
     bool compressor_running = (this->system_outputs_ & (OUTPUT_CC | OUTPUT_CC2)) != 0;
     if (compressor_running) {
@@ -1653,10 +1674,19 @@ void WaterFurnaceAurora::publish_derived_sensors(const RegisterMap &regs) {
             int32_t heat_btu = to_int32(*heat_h, *heat_l);
             float cop = static_cast<float>(std::abs(heat_btu)) /
                         (static_cast<float>(total_watts) * BTU_PER_WATT_HOUR);
-            if (cop >= 0.5f && cop <= 15.0f)
+            if (cop >= 0.5f && cop <= 15.0f) {
               this->cop_sensor_->publish_state(cop);
+            } else {
+              ESP_LOGD(TAG, "COP %.2f outside plausible range [0.5, 15.0], skipping publish "
+                            "(heat_btu=%d, total_watts=%u)", cop,
+                            static_cast<int>(heat_btu), static_cast<unsigned>(total_watts));
+            }
+          } else {
+            ESP_LOGW(TAG, "COP: heat register %u not found in poll results", heat_reg);
           }
         }
+      } else {
+        ESP_LOGW(TAG, "COP: TOTAL_WATTS register not found in poll results");
       }
     } else {
       this->cop_sensor_->publish_state(0.0f);
