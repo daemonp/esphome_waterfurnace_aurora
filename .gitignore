@@ -9,6 +9,7 @@ __pycache__/
 # Test binaries (Catch2)
 tests/test_protocol
 tests/test_registers
+tests/test_hub
 
 # Reference project (checked out for comparison only)
 rw-wf/
