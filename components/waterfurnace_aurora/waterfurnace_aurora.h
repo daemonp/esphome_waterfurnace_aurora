@@ -178,9 +178,10 @@ namespace registers {
   // Humidistat (from humidistat.rb)
   constexpr uint16_t HUMIDISTAT_SETTINGS = 12309;    // For non-IZ2
   constexpr uint16_t HUMIDISTAT_TARGETS = 12310;     // For non-IZ2
-  constexpr uint16_t IZ2_HUMIDISTAT_SETTINGS = 21114;
-  constexpr uint16_t IZ2_HUMIDISTAT_MODE = 31109;
-  constexpr uint16_t IZ2_HUMIDISTAT_TARGETS = 31110;
+  constexpr uint16_t IZ2_HUMIDISTAT_SETTINGS = 21114;   // Write: mode bitmask (0x8000=auto humidify, 0x4000=auto dehumidify)
+  constexpr uint16_t IZ2_HUMIDISTAT_TARGETS_WRITE = 21115;  // Write: (humidify_target << 8) | dehumidify_target
+  constexpr uint16_t IZ2_HUMIDISTAT_MODE = 31109;       // Read: mode bitmask (same format as 21114)
+  constexpr uint16_t IZ2_HUMIDISTAT_TARGETS = 31110;    // Read: (humidify_target << 8) | dehumidify_target
   
   // Thermostat config (write)
   constexpr uint16_t HEATING_MODE_WRITE = 12606;
@@ -381,6 +382,8 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   void set_vs_safe_mode_sensor(text_sensor::TextSensor *sensor) { vs_safe_mode_sensor_ = sensor; }
   void set_vs_alarm_sensor(text_sensor::TextSensor *sensor) { vs_alarm_sensor_ = sensor; }
   void set_axb_inputs_sensor(text_sensor::TextSensor *sensor) { axb_inputs_sensor_ = sensor; }
+  void set_humidifier_mode_sensor(text_sensor::TextSensor *sensor) { humidifier_mode_sensor_ = sensor; }
+  void set_dehumidifier_mode_sensor(text_sensor::TextSensor *sensor) { dehumidifier_mode_sensor_ = sensor; }
 
   // Control methods (called by climate/water_heater components)
   bool set_heating_setpoint(float temp);
@@ -463,6 +466,11 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   // CRC calculation (standard Modbus CRC-16)
   uint16_t calculate_crc(const uint8_t *data, size_t len);
   
+  // Send a Modbus request and receive response (shared transport for all function codes)
+  // Handles: clear pending data, TX/RX flow control, write, flush, delay, wait_for_response
+  bool send_and_receive(const uint8_t *request, size_t request_len,
+                        std::vector<uint8_t> &response, uint32_t timeout_ms = 1000);
+  
   // Wait for and parse response
   bool wait_for_response(std::vector<uint8_t> &response, uint32_t timeout_ms = 1000);
   
@@ -492,6 +500,9 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   static std::string get_vs_alarm_string(uint16_t alarm1, uint16_t alarm2);
   static std::string get_axb_inputs_string(uint16_t value);
   
+  // Zone number validation helper (DRY: used by all 6 zone control methods)
+  bool validate_zone_number(uint8_t zone_number) const;
+  
   // AWL version helpers (from Ruby gem abc_client.rb)
   bool awl_axb() const { return has_axb_ && axb_version_ >= 2.0f; }
   bool awl_thermostat() const { return thermostat_version_ >= 3.0f; }
@@ -500,6 +511,58 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   bool is_ecm_blower() const { return blower_type_ == BLOWER_ECM_208 || blower_type_ == BLOWER_ECM_265; }
   bool refrigeration_monitoring() const { return energy_monitor_level_ >= 1; }
   bool energy_monitoring() const { return energy_monitor_level_ >= 2; }
+
+  // Sensor publication helpers — DRY extraction for the 50+ find-and-publish patterns.
+  // Ruby gem equivalent: REGISTER_CONVERTERS hash mapping lambdas to register arrays.
+  // Each helper finds the register in the result map, applies a conversion, and publishes.
+  // Returns true if the register was found (regardless of whether a sensor was configured).
+  
+  // Publish raw uint16_t value
+  bool publish_sensor(const std::map<uint16_t, uint16_t> &result, uint16_t reg,
+                      sensor::Sensor *sensor) {
+    auto it = result.find(reg);
+    if (it == result.end()) return false;
+    if (sensor != nullptr) sensor->publish_state(it->second);
+    return true;
+  }
+  
+  // Publish with to_tenths() conversion (unsigned value / 10.0)
+  bool publish_sensor_tenths(const std::map<uint16_t, uint16_t> &result, uint16_t reg,
+                             sensor::Sensor *sensor) {
+    auto it = result.find(reg);
+    if (it == result.end()) return false;
+    if (sensor != nullptr) sensor->publish_state(to_tenths(it->second));
+    return true;
+  }
+  
+  // Publish with to_signed_tenths() conversion (signed value / 10.0)
+  bool publish_sensor_signed_tenths(const std::map<uint16_t, uint16_t> &result, uint16_t reg,
+                                     sensor::Sensor *sensor) {
+    auto it = result.find(reg);
+    if (it == result.end()) return false;
+    if (sensor != nullptr) sensor->publish_state(to_signed_tenths(it->second));
+    return true;
+  }
+  
+  // Publish 32-bit unsigned value from two consecutive registers (high, low)
+  bool publish_sensor_uint32(const std::map<uint16_t, uint16_t> &result, uint16_t reg_high,
+                              sensor::Sensor *sensor) {
+    auto it_h = result.find(reg_high);
+    auto it_l = result.find(reg_high + 1);
+    if (it_h == result.end() || it_l == result.end()) return false;
+    if (sensor != nullptr) sensor->publish_state(to_uint32(it_h->second, it_l->second));
+    return true;
+  }
+  
+  // Publish 32-bit signed value from two consecutive registers (high, low)
+  bool publish_sensor_int32(const std::map<uint16_t, uint16_t> &result, uint16_t reg_high,
+                             sensor::Sensor *sensor) {
+    auto it_h = result.find(reg_high);
+    auto it_l = result.find(reg_high + 1);
+    if (it_h == result.end() || it_l == result.end()) return false;
+    if (sensor != nullptr) sensor->publish_state(to_int32(it_h->second, it_l->second));
+    return true;
+  }
 
   // Read fault history (registers 601-699)
   void read_fault_history();
@@ -641,6 +704,8 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   text_sensor::TextSensor *vs_safe_mode_sensor_{nullptr};
   text_sensor::TextSensor *vs_alarm_sensor_{nullptr};
   text_sensor::TextSensor *axb_inputs_sensor_{nullptr};
+  text_sensor::TextSensor *humidifier_mode_sensor_{nullptr};
+  text_sensor::TextSensor *dehumidifier_mode_sensor_{nullptr};
   
   // Cached device info
   std::string model_number_;

@@ -1,4 +1,5 @@
 #include "aurora_iz2_climate.h"
+#include "aurora_climate_utils.h"
 #include "esphome/core/log.h"
 
 namespace esphome {
@@ -69,29 +70,13 @@ void AuroraIZ2Climate::control(const climate::ClimateCall &call) {
 
   // Handle mode change
   if (call.get_mode().has_value()) {
-    climate::ClimateMode mode = *call.get_mode();
     HeatingMode aurora_mode;
-    
-    switch (mode) {
-      case climate::CLIMATE_MODE_OFF:
-        aurora_mode = HEATING_MODE_OFF;
-        break;
-      case climate::CLIMATE_MODE_HEAT_COOL:
-        aurora_mode = HEATING_MODE_AUTO;
-        break;
-      case climate::CLIMATE_MODE_COOL:
-        aurora_mode = HEATING_MODE_COOL;
-        break;
-      case climate::CLIMATE_MODE_HEAT:
-        aurora_mode = HEATING_MODE_HEAT;
-        break;
-      default:
-        ESP_LOGW(TAG, "Unsupported mode for zone %d", this->zone_number_);
-        return;
+    if (!esphome_to_aurora_mode(*call.get_mode(), aurora_mode)) {
+      ESP_LOGW(TAG, "Unsupported mode for zone %d", this->zone_number_);
+      return;
     }
-    
     if (this->parent_->set_zone_hvac_mode(this->zone_number_, aurora_mode)) {
-      this->mode = mode;
+      this->mode = *call.get_mode();
     }
   }
 
@@ -112,22 +97,9 @@ void AuroraIZ2Climate::control(const climate::ClimateCall &call) {
 
   // Handle fan mode
   if (call.get_fan_mode().has_value()) {
-    climate::ClimateFanMode fan_mode = *call.get_fan_mode();
-    FanMode aurora_fan;
-    
-    switch (fan_mode) {
-      case climate::CLIMATE_FAN_AUTO:
-        aurora_fan = FAN_MODE_AUTO;
-        break;
-      case climate::CLIMATE_FAN_ON:
-        aurora_fan = FAN_MODE_CONTINUOUS;
-        break;
-      default:
-        aurora_fan = FAN_MODE_AUTO;
-    }
-    
+    FanMode aurora_fan = esphome_to_aurora_fan(*call.get_fan_mode());
     if (this->parent_->set_zone_fan_mode(this->zone_number_, aurora_fan)) {
-      this->fan_mode = fan_mode;
+      this->fan_mode = *call.get_fan_mode();
     }
   }
 
@@ -183,27 +155,11 @@ void AuroraIZ2Climate::update_state_() {
   }
 
   // Update mode and preset
-  switch (zone.target_mode) {
-    case HEATING_MODE_OFF:
-      this->mode = climate::CLIMATE_MODE_OFF;
-      this->preset = climate::CLIMATE_PRESET_NONE;
-      break;
-    case HEATING_MODE_AUTO:
-      this->mode = climate::CLIMATE_MODE_HEAT_COOL;
-      this->preset = climate::CLIMATE_PRESET_NONE;
-      break;
-    case HEATING_MODE_COOL:
-      this->mode = climate::CLIMATE_MODE_COOL;
-      this->preset = climate::CLIMATE_PRESET_NONE;
-      break;
-    case HEATING_MODE_HEAT:
-      this->mode = climate::CLIMATE_MODE_HEAT;
-      this->preset = climate::CLIMATE_PRESET_NONE;
-      break;
-    case HEATING_MODE_EHEAT:
-      this->mode = climate::CLIMATE_MODE_HEAT;
-      this->preset = climate::CLIMATE_PRESET_BOOST;  // E-Heat shown as BOOST preset
-      break;
+  climate::ClimateMode new_mode;
+  climate::ClimatePreset new_preset;
+  if (aurora_to_esphome_mode(zone.target_mode, new_mode, new_preset)) {
+    this->mode = new_mode;
+    this->preset = new_preset;
   }
 
   // Update action based on zone current call and damper state
@@ -232,15 +188,7 @@ void AuroraIZ2Climate::update_state_() {
   }
 
   // Update fan mode
-  switch (zone.target_fan_mode) {
-    case FAN_MODE_AUTO:
-      this->fan_mode = climate::CLIMATE_FAN_AUTO;
-      break;
-    case FAN_MODE_CONTINUOUS:
-    case FAN_MODE_INTERMITTENT:
-      this->fan_mode = climate::CLIMATE_FAN_ON;
-      break;
-  }
+  this->fan_mode = aurora_to_esphome_fan(zone.target_fan_mode);
 
   this->publish_state();
 }
