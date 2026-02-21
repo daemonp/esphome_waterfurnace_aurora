@@ -352,11 +352,24 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   void build_poll_addresses_();
 
   // Sensor publication helpers — DRY extraction for the 50+ find-and-publish patterns.
+  // Each helper skips publish_state() if the sensor already has state and the value
+  // is unchanged. This avoids ~5-7ms of API/TCP overhead per sensor per cycle,
+  // reducing total publish time from ~333ms to ~20-40ms for typical polling.
+  static bool sensor_value_changed_(sensor::Sensor *sensor, float value) {
+    if (sensor == nullptr) return false;
+    if (!sensor->has_state()) return true;  // First publish — always send
+    // Both NaN → no change; one NaN → changed; otherwise compare values
+    if (std::isnan(value)) return !std::isnan(sensor->raw_state);
+    if (std::isnan(sensor->raw_state)) return true;
+    return value != sensor->raw_state;
+  }
+
   bool publish_sensor(const RegisterMap &result, uint16_t reg,
                       sensor::Sensor *sensor) {
     const uint16_t *val = reg_find(result, reg);
     if (!val) return false;
-    if (sensor != nullptr) sensor->publish_state(*val);
+    float fval = static_cast<float>(*val);
+    if (sensor_value_changed_(sensor, fval)) sensor->publish_state(fval);
     return true;
   }
   
@@ -364,7 +377,8 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
                              sensor::Sensor *sensor) {
     const uint16_t *val = reg_find(result, reg);
     if (!val) return false;
-    if (sensor != nullptr) sensor->publish_state(to_tenths(*val));
+    float fval = to_tenths(*val);
+    if (sensor_value_changed_(sensor, fval)) sensor->publish_state(fval);
     return true;
   }
   
@@ -372,7 +386,8 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
                                      sensor::Sensor *sensor) {
     const uint16_t *val = reg_find(result, reg);
     if (!val) return false;
-    if (sensor != nullptr) sensor->publish_state(to_signed_tenths(*val));
+    float fval = to_signed_tenths(*val);
+    if (sensor_value_changed_(sensor, fval)) sensor->publish_state(fval);
     return true;
   }
   
@@ -381,7 +396,8 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
     const uint16_t *val_h = reg_find(result, reg_high);
     const uint16_t *val_l = reg_find(result, reg_high + 1);
     if (!val_h || !val_l) return false;
-    if (sensor != nullptr) sensor->publish_state(to_uint32(*val_h, *val_l));
+    float fval = static_cast<float>(to_uint32(*val_h, *val_l));
+    if (sensor_value_changed_(sensor, fval)) sensor->publish_state(fval);
     return true;
   }
   
@@ -390,8 +406,15 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
     const uint16_t *val_h = reg_find(result, reg_high);
     const uint16_t *val_l = reg_find(result, reg_high + 1);
     if (!val_h || !val_l) return false;
-    if (sensor != nullptr) sensor->publish_state(to_int32(*val_h, *val_l));
+    float fval = static_cast<float>(to_int32(*val_h, *val_l));
+    if (sensor_value_changed_(sensor, fval)) sensor->publish_state(fval);
     return true;
+  }
+
+  /// Publish a binary sensor only if its value has changed from the last published state.
+  static void publish_binary_if_changed_(binary_sensor::BinarySensor *sensor, bool value) {
+    if (sensor == nullptr) return;
+    if (!sensor->has_state() || sensor->state != value) sensor->publish_state(value);
   }
 
   /// Publish a text sensor value only if it has changed from the cached value.

@@ -829,10 +829,6 @@ void WaterFurnaceAurora::start_poll_cycle_() {
     return;
   }
   
-  ESP_LOGD(TAG, "Poll cycle: %d registers to read (medium=%s)",
-           this->addresses_to_read_.size(),
-           (this->poll_tier_counter_ % 6 == 0) ? "yes" : "no");
-  
   auto frame = protocol::build_read_registers_request(this->address_, this->addresses_to_read_);
   if (frame.empty()) {
     ESP_LOGW(TAG, "Failed to build poll request (%d registers — max is %d)",
@@ -845,28 +841,11 @@ void WaterFurnaceAurora::start_poll_cycle_() {
 }
 
 void WaterFurnaceAurora::process_poll_response_(const protocol::ParsedResponse &resp) {
-  ESP_LOGD(TAG, "Poll response: %d values received, %d expected, cache has %d entries",
-           resp.registers.size(), this->expected_addresses_.size(), this->register_cache_.size());
-  
-  // Log any mismatch for debugging
-  if (resp.registers.size() != this->expected_addresses_.size()) {
-    ESP_LOGW(TAG, "Register count mismatch! Got %d, expected %d — some sensors will be missing",
-             resp.registers.size(), this->expected_addresses_.size());
-  }
-  
   // Merge response directly into cache — no intermediate allocation.
   // reg_insert() handles insert-or-update in the sorted vector.
   for (const auto &rv : resp.registers) {
     reg_insert(this->register_cache_, rv.address, rv.value);
   }
-  
-  // After cache update, verify key registers are present
-  ESP_LOGD(TAG, "Cache check: fault=%s outputs=%s ambient=%s vs_desired=%s vs_drive_temp=%s",
-           reg_find(this->register_cache_, registers::LAST_FAULT) ? "yes" : "NO",
-           reg_find(this->register_cache_, registers::SYSTEM_OUTPUTS) ? "yes" : "NO",
-           reg_find(this->register_cache_, registers::AMBIENT_TEMP) ? "yes" : "NO",
-           reg_find(this->register_cache_, registers::COMPRESSOR_SPEED_DESIRED) ? "yes" : "NO",
-           reg_find(this->register_cache_, registers::VS_DRIVE_TEMP) ? "yes" : "NO");
   
   // Publish all sensors from the cache
   this->publish_all_sensors_();
@@ -953,12 +932,11 @@ void WaterFurnaceAurora::publish_all_sensors_() {
     if (val) {
       this->current_fault_ = *val & 0x7FFF;
       this->locked_out_ = (*val & 0x8000) != 0;
-      if (this->fault_code_sensor_ != nullptr)
+      if (sensor_value_changed_(this->fault_code_sensor_, this->current_fault_))
         this->fault_code_sensor_->publish_state(this->current_fault_);
       this->publish_text_if_changed(this->fault_description_sensor_, this->cached_fault_description_,
                                      get_fault_description(this->current_fault_));
-      if (this->lockout_sensor_ != nullptr)
-        this->lockout_sensor_->publish_state(this->locked_out_);
+      publish_binary_if_changed_(this->lockout_sensor_, this->locked_out_);
     }
   }
   
@@ -967,7 +945,7 @@ void WaterFurnaceAurora::publish_all_sensors_() {
     const uint16_t *val = reg_find(regs, registers::LAST_LOCKOUT_FAULT);
     if (val) {
       uint16_t lockout_code = *val & 0x7FFF;
-      if (this->lockout_fault_sensor_ != nullptr)
+      if (sensor_value_changed_(this->lockout_fault_sensor_, lockout_code))
         this->lockout_fault_sensor_->publish_state(lockout_code);
       this->publish_text_if_changed(this->lockout_fault_description_sensor_,
                                      this->cached_lockout_fault_description_,
@@ -994,16 +972,17 @@ void WaterFurnaceAurora::publish_all_sensors_() {
     const uint16_t *val = reg_find(regs, registers::SYSTEM_OUTPUTS);
     if (val) {
       this->system_outputs_ = *val;
-      if (this->compressor_sensor_ != nullptr)
-        this->compressor_sensor_->publish_state((this->system_outputs_ & (OUTPUT_CC | OUTPUT_CC2)) != 0);
-      if (this->blower_sensor_ != nullptr)
-        this->blower_sensor_->publish_state((this->system_outputs_ & OUTPUT_BLOWER) != 0);
-      if (this->aux_heat_sensor_ != nullptr)
-        this->aux_heat_sensor_->publish_state((this->system_outputs_ & (OUTPUT_EH1 | OUTPUT_EH2)) != 0);
-      if (this->aux_heat_stage_sensor_ != nullptr) {
-        uint8_t stage = (this->system_outputs_ & OUTPUT_EH2) ? 2
-                      : (this->system_outputs_ & OUTPUT_EH1) ? 1 : 0;
-        this->aux_heat_stage_sensor_->publish_state(stage);
+      publish_binary_if_changed_(this->compressor_sensor_,
+                                 (this->system_outputs_ & (OUTPUT_CC | OUTPUT_CC2)) != 0);
+      publish_binary_if_changed_(this->blower_sensor_,
+                                 (this->system_outputs_ & OUTPUT_BLOWER) != 0);
+      publish_binary_if_changed_(this->aux_heat_sensor_,
+                                 (this->system_outputs_ & (OUTPUT_EH1 | OUTPUT_EH2)) != 0);
+      {
+        float stage = static_cast<float>((this->system_outputs_ & OUTPUT_EH2) ? 2
+                      : (this->system_outputs_ & OUTPUT_EH1) ? 1 : 0);
+        if (sensor_value_changed_(this->aux_heat_stage_sensor_, stage))
+          this->aux_heat_stage_sensor_->publish_state(stage);
       }
     }
   }
@@ -1013,14 +992,11 @@ void WaterFurnaceAurora::publish_all_sensors_() {
     const uint16_t *val = reg_find(regs, registers::SYSTEM_STATUS);
     if (val) {
       uint16_t status = *val;
-      if (this->lps_sensor_ != nullptr)
-        this->lps_sensor_->publish_state((status & STATUS_LPS) != 0);
-      if (this->hps_sensor_ != nullptr)
-        this->hps_sensor_->publish_state((status & STATUS_HPS) != 0);
-      if (this->emergency_shutdown_sensor_ != nullptr)
-        this->emergency_shutdown_sensor_->publish_state((status & STATUS_EMERGENCY_SHUTDOWN) != 0);
-      if (this->load_shed_sensor_ != nullptr)
-        this->load_shed_sensor_->publish_state((status & STATUS_LOAD_SHED) != 0);
+      publish_binary_if_changed_(this->lps_sensor_, (status & STATUS_LPS) != 0);
+      publish_binary_if_changed_(this->hps_sensor_, (status & STATUS_HPS) != 0);
+      publish_binary_if_changed_(this->emergency_shutdown_sensor_,
+                                 (status & STATUS_EMERGENCY_SHUTDOWN) != 0);
+      publish_binary_if_changed_(this->load_shed_sensor_, (status & STATUS_LOAD_SHED) != 0);
     }
   }
   
@@ -1035,10 +1011,10 @@ void WaterFurnaceAurora::publish_all_sensors_() {
     const uint16_t *val = reg_find(regs, registers::AXB_OUTPUTS);
     if (val) {
       this->axb_outputs_ = *val;
-      if (this->dhw_running_sensor_ != nullptr)
-        this->dhw_running_sensor_->publish_state((this->axb_outputs_ & AXB_OUTPUT_DHW) != 0);
-      if (this->loop_pump_sensor_ != nullptr)
-        this->loop_pump_sensor_->publish_state((this->axb_outputs_ & AXB_OUTPUT_LOOP_PUMP) != 0);
+      publish_binary_if_changed_(this->dhw_running_sensor_,
+                                 (this->axb_outputs_ & AXB_OUTPUT_DHW) != 0);
+      publish_binary_if_changed_(this->loop_pump_sensor_,
+                                 (this->axb_outputs_ & AXB_OUTPUT_LOOP_PUMP) != 0);
     }
   }
   
@@ -1057,7 +1033,7 @@ void WaterFurnaceAurora::publish_all_sensors_() {
     const uint16_t *val_amb = reg_find(regs, registers::AMBIENT_TEMP);
     if (val_amb) {
       this->ambient_temp_ = to_signed_tenths(*val_amb);
-      if (this->ambient_temp_sensor_ != nullptr)
+      if (sensor_value_changed_(this->ambient_temp_sensor_, this->ambient_temp_))
         this->ambient_temp_sensor_->publish_state(this->ambient_temp_);
     }
   }
@@ -1077,13 +1053,13 @@ void WaterFurnaceAurora::publish_all_sensors_() {
     const uint16_t *val_hsp = reg_find(regs, registers::HEATING_SETPOINT);
     if (val_hsp) {
       this->heating_setpoint_ = to_tenths(*val_hsp);
-      if (this->heating_setpoint_sensor_ != nullptr)
+      if (sensor_value_changed_(this->heating_setpoint_sensor_, this->heating_setpoint_))
         this->heating_setpoint_sensor_->publish_state(this->heating_setpoint_);
     }
     const uint16_t *val_csp = reg_find(regs, registers::COOLING_SETPOINT);
     if (val_csp) {
       this->cooling_setpoint_ = to_tenths(*val_csp);
-      if (this->cooling_setpoint_sensor_ != nullptr)
+      if (sensor_value_changed_(this->cooling_setpoint_sensor_, this->cooling_setpoint_))
         this->cooling_setpoint_sensor_->publish_state(this->cooling_setpoint_);
     }
   }
@@ -1097,7 +1073,7 @@ void WaterFurnaceAurora::publish_all_sensors_() {
     const uint16_t *val_dhwsp = reg_find(regs, registers::DHW_SETPOINT);
     if (val_dhwsp) {
       this->dhw_setpoint_ = to_tenths(*val_dhwsp);
-      if (this->dhw_setpoint_sensor_ != nullptr)
+      if (sensor_value_changed_(this->dhw_setpoint_sensor_, this->dhw_setpoint_))
         this->dhw_setpoint_sensor_->publish_state(this->dhw_setpoint_);
     }
   }
@@ -1105,7 +1081,7 @@ void WaterFurnaceAurora::publish_all_sensors_() {
     const uint16_t *val_dhwt = reg_find(regs, registers::DHW_TEMP);
     if (val_dhwt) {
       this->dhw_temp_ = to_signed_tenths(*val_dhwt);
-      if (this->dhw_temp_sensor_ != nullptr)
+      if (sensor_value_changed_(this->dhw_temp_sensor_, this->dhw_temp_))
         this->dhw_temp_sensor_->publish_state(this->dhw_temp_);
     }
   }
@@ -1151,8 +1127,11 @@ void WaterFurnaceAurora::publish_all_sensors_() {
   this->publish_sensor_tenths(regs, registers::WATERFLOW, this->waterflow_sensor_);
   {
     const uint16_t *val_lp = reg_find(regs, registers::LOOP_PRESSURE);
-    if (val_lp && *val_lp < 10000 && this->loop_pressure_sensor_ != nullptr)
-      this->loop_pressure_sensor_->publish_state(to_tenths(*val_lp));
+    if (val_lp && *val_lp < 10000) {
+      float fval = to_tenths(*val_lp);
+      if (sensor_value_changed_(this->loop_pressure_sensor_, fval))
+        this->loop_pressure_sensor_->publish_state(fval);
+    }
   }
   
   // VS Drive
@@ -1217,21 +1196,21 @@ void WaterFurnaceAurora::publish_all_sensors_() {
   uint16_t subcool_reg = is_cooling ? registers::SUBCOOL_COOLING : registers::SUBCOOL_HEATING;
   {
     const uint16_t *val = reg_find(regs, subcool_reg);
-    if (val && this->subcool_temp_sensor_ != nullptr)
-      this->subcool_temp_sensor_->publish_state(to_signed_tenths(*val));
+    if (val) {
+      float fval = to_signed_tenths(*val);
+      if (sensor_value_changed_(this->subcool_temp_sensor_, fval))
+        this->subcool_temp_sensor_->publish_state(fval);
+    }
   }
   
   this->publish_sensor_int32(regs, registers::HEAT_OF_EXTRACTION, this->heat_of_extraction_sensor_);
   this->publish_sensor_int32(regs, registers::HEAT_OF_REJECTION, this->heat_of_rejection_sensor_);
   
   // Humidifier/Dehumidifier running
-  if (this->humidifier_running_sensor_ != nullptr) {
-    this->humidifier_running_sensor_->publish_state((this->system_outputs_ & OUTPUT_ACCESSORY) != 0);
-  }
-  if (this->dehumidifier_running_sensor_ != nullptr) {
-    this->dehumidifier_running_sensor_->publish_state(
-        this->active_dehumidify_ || ((this->axb_outputs_ & 0x10) != 0));
-  }
+  publish_binary_if_changed_(this->humidifier_running_sensor_,
+                             (this->system_outputs_ & OUTPUT_ACCESSORY) != 0);
+  publish_binary_if_changed_(this->dehumidifier_running_sensor_,
+                             this->active_dehumidify_ || ((this->axb_outputs_ & 0x10) != 0));
   
   // Humidistat
   {
@@ -1252,10 +1231,12 @@ void WaterFurnaceAurora::publish_all_sensors_() {
 
     const uint16_t *val_targets = reg_find(regs, target_reg);
     if (val_targets) {
-      if (this->humidification_target_sensor_ != nullptr)
-        this->humidification_target_sensor_->publish_state((*val_targets >> 8) & 0xFF);
-      if (this->dehumidification_target_sensor_ != nullptr)
-        this->dehumidification_target_sensor_->publish_state(*val_targets & 0xFF);
+      float hum_target = static_cast<float>((*val_targets >> 8) & 0xFF);
+      if (sensor_value_changed_(this->humidification_target_sensor_, hum_target))
+        this->humidification_target_sensor_->publish_state(hum_target);
+      float dehum_target = static_cast<float>(*val_targets & 0xFF);
+      if (sensor_value_changed_(this->dehumidification_target_sensor_, dehum_target))
+        this->dehumidification_target_sensor_->publish_state(dehum_target);
     }
   }
   
@@ -1365,6 +1346,7 @@ bool WaterFurnaceAurora::set_heating_setpoint(float temp) {
   }
   uint16_t value = static_cast<uint16_t>(temp * 10);
   this->write_register(registers::HEATING_SETPOINT_WRITE, value);
+  this->heating_setpoint_ = temp;  // Optimistic update — prevents stale read-back during cooldown
   this->last_setpoint_write_ = millis();
   return true;
 }
@@ -1376,24 +1358,28 @@ bool WaterFurnaceAurora::set_cooling_setpoint(float temp) {
   }
   uint16_t value = static_cast<uint16_t>(temp * 10);
   this->write_register(registers::COOLING_SETPOINT_WRITE, value);
+  this->cooling_setpoint_ = temp;  // Optimistic update — prevents stale read-back during cooldown
   this->last_setpoint_write_ = millis();
   return true;
 }
 
 bool WaterFurnaceAurora::set_hvac_mode(HeatingMode mode) {
   this->write_register(registers::HEATING_MODE_WRITE, static_cast<uint16_t>(mode));
+  this->hvac_mode_ = mode;  // Optimistic update — prevents stale read-back during cooldown
   this->last_mode_write_ = millis();
   return true;
 }
 
 bool WaterFurnaceAurora::set_fan_mode(FanMode mode) {
   this->write_register(registers::FAN_MODE_WRITE, static_cast<uint16_t>(mode));
+  this->fan_mode_ = mode;  // Optimistic update — prevents stale read-back during cooldown
   this->last_fan_write_ = millis();
   return true;
 }
 
 bool WaterFurnaceAurora::set_dhw_enabled(bool enabled) {
   this->write_register(registers::DHW_ENABLED, enabled ? 1 : 0);
+  this->dhw_enabled_ = enabled;  // Optimistic update
   return true;
 }
 
@@ -1403,6 +1389,7 @@ bool WaterFurnaceAurora::set_dhw_setpoint(float temp) {
     return false;
   }
   this->write_register(registers::DHW_SETPOINT, static_cast<uint16_t>(temp * 10));
+  this->dhw_setpoint_ = temp;  // Optimistic update
   return true;
 }
 
