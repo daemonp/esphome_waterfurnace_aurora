@@ -211,6 +211,27 @@ TEST_CASE("get_axb_inputs_string", "[registers]") {
   REQUIRE(result.find("SmartGrid") != std::string::npos);
 }
 
+TEST_CASE("get_outputs_string", "[registers][bitmask]") {
+  REQUIRE(get_outputs_string(0) == "None");
+  REQUIRE(get_outputs_string(OUTPUT_CC) == "CC");
+  REQUIRE(get_outputs_string(OUTPUT_CC | OUTPUT_BLOWER) == "CC, Blower");
+  REQUIRE(get_outputs_string(OUTPUT_LOCKOUT).find("Lockout") != std::string::npos);
+}
+
+TEST_CASE("get_inputs_string", "[registers][bitmask]") {
+  REQUIRE(get_inputs_string(0) == "None");
+  REQUIRE(get_inputs_string(STATUS_Y1) == "Y1");
+  REQUIRE(get_inputs_string(STATUS_LPS | STATUS_HPS) == "LPS, HPS");
+  REQUIRE(get_inputs_string(STATUS_EMERGENCY_SHUTDOWN).find("Emergency") != std::string::npos);
+}
+
+TEST_CASE("Lockout register constants", "[registers]") {
+  // Verify register addresses
+  REQUIRE(registers::LAST_LOCKOUT_FAULT == 26);
+  REQUIRE(registers::OUTPUTS_AT_LOCKOUT == 27);
+  REQUIRE(registers::INPUTS_AT_LOCKOUT == 28);
+}
+
 // ============================================================================
 // IZ2 Zone Extraction
 // ============================================================================

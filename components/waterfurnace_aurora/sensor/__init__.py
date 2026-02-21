@@ -46,6 +46,7 @@ CONF_PUMP_WATTS = "pump_watts"
 CONF_WATERFLOW = "waterflow"
 CONF_LOOP_PRESSURE = "loop_pressure"
 CONF_FAULT_CODE = "fault_code"
+CONF_LOCKOUT_FAULT_CODE = "lockout_fault_code"
 CONF_FP1_TEMPERATURE = "fp1_temperature"
 CONF_FP2_TEMPERATURE = "fp2_temperature"
 CONF_LINE_VOLTAGE_SETTING = "line_voltage_setting"
@@ -183,6 +184,9 @@ CONFIG_SCHEMA = cv.Schema(
         ),
         # Fault
         cv.Optional(CONF_FAULT_CODE): sensor.sensor_schema(
+            accuracy_decimals=0,
+        ),
+        cv.Optional(CONF_LOCKOUT_FAULT_CODE): sensor.sensor_schema(
             accuracy_decimals=0,
         ),
         # FP1/FP2 refrigerant temperatures
@@ -419,6 +423,10 @@ async def to_code(config):
     if CONF_FAULT_CODE in config:
         sens = await sensor.new_sensor(config[CONF_FAULT_CODE])
         cg.add(parent.set_fault_code_sensor(sens))
+
+    if CONF_LOCKOUT_FAULT_CODE in config:
+        sens = await sensor.new_sensor(config[CONF_LOCKOUT_FAULT_CODE])
+        cg.add(parent.set_lockout_fault_sensor(sens))
 
     # FP1/FP2 refrigerant temperatures
     if CONF_FP1_TEMPERATURE in config:

@@ -236,5 +236,13 @@ std::string get_axb_inputs_string(uint16_t value) {
   return result;
 }
 
+std::string get_outputs_string(uint16_t value) {
+  return bitmask_to_string(value, OUTPUT_BITS, OUTPUT_BITS_COUNT);
+}
+
+std::string get_inputs_string(uint16_t value) {
+  return bitmask_to_string(value, INPUT_BITS, INPUT_BITS_COUNT);
+}
+
 }  // namespace waterfurnace_aurora
 }  // namespace esphome

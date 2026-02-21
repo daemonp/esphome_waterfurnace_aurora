@@ -129,6 +129,8 @@ sensor:
       name: "Test Pump Speed"
     fault_code:
       name: "Test Fault Code"
+    lockout_fault_code:
+      name: "Test Lockout Fault Code"
     cop:
       name: "Test COP"
     water_delta_t:
@@ -161,6 +163,12 @@ text_sensor:
       name: "Test Fault Description"
     model_number:
       name: "Test Model Number"
+    lockout_fault_description:
+      name: "Test Lockout Fault Description"
+    outputs_at_lockout:
+      name: "Test Outputs at Lockout"
+    inputs_at_lockout:
+      name: "Test Inputs at Lockout"
 
 # --- Buttons ---
 button:

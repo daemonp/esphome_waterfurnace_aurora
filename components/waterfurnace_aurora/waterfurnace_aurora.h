@@ -195,6 +195,10 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   void set_humidifier_mode_sensor(text_sensor::TextSensor *sensor) { humidifier_mode_sensor_ = sensor; }
   void set_dehumidifier_mode_sensor(text_sensor::TextSensor *sensor) { dehumidifier_mode_sensor_ = sensor; }
   void set_pump_type_sensor(text_sensor::TextSensor *sensor) { pump_type_sensor_ = sensor; }
+  void set_lockout_fault_sensor(sensor::Sensor *sensor) { lockout_fault_sensor_ = sensor; }
+  void set_lockout_fault_description_sensor(text_sensor::TextSensor *sensor) { lockout_fault_description_sensor_ = sensor; }
+  void set_outputs_at_lockout_sensor(text_sensor::TextSensor *sensor) { outputs_at_lockout_sensor_ = sensor; }
+  void set_inputs_at_lockout_sensor(text_sensor::TextSensor *sensor) { inputs_at_lockout_sensor_ = sensor; }
 
   // Control methods — now queue writes instead of blocking
   void write_register(uint16_t addr, uint16_t value);
@@ -568,6 +572,12 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   text_sensor::TextSensor *dehumidifier_mode_sensor_{nullptr};
   text_sensor::TextSensor *pump_type_sensor_{nullptr};
   
+  // Lockout diagnostic sensors
+  sensor::Sensor *lockout_fault_sensor_{nullptr};
+  text_sensor::TextSensor *lockout_fault_description_sensor_{nullptr};
+  text_sensor::TextSensor *outputs_at_lockout_sensor_{nullptr};
+  text_sensor::TextSensor *inputs_at_lockout_sensor_{nullptr};
+  
   // Observer callbacks
   std::vector<std::function<void()>> listeners_;
   
@@ -582,6 +592,9 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   std::string cached_axb_inputs_;
   std::string cached_humidifier_mode_;
   std::string cached_dehumidifier_mode_;
+  std::string cached_lockout_fault_description_;
+  std::string cached_outputs_at_lockout_;
+  std::string cached_inputs_at_lockout_;
   
   // Adaptive polling tier counter
   uint8_t poll_tier_counter_{0};

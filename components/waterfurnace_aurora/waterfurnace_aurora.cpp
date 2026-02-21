@@ -736,6 +736,9 @@ void WaterFurnaceAurora::build_poll_addresses_() {
   
   // === TIER 1: Medium registers — every 6th cycle (~30s) ===
   if (medium_poll) {
+    this->addresses_to_read_.push_back(registers::LAST_LOCKOUT_FAULT);
+    this->addresses_to_read_.push_back(registers::OUTPUTS_AT_LOCKOUT);
+    this->addresses_to_read_.push_back(registers::INPUTS_AT_LOCKOUT);
     this->addresses_to_read_.push_back(registers::LINE_VOLTAGE_SETTING);
     this->addresses_to_read_.push_back(registers::HEATING_SETPOINT);
     this->addresses_to_read_.push_back(registers::COOLING_SETPOINT);
@@ -903,6 +906,33 @@ void WaterFurnaceAurora::publish_all_sensors_() {
       if (this->lockout_sensor_ != nullptr)
         this->lockout_sensor_->publish_state(this->locked_out_);
     }
+  }
+  
+  // Lockout diagnostics (registers 26-28)
+  {
+    const uint16_t *val = reg_find(regs, registers::LAST_LOCKOUT_FAULT);
+    if (val) {
+      uint16_t lockout_code = *val & 0x7FFF;
+      if (this->lockout_fault_sensor_ != nullptr)
+        this->lockout_fault_sensor_->publish_state(lockout_code);
+      this->publish_text_if_changed(this->lockout_fault_description_sensor_,
+                                     this->cached_lockout_fault_description_,
+                                     get_fault_description(lockout_code));
+    }
+  }
+  {
+    const uint16_t *val = reg_find(regs, registers::OUTPUTS_AT_LOCKOUT);
+    if (val)
+      this->publish_text_if_changed(this->outputs_at_lockout_sensor_,
+                                     this->cached_outputs_at_lockout_,
+                                     get_outputs_string(*val));
+  }
+  {
+    const uint16_t *val = reg_find(regs, registers::INPUTS_AT_LOCKOUT);
+    if (val)
+      this->publish_text_if_changed(this->inputs_at_lockout_sensor_,
+                                     this->cached_inputs_at_lockout_,
+                                     get_inputs_string(*val));
   }
   
   // System outputs

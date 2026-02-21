@@ -22,6 +22,9 @@ CONF_AXB_INPUTS = "axb_inputs"
 CONF_HUMIDIFIER_MODE = "humidifier_mode"
 CONF_DEHUMIDIFIER_MODE = "dehumidifier_mode"
 CONF_PUMP_TYPE = "pump_type"
+CONF_LOCKOUT_FAULT_DESCRIPTION = "lockout_fault_description"
+CONF_OUTPUTS_AT_LOCKOUT = "outputs_at_lockout"
+CONF_INPUTS_AT_LOCKOUT = "inputs_at_lockout"
 
 CONFIG_SCHEMA = cv.Schema(
     {
@@ -40,6 +43,9 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_HUMIDIFIER_MODE): text_sensor.text_sensor_schema(),
         cv.Optional(CONF_DEHUMIDIFIER_MODE): text_sensor.text_sensor_schema(),
         cv.Optional(CONF_PUMP_TYPE): text_sensor.text_sensor_schema(),
+        cv.Optional(CONF_LOCKOUT_FAULT_DESCRIPTION): text_sensor.text_sensor_schema(),
+        cv.Optional(CONF_OUTPUTS_AT_LOCKOUT): text_sensor.text_sensor_schema(),
+        cv.Optional(CONF_INPUTS_AT_LOCKOUT): text_sensor.text_sensor_schema(),
     }
 )
 
@@ -102,3 +108,15 @@ async def to_code(config):
     if CONF_PUMP_TYPE in config:
         sens = await text_sensor.new_text_sensor(config[CONF_PUMP_TYPE])
         cg.add(parent.set_pump_type_sensor(sens))
+
+    if CONF_LOCKOUT_FAULT_DESCRIPTION in config:
+        sens = await text_sensor.new_text_sensor(config[CONF_LOCKOUT_FAULT_DESCRIPTION])
+        cg.add(parent.set_lockout_fault_description_sensor(sens))
+
+    if CONF_OUTPUTS_AT_LOCKOUT in config:
+        sens = await text_sensor.new_text_sensor(config[CONF_OUTPUTS_AT_LOCKOUT])
+        cg.add(parent.set_outputs_at_lockout_sensor(sens))
+
+    if CONF_INPUTS_AT_LOCKOUT in config:
+        sens = await text_sensor.new_text_sensor(config[CONF_INPUTS_AT_LOCKOUT])
+        cg.add(parent.set_inputs_at_lockout_sensor(sens))

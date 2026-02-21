@@ -136,6 +136,9 @@ namespace registers {
   static constexpr uint16_t FP1_TEMP = 19;
   static constexpr uint16_t FP2_TEMP = 20;
   static constexpr uint16_t LAST_FAULT = 25;
+  static constexpr uint16_t LAST_LOCKOUT_FAULT = 26;     // High bit = locked, bits 0-14 = fault code
+  static constexpr uint16_t OUTPUTS_AT_LOCKOUT = 27;     // Bitmask: system outputs when lockout occurred
+  static constexpr uint16_t INPUTS_AT_LOCKOUT = 28;      // Bitmask: system status/inputs when lockout occurred
   static constexpr uint16_t SYSTEM_OUTPUTS = 30;
   static constexpr uint16_t SYSTEM_STATUS = 31;
   static constexpr uint16_t MODEL_NUMBER = 92;       // 12 registers (92-103)
@@ -331,6 +334,34 @@ struct BitLabel {
 std::string bitmask_to_string(uint16_t value, const BitLabel *bits, size_t count);
 
 // Predefined bit label tables
+
+static constexpr BitLabel OUTPUT_BITS[] = {
+  {OUTPUT_CC, "CC"},
+  {OUTPUT_CC2, "CC2"},
+  {OUTPUT_RV, "RV"},
+  {OUTPUT_BLOWER, "Blower"},
+  {OUTPUT_EH1, "EH1"},
+  {OUTPUT_EH2, "EH2"},
+  {OUTPUT_ACCESSORY, "Accessory"},
+  {OUTPUT_LOCKOUT, "Lockout"},
+  {OUTPUT_ALARM, "Alarm"},
+};
+static constexpr size_t OUTPUT_BITS_COUNT = sizeof(OUTPUT_BITS) / sizeof(OUTPUT_BITS[0]);
+
+static constexpr BitLabel INPUT_BITS[] = {
+  {STATUS_Y1, "Y1"},
+  {STATUS_Y2, "Y2"},
+  {STATUS_W, "W"},
+  {STATUS_O, "O"},
+  {STATUS_G, "G"},
+  {STATUS_DH_RH, "DH/RH"},
+  {STATUS_EMERGENCY_SHUTDOWN, "Emergency Shutdown"},
+  {STATUS_LPS, "LPS"},
+  {STATUS_HPS, "HPS"},
+  {STATUS_LOAD_SHED, "Load Shed"},
+};
+static constexpr size_t INPUT_BITS_COUNT = sizeof(INPUT_BITS) / sizeof(INPUT_BITS[0]);
+
 static constexpr BitLabel VS_DERATE_BITS[] = {
   {VS_DERATE_DRIVE_OVER_TEMP, "Drive Over Temp"},
   {VS_DERATE_LOW_SUCTION_PRESSURE, "Low Suction Pressure"},
@@ -435,6 +466,12 @@ std::string get_vs_alarm_string(uint16_t alarm1, uint16_t alarm2);
 
 /// Get AXB inputs string from bitmask.
 std::string get_axb_inputs_string(uint16_t value);
+
+/// Get system outputs string from bitmask (for lockout diagnostics).
+std::string get_outputs_string(uint16_t value);
+
+/// Get system inputs/status string from bitmask (for lockout diagnostics).
+std::string get_inputs_string(uint16_t value);
 
 // ============================================================================
 // IZ2 Zone Extraction Helpers
