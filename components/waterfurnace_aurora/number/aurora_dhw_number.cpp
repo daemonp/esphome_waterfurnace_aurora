@@ -75,9 +75,33 @@ void AuroraNumber::update_state_() {
       value = this->parent_->get_cached_register(registers::VS_PUMP_MAX);
       break;
     case AuroraNumberType::FAN_INTERMITTENT_ON:
+      if (this->zone_number_ > 0) {
+        // IZ2 per-zone: read from zone data (parsed from config1 register)
+        if (this->zone_number_ <= this->parent_->get_num_iz2_zones()) {
+          const auto &zone = this->parent_->get_zone_data(this->zone_number_);
+          value = static_cast<float>(zone.fan_on_time);
+        }
+      } else {
+        // System-wide: read from FAN_CONFIG register (same bit layout as IZ2 config1)
+        float raw = this->parent_->get_cached_register(registers::FAN_CONFIG);
+        if (!std::isnan(raw))
+          value = static_cast<float>(iz2_extract_fan_on_time(static_cast<uint16_t>(raw)));
+      }
+      break;
     case AuroraNumberType::FAN_INTERMITTENT_OFF:
-      // Write-only registers — no read-back available
-      return;
+      if (this->zone_number_ > 0) {
+        // IZ2 per-zone: read from zone data (parsed from config1 register)
+        if (this->zone_number_ <= this->parent_->get_num_iz2_zones()) {
+          const auto &zone = this->parent_->get_zone_data(this->zone_number_);
+          value = static_cast<float>(zone.fan_off_time);
+        }
+      } else {
+        // System-wide: read from FAN_CONFIG register (same bit layout as IZ2 config1)
+        float raw = this->parent_->get_cached_register(registers::FAN_CONFIG);
+        if (!std::isnan(raw))
+          value = static_cast<float>(iz2_extract_fan_off_time(static_cast<uint16_t>(raw)));
+      }
+      break;
     case AuroraNumberType::HUMIDIFICATION_TARGET:
       // Read from humidistat targets register (high byte).
       // IZ2 systems use a different read register than non-IZ2.
@@ -123,8 +147,11 @@ void AuroraNumber::dump_config() {
     case AuroraNumberType::DEHUMIDIFICATION_TARGET: type_name = "Dehumidification Target"; break;
     default: break;
   }
-  ESP_LOGCONFIG(TAG, "Aurora Number: %s", type_name);
+  ESP_LOGCONFIG(TAG, "Aurora Number: %s%s", type_name,
+                this->zone_number_ > 0 ? " (zone)" : "");
   ESP_LOGCONFIG(TAG, "  Parent: %s", this->parent_ != nullptr ? "configured" : "NOT SET");
+  if (this->zone_number_ > 0)
+    ESP_LOGCONFIG(TAG, "  Zone: %d", this->zone_number_);
 }
 
 void AuroraNumber::control(float value) {
@@ -163,10 +190,16 @@ void AuroraNumber::control(float value) {
       success = this->parent_->set_pump_max_speed(int_value);
       break;
     case AuroraNumberType::FAN_INTERMITTENT_ON:
-      success = this->parent_->set_fan_intermittent_on(int_value);
+      if (this->zone_number_ > 0)
+        success = this->parent_->set_zone_fan_intermittent_on(this->zone_number_, int_value);
+      else
+        success = this->parent_->set_fan_intermittent_on(int_value);
       break;
     case AuroraNumberType::FAN_INTERMITTENT_OFF:
-      success = this->parent_->set_fan_intermittent_off(int_value);
+      if (this->zone_number_ > 0)
+        success = this->parent_->set_zone_fan_intermittent_off(this->zone_number_, int_value);
+      else
+        success = this->parent_->set_fan_intermittent_off(int_value);
       break;
     case AuroraNumberType::HUMIDIFICATION_TARGET:
       success = this->parent_->set_humidification_target(int_value);

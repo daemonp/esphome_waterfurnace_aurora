@@ -50,6 +50,7 @@ class AuroraNumber : public number::Number, public Component {
 
   void set_parent(WaterFurnaceAurora *parent) { this->parent_ = parent; }
   void set_type(AuroraNumberType type) { this->type_ = type; }
+  void set_zone_number(uint8_t zone) { this->zone_number_ = zone; }
 
  protected:
   void control(float value) override;
@@ -57,6 +58,7 @@ class AuroraNumber : public number::Number, public Component {
 
   WaterFurnaceAurora *parent_{nullptr};
   AuroraNumberType type_{AuroraNumberType::BLOWER_ONLY_SPEED};
+  uint8_t zone_number_{0};  // 0 = system-wide, 1-6 = IZ2 zone
   float last_value_{NAN};
 };
 

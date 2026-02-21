@@ -15,6 +15,7 @@ from esphome.const import (
 from .. import waterfurnace_aurora_ns, WaterFurnaceAurora, CONF_AURORA_ID
 
 UNIT_FAHRENHEIT = "°F"
+CONF_ZONE = "zone"
 
 DEPENDENCIES = ["waterfurnace_aurora"]
 CODEOWNERS = ["@daemonp"]
@@ -82,7 +83,16 @@ PUMP_SPEED_SCHEMA = number.number_schema(
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
+def validate_zone(value):
+    """Validate zone number is 1-6."""
+    value = cv.int_(value)
+    if value < 1 or value > 6:
+        raise cv.Invalid("Zone number must be between 1 and 6")
+    return value
+
+
 # Schema for fan intermittent on time (0, 5, 10, 15, 20, 25 minutes)
+# Supports optional zone parameter for IZ2 per-zone control.
 FAN_ON_TIME_SCHEMA = number.number_schema(
     AuroraNumber,
     unit_of_measurement="min",
@@ -92,10 +102,12 @@ FAN_ON_TIME_SCHEMA = number.number_schema(
         cv.Optional(CONF_MIN_VALUE, default=0): cv.float_,
         cv.Optional(CONF_MAX_VALUE, default=25): cv.float_,
         cv.Optional(CONF_STEP, default=5): cv.float_,
+        cv.Optional(CONF_ZONE): validate_zone,
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
 # Schema for fan intermittent off time (5, 10, 15, 20, 25, 30, 35, 40 minutes)
+# Supports optional zone parameter for IZ2 per-zone control.
 FAN_OFF_TIME_SCHEMA = number.number_schema(
     AuroraNumber,
     unit_of_measurement="min",
@@ -105,6 +117,7 @@ FAN_OFF_TIME_SCHEMA = number.number_schema(
         cv.Optional(CONF_MIN_VALUE, default=5): cv.float_,
         cv.Optional(CONF_MAX_VALUE, default=40): cv.float_,
         cv.Optional(CONF_STEP, default=5): cv.float_,
+        cv.Optional(CONF_ZONE): validate_zone,
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
@@ -193,3 +206,6 @@ async def to_code(config):
             await cg.register_component(var, num_config)
             cg.add(var.set_parent(parent))
             cg.add(var.set_type(number_type))
+            # Per-zone support for fan intermittent timing
+            if CONF_ZONE in num_config:
+                cg.add(var.set_zone_number(num_config[CONF_ZONE]))

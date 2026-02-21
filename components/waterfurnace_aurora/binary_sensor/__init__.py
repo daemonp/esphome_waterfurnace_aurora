@@ -24,6 +24,7 @@ CONF_LPS = "low_pressure_switch"
 CONF_HPS = "high_pressure_switch"
 CONF_EMERGENCY_SHUTDOWN = "emergency_shutdown"
 CONF_LOAD_SHED = "load_shed"
+CONF_FAN_CALL = "fan_call"
 
 CONFIG_SCHEMA = cv.Schema(
     {
@@ -62,6 +63,9 @@ CONFIG_SCHEMA = cv.Schema(
             device_class=DEVICE_CLASS_PROBLEM,
         ),
         cv.Optional(CONF_LOAD_SHED): binary_sensor.binary_sensor_schema(
+            device_class=DEVICE_CLASS_RUNNING,
+        ),
+        cv.Optional(CONF_FAN_CALL): binary_sensor.binary_sensor_schema(
             device_class=DEVICE_CLASS_RUNNING,
         ),
     }
@@ -118,3 +122,7 @@ async def to_code(config):
     if CONF_LOAD_SHED in config:
         sens = await binary_sensor.new_binary_sensor(config[CONF_LOAD_SHED])
         cg.add(parent.set_load_shed_binary_sensor(sens))
+
+    if CONF_FAN_CALL in config:
+        sens = await binary_sensor.new_binary_sensor(config[CONF_FAN_CALL])
+        cg.add(parent.set_fan_call_binary_sensor(sens))
