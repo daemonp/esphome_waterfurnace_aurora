@@ -3,6 +3,8 @@
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"  // for fahrenheit_to_celsius / celsius_to_fahrenheit
 
+#include <cmath>
+
 namespace esphome {
 namespace waterfurnace_aurora {
 
@@ -164,25 +166,25 @@ void AuroraIZ2Climate::update_state_() {
     this->preset = new_preset;
   }
 
-   // Update action based on zone current call and damper state
-    if (!zone.damper_open) {
-      this->action = climate::CLIMATE_ACTION_IDLE;
-    } else {
-      switch (zone.current_call) {
-        case ZoneCall::H1:
-        case ZoneCall::H2:
-        case ZoneCall::H3:
-          this->action = climate::CLIMATE_ACTION_HEATING;
-          break;
-        case ZoneCall::C1:
-        case ZoneCall::C2:
-          this->action = climate::CLIMATE_ACTION_COOLING;
-          break;
-        default:
-          // STANDBY, UNKNOWN1, UNKNOWN7 → idle
-          this->action = climate::CLIMATE_ACTION_IDLE;
-      }
+  // Update action based on zone current call and damper state
+  if (!zone.damper_open) {
+    this->action = climate::CLIMATE_ACTION_IDLE;
+  } else {
+    switch (zone.current_call) {
+      case ZoneCall::H1:
+      case ZoneCall::H2:
+      case ZoneCall::H3:
+        this->action = climate::CLIMATE_ACTION_HEATING;
+        break;
+      case ZoneCall::C1:
+      case ZoneCall::C2:
+        this->action = climate::CLIMATE_ACTION_COOLING;
+        break;
+      default:
+        // STANDBY, UNKNOWN1, UNKNOWN7 → idle
+        this->action = climate::CLIMATE_ACTION_IDLE;
     }
+  }
 
   // Update fan mode
   this->fan_mode = aurora_to_esphome_fan(zone.target_fan_mode);

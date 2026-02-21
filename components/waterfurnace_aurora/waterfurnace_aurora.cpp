@@ -576,13 +576,15 @@ void WaterFurnaceAurora::process_setup_detect_response_(const protocol::ParsedRe
   // VS Drive detection via ABC program
   bool vs_detected_from_program = false;
   if (!this->vs_drive_override_) {
-    std::vector<uint16_t> prog_regs;
+    // Stack-allocated array — no heap allocation needed (setup runs once).
+    uint16_t prog_buf[4];
+    size_t prog_count = 0;
     for (uint16_t r = registers::ABC_PROGRAM; r <= registers::ABC_PROGRAM + 3; r++) {
       const uint16_t *val = reg_find(result, r);
-      if (val) prog_regs.push_back(*val);
+      if (val && prog_count < 4) prog_buf[prog_count++] = *val;
     }
-    if (!prog_regs.empty()) {
-      std::string program = registers_to_string(prog_regs);
+    if (prog_count > 0) {
+      std::string program = registers_to_string(prog_buf, prog_count);
       ESP_LOGD(TAG, "ABC Program: '%s'", program.c_str());
       vs_detected_from_program = (program.find("VSP") != std::string::npos ||
                                    program.find("SPLVS") != std::string::npos);

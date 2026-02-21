@@ -3,6 +3,8 @@
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"  // for fahrenheit_to_celsius / celsius_to_fahrenheit
 
+#include <cmath>
+
 namespace esphome {
 namespace waterfurnace_aurora {
 
@@ -164,10 +166,10 @@ void AuroraClimate::update_state_() {
 
   // Update action based on system outputs
   uint16_t outputs = this->parent_->get_system_outputs();
-  bool compressor = outputs & (OUTPUT_CC | OUTPUT_CC2);
-  bool cooling = outputs & OUTPUT_RV;
-  bool aux_heat = outputs & (OUTPUT_EH1 | OUTPUT_EH2);
-  bool blower = outputs & OUTPUT_BLOWER;
+  bool compressor = (outputs & (OUTPUT_CC | OUTPUT_CC2)) != 0;
+  bool cooling = (outputs & OUTPUT_RV) != 0;
+  bool aux_heat = (outputs & (OUTPUT_EH1 | OUTPUT_EH2)) != 0;
+  bool blower = (outputs & OUTPUT_BLOWER) != 0;
   
   if (this->parent_->is_locked_out()) {
     this->action = climate::CLIMATE_ACTION_OFF;

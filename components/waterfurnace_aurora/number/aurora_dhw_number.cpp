@@ -40,7 +40,7 @@ void AuroraDHWNumber::control(float value) {
 
 // Generic AuroraNumber implementation — no listener needed, state is write-only
 void AuroraNumber::dump_config() {
-  const char* type_name = "Unknown";
+  const char *type_name = "Unknown";
   switch (this->type_) {
     case AuroraNumberType::BLOWER_ONLY_SPEED: type_name = "Blower Only Speed"; break;
     case AuroraNumberType::LO_COMPRESSOR_SPEED: type_name = "Lo Compressor Speed"; break;

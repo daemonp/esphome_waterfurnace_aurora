@@ -11,9 +11,6 @@ tests/test_protocol
 tests/test_registers
 tests/test_hub
 
-# Reference project (checked out for comparison only)
-rw-wf/
-
 # Local-only files
 home.yaml
 mise.toml
