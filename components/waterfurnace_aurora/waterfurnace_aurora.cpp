@@ -1330,24 +1330,17 @@ void WaterFurnaceAurora::write_register(uint16_t addr, uint16_t value) {
 void WaterFurnaceAurora::process_pending_writes_() {
   if (this->pending_writes_.empty()) return;
   
-  if (this->pending_writes_.size() == 1) {
-    // Single write — use func 0x06
-    auto &w = this->pending_writes_[0];
-    ESP_LOGD(TAG, "Writing register %d = %d", w.first, w.second);
-    auto frame = protocol::build_write_single_request(this->address_, w.first, w.second);
-    this->pending_writes_.clear();
-    this->send_request_(frame, PendingRequest::WRITE_SINGLE);
-  } else {
-    // Batch write — use func 0x43
-    ESP_LOGD(TAG, "Batch writing %d registers", this->pending_writes_.size());
-    auto frame = protocol::build_write_multi_request(this->address_, this->pending_writes_);
-    this->pending_writes_.clear();
-    if (frame.empty()) {
-      ESP_LOGW(TAG, "Failed to build batch write request");
-      return;
-    }
-    this->send_request_(frame, PendingRequest::WRITE_MULTI);
-  }
+  // Always write one register at a time using func 0x06.
+  // The Aurora firmware rejects batch writes (func 0x43) with error 0x02
+  // "Illegal Data Address" when multiple registers are written together.
+  // Pop the first pending write and send it; remaining writes will be
+  // dispatched in subsequent loop() iterations.
+  auto w = this->pending_writes_.front();
+  this->pending_writes_.erase(this->pending_writes_.begin());
+  ESP_LOGD(TAG, "Writing register %d = %d (%d remaining)", w.first, w.second,
+           this->pending_writes_.size());
+  auto frame = protocol::build_write_single_request(this->address_, w.first, w.second);
+  this->send_request_(frame, PendingRequest::WRITE_SINGLE);
 }
 
 // ============================================================================
