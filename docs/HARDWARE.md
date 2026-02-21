@@ -18,27 +18,27 @@ The AID Tool port on the front of your heat pump uses an RJ45 jack. The 8 pins c
 
 ### RJ45 Plug Pin Numbering
 
-When building your cable, you need to know how pin numbers map to wire positions. Looking at the RJ45 plug with the **clip pointing away** from you and the gold contacts facing up, **pin 1 is on the left**:
+When building your cable, you need to know how pin numbers map to wire positions. Hold the RJ45 plug with the **clip on top** and the gold contacts facing you. **Pin 1 is on the left**:
 
 ```
-        RJ45 Plug (clip pointing away from you, contacts up)
+                    RJ45 Plug
+      (hold with clip on top, contacts facing you)
 
-        ┌─────────────────────────────────────────────┐
-        │  ┌────┬────┬────┬────┬────┬────┬────┬────┐  │
-        │  │ 1  │ 2  │ 3  │ 4  │ 5  │ 6  │ 7  │ 8  │  │
-        │  │W/Or│ Or │W/Gn│ Bl │W/Bl│ Gn │W/Br│ Br │  │
-        │  └────┴────┴────┴────┴────┴────┴────┴────┘  │
-        │              gold contacts                    │
-        │                                               │
-        │              ┌────────┐                       │
-        │              │  clip  │                       │
-        └──────────────┴────────┴───────────────────────┘
-                            │
-                         to cable
+                 ┌────────────┐
+                 │    clip     │
+        ┌────────┴────────────┴────────┐
+        │                              │
+        │  ┌────┬────┬────┬────┬────┬────┬────┬────┐
+        │  │ 1  │ 2  │ 3  │ 4  │ 5  │ 6  │ 7  │ 8  │
+        │  │W/Or│ Or │W/Gn│ Bl │W/Bl│ Gn │W/Br│ Br │
+        │  └────┴────┴────┴────┴────┴────┴────┴────┘
+        └──────────────────────────────────────────┘
+                          │
+                       to cable
 
         T568B wire order (left to right):
-        1: White/Orange  2: Orange  3: White/Green  4: Blue
-        5: White/Blue    6: Green   7: White/Brown  8: Brown
+        1: White/Orange   2: Orange       3: White/Green   4: Blue
+        5: White/Blue     6: Green        7: White/Brown   8: Brown
 ```
 
 ### Heat Pump AID Tool Port
@@ -46,14 +46,16 @@ When building your cable, you need to know how pin numbers map to wire positions
 Looking at the RJ45 **jack** on the heat pump (the port you plug into), the pin order is **mirrored** — pin 1 is on the right:
 
 ```
-      Heat Pump AID Tool Port (looking at the jack)
-     ┌───────────────────────────────────────────────┐
-     │  ┌────┬────┬────┬────┬────┬────┬────┬────┐    │
-     │  │ 8  │ 7  │ 6  │ 5  │ 4  │ 3  │ 2  │ 1  │    │
-     │  └────┴────┴────┴────┴────┴────┴────┴────┘    │
-     │               ╔════════════╗                   │
-     │               ║  AID Tool  ║                   │
-     └───────────────╚════════════╝───────────────────┘
+        Heat Pump AID Tool Port (looking at the jack)
+
+        ┌──────────────────────────────────────────┐
+        │                                          │
+        │  ┌────┬────┬────┬────┬────┬────┬────┬────┐
+        │  │ 8  │ 7  │ 6  │ 5  │ 4  │ 3  │ 2  │ 1  │
+        │  └────┴────┴────┴────┴────┴────┴────┴────┘
+        │              ╔════════════╗               │
+        │              ║  AID Tool  ║               │
+        └──────────────╚════════════╝───────────────┘
 ```
 
 When you plug in, pin 1 on the plug mates with pin 1 on the jack — the mirroring is handled by the connector geometry. Just make sure you have the right wires on the right pins of the plug.
@@ -91,26 +93,26 @@ Pins 1 & 3 are both A+ (tied together), and pins 2 & 4 are both B- (tied togethe
 The easiest approach: take a standard ethernet cable (T568B), cut off one end, and connect only the four data wires. Leave the RJ45 plug on the other end to plug into the heat pump.
 
 ```
-    RJ45 Plug                                              MAX485
-   (to heat pump)          Ethernet Cable                  Module
-  ┌──────────┐                                          ┌──────────┐
-  │ Pin 1 A+ ├──── White/Orange ──┐                     │          │
-  │ Pin 2 B- ├──── Orange ────────┤                     │          │
-  │ Pin 3 A+ ├──── White/Green ───┼── twist together ──►│ A / +    │
-  │ Pin 4 B- ├──── Blue ──────────┼── twist together ──►│ B / -    │
-  │          │                    │                     │          │
-  │ Pin 5  R ├──╌╌ White/Blue     │                     │          │
-  │ Pin 6  C ├──╌╌ Green        CUT, TAPE & INSULATE    │          │
-  │ Pin 7  R ├──╌╌ White/Brown  ⚡ DO NOT CONNECT ⚡    │          │
-  │ Pin 8  C ├──╌╌ Brown          │                     │          │
-  └──────────┘                    │                     │          │
-                                                        │ DI (TX) ─┤──► ESP GPIO_TX
-                                                        │ RO (RX) ─┤──► ESP GPIO_RX
-                                                        │ DE ──┬───┤──► ESP GPIO_FLOW
-                                                        │ RE ──┘   │
-                                                        │ VCC ─────┤──► ESP 3.3V
-                                                        │ GND ─────┤──► ESP GND
-                                                        └──────────┘
+  RJ45 Plug                                         MAX485 Module
+  (to heat pump)        Ethernet Cable               (RS485 adapter)
+  ┌──────────┐                                      ┌─────────────┐
+  │ Pin 1 A+ ├─── White/Orange ──┐                  │             │
+  │ Pin 2 B- ├─── Orange ────────┤                  │             │
+  │ Pin 3 A+ ├─── White/Green ───┼─ join together ─►│ A / +       │
+  │ Pin 4 B- ├─── Blue ──────────┼─ join together ─►│ B / -       │
+  │          │                                      │             │
+  │ Pin 5  R ├╌╌╌ White/Blue  ╲                     │             │
+  │ Pin 6  C ├╌╌╌ Green        ╳ CUT & INSULATE    │             │
+  │ Pin 7  R ├╌╌╌ White/Brown ╱  ⚡ DO NOT USE ⚡   │             │
+  │ Pin 8  C ├╌╌╌ Brown                            │             │
+  └──────────┘                                      │             │
+                                                    │ DI (TX) ────┤──► ESP GPIO_TX
+                                                    │ RO (RX) ────┤──► ESP GPIO_RX
+                                                    │ DE ───┬─────┤──► ESP GPIO_FLOW
+                                                    │ RE ───┘     │
+                                                    │ VCC ────────┤──► ESP 3.3V
+                                                    │ GND ────────┤──► ESP GND
+                                                    └─────────────┘
 ```
 
 **Cable assembly steps:**
