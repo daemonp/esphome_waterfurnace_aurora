@@ -1658,6 +1658,14 @@ void WaterFurnaceAurora::publish_derived_sensors(const RegisterMap &regs) {
   }
   
   // COP = useful heat output / electrical energy input
+  //
+  // The Aurora register names are from the ground loop's perspective:
+  //   HEAT_OF_EXTRACTION = heat extracted FROM the ground (non-zero in heating)
+  //   HEAT_OF_REJECTION  = heat rejected  TO  the ground (non-zero in cooling)
+  //
+  // Thermodynamics (energy conservation: Q_hot = Q_cold + W):
+  //   Heating COP = Q_to_house   / W = (Q_from_ground + W) / W
+  //   Cooling COP = Q_from_house / W = (Q_to_ground   - W) / W
   if (this->cop_sensor_ != nullptr) {
     bool compressor_running = (this->system_outputs_ & (OUTPUT_CC | OUTPUT_CC2)) != 0;
     if (compressor_running) {
@@ -1667,19 +1675,25 @@ void WaterFurnaceAurora::publish_derived_sensors(const RegisterMap &regs) {
         uint32_t total_watts = to_uint32(*tw_h, *tw_l);
         if (total_watts > 0) {
           bool cooling = (this->system_outputs_ & OUTPUT_RV) != 0;
-          uint16_t heat_reg = cooling ? registers::HEAT_OF_EXTRACTION : registers::HEAT_OF_REJECTION;
+          // Heating → ground-side heat is EXTRACTION; Cooling → ground-side heat is REJECTION
+          uint16_t heat_reg = cooling ? registers::HEAT_OF_REJECTION : registers::HEAT_OF_EXTRACTION;
           const uint16_t *heat_h = reg_find(regs, heat_reg);
           const uint16_t *heat_l = reg_find(regs, heat_reg + 1);
           if (heat_h && heat_l) {
-            int32_t heat_btu = to_int32(*heat_h, *heat_l);
-            float cop = static_cast<float>(std::abs(heat_btu)) /
-                        (static_cast<float>(total_watts) * BTU_PER_WATT_HOUR);
-            if (cop >= 0.5f && cop <= 15.0f) {
-              this->cop_sensor_->publish_state(cop);
-            } else {
-              ESP_LOGD(TAG, "COP %.2f outside plausible range [0.5, 15.0], skipping publish "
-                            "(heat_btu=%d, total_watts=%u)", cop,
-                            static_cast<int>(heat_btu), static_cast<unsigned>(total_watts));
+            float ground_btu = static_cast<float>(std::abs(to_int32(*heat_h, *heat_l)));
+            float watts_btu = static_cast<float>(total_watts) * BTU_PER_WATT_HOUR;
+            // Heating: useful output = ground heat + compressor work
+            // Cooling: useful output = ground heat - compressor work
+            float useful_btu = cooling ? (ground_btu - watts_btu) : (ground_btu + watts_btu);
+            if (useful_btu > 0.0f) {
+              float cop = useful_btu / watts_btu;
+              if (cop >= 0.5f && cop <= 15.0f) {
+                this->cop_sensor_->publish_state(cop);
+              } else {
+                ESP_LOGD(TAG, "COP %.2f outside plausible range [0.5, 15.0], skipping publish "
+                              "(ground_btu=%.0f, watts_btu=%.0f, cooling=%d)", cop,
+                              ground_btu, watts_btu, cooling);
+              }
             }
           } else {
             ESP_LOGW(TAG, "COP: heat register %u not found in poll results", heat_reg);
