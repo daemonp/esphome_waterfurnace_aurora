@@ -1,6 +1,7 @@
 #include "aurora_climate.h"
 #include "aurora_climate_utils.h"
 #include "esphome/core/log.h"
+#include "esphome/core/helpers.h"  // for fahrenheit_to_celsius / celsius_to_fahrenheit
 
 namespace esphome {
 namespace waterfurnace_aurora {
@@ -43,9 +44,10 @@ climate::ClimateTraits AuroraClimate::traits() {
   traits.add_supported_preset(climate::CLIMATE_PRESET_NONE);
   traits.add_supported_preset(climate::CLIMATE_PRESET_BOOST);  // Emergency Heat
   
-  // Temperature ranges from thermostat.rb
-  traits.set_visual_min_temperature(40);  // Heating min
-  traits.set_visual_max_temperature(99);  // Cooling max
+  // Temperature ranges from thermostat.rb (converted to Celsius for ESPHome)
+  // Heating min: 40°F = 4.4°C, Cooling max: 99°F = 37.2°C
+  traits.set_visual_min_temperature(fahrenheit_to_celsius(40));
+  traits.set_visual_max_temperature(fahrenheit_to_celsius(99));
   traits.set_visual_temperature_step(0.5);
   
   return traits;
@@ -70,17 +72,20 @@ void AuroraClimate::control(const climate::ClimateCall &call) {
   }
 
   // Handle target temperature changes (dual setpoint)
+  // HA sends Celsius; hardware expects Fahrenheit
   if (call.get_target_temperature_low().has_value()) {
-    float temp = *call.get_target_temperature_low();
-    if (this->parent_->set_heating_setpoint(temp)) {
-      this->target_temperature_low = temp;
+    float temp_c = *call.get_target_temperature_low();
+    float temp_f = celsius_to_fahrenheit(temp_c);
+    if (this->parent_->set_heating_setpoint(temp_f)) {
+      this->target_temperature_low = temp_c;
     }
   }
   
   if (call.get_target_temperature_high().has_value()) {
-    float temp = *call.get_target_temperature_high();
-    if (this->parent_->set_cooling_setpoint(temp)) {
-      this->target_temperature_high = temp;
+    float temp_c = *call.get_target_temperature_high();
+    float temp_f = celsius_to_fahrenheit(temp_c);
+    if (this->parent_->set_cooling_setpoint(temp_f)) {
+      this->target_temperature_high = temp_c;
     }
   }
 
@@ -132,21 +137,21 @@ void AuroraClimate::update_state_() {
     }
   }
 
-  // Update current temperature
+  // Update current temperature (hardware reports °F, climate entity uses °C)
   float ambient = this->parent_->get_ambient_temperature();
   if (!std::isnan(ambient)) {
-    this->current_temperature = ambient;
+    this->current_temperature = fahrenheit_to_celsius(ambient);
   }
 
-  // Update setpoints
+  // Update setpoints (hardware reports °F, climate entity uses °C)
   float heating_sp = this->parent_->get_heating_setpoint();
   float cooling_sp = this->parent_->get_cooling_setpoint();
   
   if (!std::isnan(heating_sp)) {
-    this->target_temperature_low = heating_sp;
+    this->target_temperature_low = fahrenheit_to_celsius(heating_sp);
   }
   if (!std::isnan(cooling_sp)) {
-    this->target_temperature_high = cooling_sp;
+    this->target_temperature_high = fahrenheit_to_celsius(cooling_sp);
   }
 
   // Update mode and preset

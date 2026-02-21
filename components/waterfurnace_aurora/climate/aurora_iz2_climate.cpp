@@ -1,6 +1,7 @@
 #include "aurora_iz2_climate.h"
 #include "aurora_climate_utils.h"
 #include "esphome/core/log.h"
+#include "esphome/core/helpers.h"  // for fahrenheit_to_celsius / celsius_to_fahrenheit
 
 namespace esphome {
 namespace waterfurnace_aurora {
@@ -41,10 +42,10 @@ climate::ClimateTraits AuroraIZ2Climate::traits() {
   traits.add_supported_preset(climate::CLIMATE_PRESET_NONE);
   traits.add_supported_preset(climate::CLIMATE_PRESET_BOOST);  // Emergency Heat
   
-  // Temperature ranges from thermostat.rb / iz2_zone.rb
-  // Heating: 40-90, Cooling: 54-99
-  traits.set_visual_min_temperature(40);
-  traits.set_visual_max_temperature(99);
+  // Temperature ranges from thermostat.rb / iz2_zone.rb (converted to Celsius for ESPHome)
+  // Heating min: 40°F = 4.4°C, Cooling max: 99°F = 37.2°C
+  traits.set_visual_min_temperature(fahrenheit_to_celsius(40));
+  traits.set_visual_max_temperature(fahrenheit_to_celsius(99));
   traits.set_visual_temperature_step(0.5);
   
   return traits;
@@ -79,17 +80,20 @@ void AuroraIZ2Climate::control(const climate::ClimateCall &call) {
   }
 
   // Handle target temperature changes (dual setpoint)
+  // HA sends Celsius; hardware expects Fahrenheit
   if (call.get_target_temperature_low().has_value()) {
-    float temp = *call.get_target_temperature_low();
-    if (this->parent_->set_zone_heating_setpoint(this->zone_number_, temp)) {
-      this->target_temperature_low = temp;
+    float temp_c = *call.get_target_temperature_low();
+    float temp_f = celsius_to_fahrenheit(temp_c);
+    if (this->parent_->set_zone_heating_setpoint(this->zone_number_, temp_f)) {
+      this->target_temperature_low = temp_c;
     }
   }
   
   if (call.get_target_temperature_high().has_value()) {
-    float temp = *call.get_target_temperature_high();
-    if (this->parent_->set_zone_cooling_setpoint(this->zone_number_, temp)) {
-      this->target_temperature_high = temp;
+    float temp_c = *call.get_target_temperature_high();
+    float temp_f = celsius_to_fahrenheit(temp_c);
+    if (this->parent_->set_zone_cooling_setpoint(this->zone_number_, temp_f)) {
+      this->target_temperature_high = temp_c;
     }
   }
 
@@ -139,17 +143,17 @@ void AuroraIZ2Climate::update_state_() {
 
   const IZ2ZoneData& zone = this->parent_->get_zone_data(this->zone_number_);
 
-  // Update current temperature
+  // Update current temperature (hardware reports °F, climate entity uses °C)
   if (!std::isnan(zone.ambient_temperature)) {
-    this->current_temperature = zone.ambient_temperature;
+    this->current_temperature = fahrenheit_to_celsius(zone.ambient_temperature);
   }
 
-  // Update setpoints
+  // Update setpoints (hardware reports °F, climate entity uses °C)
   if (!std::isnan(zone.heating_setpoint)) {
-    this->target_temperature_low = zone.heating_setpoint;
+    this->target_temperature_low = fahrenheit_to_celsius(zone.heating_setpoint);
   }
   if (!std::isnan(zone.cooling_setpoint)) {
-    this->target_temperature_high = zone.cooling_setpoint;
+    this->target_temperature_high = fahrenheit_to_celsius(zone.cooling_setpoint);
   }
 
   // Update mode and preset
