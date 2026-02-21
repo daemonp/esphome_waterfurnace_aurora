@@ -487,10 +487,13 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   static constexpr size_t MAX_PENDING_WRITES = 16;
   std::vector<std::pair<uint16_t, uint16_t>> pending_writes_;
   
-  // Write cooldowns — prevent stale read-backs from reverting optimistic UI updates
-  uint32_t last_mode_write_{0};
-  uint32_t last_setpoint_write_{0};
-  uint32_t last_fan_write_{0};
+  // Write cooldowns — prevent stale read-backs from reverting optimistic UI updates.
+  // Initialized to ensure cooldown is INACTIVE at boot (unsigned wraparound arithmetic:
+  // millis() - COOLDOWN_BOOT_INIT > WRITE_COOLDOWN_MS is true even when millis() == 0).
+  static constexpr uint32_t COOLDOWN_BOOT_INIT = 0u - WRITE_COOLDOWN_MS - 1u;
+  uint32_t last_mode_write_{COOLDOWN_BOOT_INIT};
+  uint32_t last_setpoint_write_{COOLDOWN_BOOT_INIT};
+  uint32_t last_fan_write_{COOLDOWN_BOOT_INIT};
   
   // Setup callbacks — fired once when hardware detection completes
   std::vector<std::function<void()>> setup_callbacks_;
