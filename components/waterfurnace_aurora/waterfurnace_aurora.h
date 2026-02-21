@@ -13,9 +13,48 @@
 #include <vector>
 #include <functional>
 #include <cmath>
+#include <utility>
 
 namespace esphome {
 namespace waterfurnace_aurora {
+
+// ============================================================================
+// State Machine
+// ============================================================================
+
+enum class State : uint8_t {
+  SETUP_READ_ID,            // Read model/serial/program info
+  SETUP_DETECT_COMPONENTS,  // Detect AXB, VS Drive, IZ2, blower, pump, energy
+  SETUP_DETECT_VS,          // VS Drive probe (optional second detect step)
+  IDLE,                     // Ready for next operation
+  WAITING_RESPONSE,         // Request sent, collecting bytes
+  ERROR_BACKOFF,            // Communication error, waiting before retry
+};
+
+// Identifies what type of request is currently in-flight (for response routing)
+enum class PendingRequest : uint8_t {
+  NONE,
+  SETUP_ID,          // func 0x03 read for model/serial
+  SETUP_DETECT,      // func 0x42 read for hardware detection
+  SETUP_VS_PROBE,    // func 0x42 read for VS drive probing
+  POLL_REGISTERS,    // func 0x42 read for normal polling
+  POLL_FAULT_HISTORY,// func 0x03 read for fault history
+  WRITE_SINGLE,      // func 0x06 write
+  WRITE_MULTI,       // func 0x43 batch write
+};
+
+// ============================================================================
+// Timing Constants
+// ============================================================================
+
+static constexpr uint32_t RESPONSE_TIMEOUT_MS = 2000;
+static constexpr uint32_t ERROR_BACKOFF_MS = 5000;
+static constexpr uint32_t CONNECTED_TIMEOUT_MS = 30000;
+static constexpr uint32_t WRITE_COOLDOWN_MS = 10000;
+
+// ============================================================================
+// Hub Class
+// ============================================================================
 
 class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
  public:
@@ -37,6 +76,10 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   void set_has_vs_drive_override(bool value) { this->has_vs_drive_ = value; this->vs_drive_override_ = true; }
   void set_has_iz2_override(bool value) { this->has_iz2_ = value; this->iz2_override_ = true; }
   void set_num_iz2_zones_override(uint8_t value) { this->num_iz2_zones_ = value; this->iz2_zones_override_ = true; }
+
+  // Connected sensor
+  void set_connected_sensor(binary_sensor::BinarySensor *sensor) { this->connected_sensor_ = sensor; }
+  void set_connected_timeout(uint32_t ms) { this->connected_timeout_ = ms; }
 
   // Register sensors
   void set_entering_air_sensor(sensor::Sensor *sensor) { entering_air_sensor_ = sensor; }
@@ -145,7 +188,9 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   void set_dehumidifier_mode_sensor(text_sensor::TextSensor *sensor) { dehumidifier_mode_sensor_ = sensor; }
   void set_pump_type_sensor(text_sensor::TextSensor *sensor) { pump_type_sensor_ = sensor; }
 
-  // Control methods (called by climate/water_heater components)
+  // Control methods — now queue writes instead of blocking
+  void write_register(uint16_t addr, uint16_t value);
+  
   bool set_heating_setpoint(float temp);
   bool set_cooling_setpoint(float temp);
   bool set_hvac_mode(HeatingMode mode);
@@ -195,10 +240,21 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   uint16_t get_system_outputs() const { return system_outputs_; }
   uint16_t get_axb_outputs() const { return axb_outputs_; }
   bool is_locked_out() const { return locked_out_; }
+  bool is_setup_complete() const { return setup_complete_; }
   
   // Observer pattern: sub-entities register a callback to be notified when data updates.
   void register_listener(std::function<void()> callback) {
     this->listeners_.push_back(std::move(callback));
+  }
+
+  // Deferred setup callbacks — fired when hardware detection completes.
+  // If setup is already complete, the callback fires immediately.
+  void register_setup_callback(std::function<void()> callback) {
+    if (this->setup_complete_) {
+      callback();
+    } else {
+      this->setup_callbacks_.push_back(std::move(callback));
+    }
   }
 
   // IZ2 Zone getters
@@ -207,25 +263,35 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   const IZ2ZoneData& get_zone_data(uint8_t zone_number) const;
 
  protected:
-  // Modbus communication methods
-  bool read_register_ranges(const std::vector<std::pair<uint16_t, uint16_t>> &ranges,
-                            RegisterMap &result);
-  bool read_specific_registers(const std::vector<uint16_t> &addresses,
-                               RegisterMap &result);
-  bool read_holding_registers(uint16_t start_addr, uint16_t count, std::vector<uint16_t> &result);
-  bool write_holding_register(uint16_t addr, uint16_t value);
+  // --- State machine operations ---
+  void transition_(State new_state);
+  void send_request_(const std::vector<uint8_t> &frame, PendingRequest type,
+                     const std::vector<uint16_t> &expected_addrs = {});
+  bool read_frame_(std::vector<uint8_t> &frame);
+  void process_response_(const std::vector<uint8_t> &frame);
+  void handle_timeout_();
   
-  // Send a Modbus request and receive response (shared transport)
-  bool send_and_receive(const uint8_t *request, size_t request_len,
-                        std::vector<uint8_t> &response, uint32_t timeout_ms = 1000);
-  bool wait_for_response(std::vector<uint8_t> &response, uint32_t timeout_ms = 1000);
+  // --- Setup steps (called from loop() state machine) ---
+  void start_setup_read_id_();
+  void start_setup_detect_();
+  void start_setup_vs_probe_();
+  void process_setup_id_response_(const protocol::ParsedResponse &resp);
+  void process_setup_detect_response_(const protocol::ParsedResponse &resp);
+  void process_setup_vs_probe_response_(const protocol::ParsedResponse &resp);
+  void finish_setup_();
   
-  // Data refresh
-  void refresh_all_data();
+  // --- Polling ---
+  void start_poll_cycle_();
+  void start_fault_history_read_();
+  void process_poll_response_(const protocol::ParsedResponse &resp);
+  void process_fault_history_response_(const protocol::ParsedResponse &resp);
+  void publish_all_sensors_();
   
-  // Hardware auto-detection
-  void detect_hardware();
-  void read_device_info();
+  // --- Write handling ---
+  void process_pending_writes_();
+  
+  // --- Connectivity ---
+  void update_connected_(bool connected);
   
   // Current mode string (computed from system outputs and state)
   std::string get_current_mode_string();
@@ -242,6 +308,9 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   bool is_vs_pump() const { return pump_type_ == PumpType::VS_PUMP || pump_type_ == PumpType::VS_PUMP_26_99 || pump_type_ == PumpType::VS_PUMP_UPS26_99; }
   bool refrigeration_monitoring() const { return energy_monitor_level_ >= 1; }
   bool energy_monitoring() const { return energy_monitor_level_ >= 2; }
+
+  // Build the addresses list for the current poll cycle based on tier
+  void build_poll_addresses_();
 
   // Sensor publication helpers — DRY extraction for the 50+ find-and-publish patterns.
   bool publish_sensor(const RegisterMap &result, uint16_t reg,
@@ -303,13 +372,10 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   
   // Derived sensors (COP, delta-T, approach)
   void publish_derived_sensors(const RegisterMap &regs);
-  
-  // Fault history
-  void read_fault_history();
 
+  // --- Configuration ---
   uint8_t address_{1};
   uint8_t read_retries_{2};
-  
   GPIOPin *flow_control_pin_{nullptr};
   
   // Hardware override flags
@@ -318,13 +384,47 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   bool iz2_override_{false};
   bool iz2_zones_override_{false};
   
+  // --- State machine ---
+  State state_{State::SETUP_READ_ID};
+  PendingRequest pending_request_{PendingRequest::NONE};
+  bool setup_complete_{false};
+  uint8_t setup_retry_count_{0};
+  static constexpr uint8_t MAX_SETUP_RETRIES = 5;
+  
+  // RX buffer — persists across loop() calls for incremental frame reading
+  std::vector<uint8_t> rx_buffer_;
+  
+  // Expected addresses for the current in-flight request
+  std::vector<uint16_t> expected_addresses_;
+  
+  // Timing
+  uint32_t last_request_time_{0};
+  uint32_t error_backoff_until_{0};
+  uint32_t last_successful_response_{0};
+  
+  // Connectivity
+  binary_sensor::BinarySensor *connected_sensor_{nullptr};
+  uint32_t connected_timeout_{CONNECTED_TIMEOUT_MS};
+  bool connected_{false};
+  
+  // Write queue — writes are queued and dispatched non-blockingly from IDLE
+  std::vector<std::pair<uint16_t, uint16_t>> pending_writes_;
+  
+  // Write cooldowns — prevent stale read-backs from reverting optimistic UI updates
+  uint32_t last_mode_write_{0};
+  uint32_t last_setpoint_write_{0};
+  uint32_t last_fan_write_{0};
+  
+  // Setup callbacks — fired once when hardware detection completes
+  std::vector<std::function<void()>> setup_callbacks_;
+  
   // Cached register values — flat sorted vector
   RegisterMap register_cache_;
   
   // Pre-allocated vector for register addresses
   std::vector<uint16_t> addresses_to_read_;
   
-  // State
+  // --- Heat pump state ---
   float ambient_temp_{NAN};
   float heating_setpoint_{NAN};
   float cooling_setpoint_{NAN};
@@ -356,7 +456,7 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   // IZ2 Zone data
   IZ2ZoneData iz2_zones_[MAX_IZ2_ZONES];
   
-  // Sensors
+  // --- Sensors ---
   sensor::Sensor *entering_air_sensor_{nullptr};
   sensor::Sensor *leaving_air_sensor_{nullptr};
   sensor::Sensor *ambient_temp_sensor_{nullptr};
