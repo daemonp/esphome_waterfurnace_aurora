@@ -1049,18 +1049,33 @@ void WaterFurnaceAurora::publish_all_sensors_() {
   this->publish_sensor(regs, registers::RELATIVE_HUMIDITY, this->humidity_sensor_);
   
   // Setpoints (respect write cooldown)
-  if ((millis() - this->last_setpoint_write_) > WRITE_COOLDOWN_MS) {
-    const uint16_t *val_hsp = reg_find(regs, registers::HEATING_SETPOINT);
-    if (val_hsp) {
-      this->heating_setpoint_ = to_tenths(*val_hsp);
-      if (sensor_value_changed_(this->heating_setpoint_sensor_, this->heating_setpoint_))
-        this->heating_setpoint_sensor_->publish_state(this->heating_setpoint_);
-    }
-    const uint16_t *val_csp = reg_find(regs, registers::COOLING_SETPOINT);
-    if (val_csp) {
-      this->cooling_setpoint_ = to_tenths(*val_csp);
-      if (sensor_value_changed_(this->cooling_setpoint_sensor_, this->cooling_setpoint_))
-        this->cooling_setpoint_sensor_->publish_state(this->cooling_setpoint_);
+  {
+    uint32_t elapsed = millis() - this->last_setpoint_write_;
+    bool cooldown_active = elapsed <= WRITE_COOLDOWN_MS;
+    if (cooldown_active) {
+      ESP_LOGD(TAG, "Setpoint cooldown active (%ums elapsed, cached heat=%.1f cool=%.1f)",
+               elapsed, this->heating_setpoint_, this->cooling_setpoint_);
+    } else {
+      const uint16_t *val_hsp = reg_find(regs, registers::HEATING_SETPOINT);
+      if (val_hsp) {
+        float new_val = to_tenths(*val_hsp);
+        if (new_val != this->heating_setpoint_) {
+          ESP_LOGD(TAG, "Heating SP from device: %.1f -> %.1f", this->heating_setpoint_, new_val);
+        }
+        this->heating_setpoint_ = new_val;
+        if (sensor_value_changed_(this->heating_setpoint_sensor_, this->heating_setpoint_))
+          this->heating_setpoint_sensor_->publish_state(this->heating_setpoint_);
+      }
+      const uint16_t *val_csp = reg_find(regs, registers::COOLING_SETPOINT);
+      if (val_csp) {
+        float new_val = to_tenths(*val_csp);
+        if (new_val != this->cooling_setpoint_) {
+          ESP_LOGD(TAG, "Cooling SP from device: %.1f -> %.1f", this->cooling_setpoint_, new_val);
+        }
+        this->cooling_setpoint_ = new_val;
+        if (sensor_value_changed_(this->cooling_setpoint_sensor_, this->cooling_setpoint_))
+          this->cooling_setpoint_sensor_->publish_state(this->cooling_setpoint_);
+      }
     }
   }
   
