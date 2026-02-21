@@ -159,32 +159,41 @@ void AuroraClimate::update_state_() {
   }
 
   // Update setpoints (hardware reports °F, climate entity uses °C)
-  float heating_sp = this->parent_->get_heating_setpoint();
-  float cooling_sp = this->parent_->get_cooling_setpoint();
-  
-  if (!std::isnan(heating_sp)) {
-    float new_low = fahrenheit_to_celsius(heating_sp);
-    if (this->target_temperature_low != new_low) {
-      ESP_LOGD(TAG, "update_state_: heating SP changing %.2f°C -> %.2f°C (hub=%.1f°F)",
-               this->target_temperature_low, new_low, heating_sp);
+  // Skip setpoint updates during write cooldown — prevents the stale device
+  // read-back from overwriting the optimistic value set by control().
+  if (!this->parent_->setpoint_cooldown_active()) {
+    float heating_sp = this->parent_->get_heating_setpoint();
+    float cooling_sp = this->parent_->get_cooling_setpoint();
+    
+    if (!std::isnan(heating_sp)) {
+      float new_low = fahrenheit_to_celsius(heating_sp);
+      if (this->target_temperature_low != new_low) {
+        ESP_LOGD(TAG, "update_state_: heating SP changing %.2f°C -> %.2f°C (hub=%.1f°F)",
+                 this->target_temperature_low, new_low, heating_sp);
+      }
+      this->target_temperature_low = new_low;
     }
-    this->target_temperature_low = new_low;
-  }
-  if (!std::isnan(cooling_sp)) {
-    float new_high = fahrenheit_to_celsius(cooling_sp);
-    if (this->target_temperature_high != new_high) {
-      ESP_LOGD(TAG, "update_state_: cooling SP changing %.2f°C -> %.2f°C (hub=%.1f°F)",
-               this->target_temperature_high, new_high, cooling_sp);
+    if (!std::isnan(cooling_sp)) {
+      float new_high = fahrenheit_to_celsius(cooling_sp);
+      if (this->target_temperature_high != new_high) {
+        ESP_LOGD(TAG, "update_state_: cooling SP changing %.2f°C -> %.2f°C (hub=%.1f°F)",
+                 this->target_temperature_high, new_high, cooling_sp);
+      }
+      this->target_temperature_high = new_high;
     }
-    this->target_temperature_high = new_high;
+  } else {
+    ESP_LOGD(TAG, "update_state_: setpoint cooldown active, skipping setpoint update (local heat=%.2f°C cool=%.2f°C)",
+             this->target_temperature_low, this->target_temperature_high);
   }
 
-  // Update mode and preset
-  climate::ClimateMode new_mode;
-  climate::ClimatePreset new_preset;
-  if (aurora_to_esphome_mode(this->parent_->get_hvac_mode(), new_mode, new_preset)) {
-    this->mode = new_mode;
-    this->preset = new_preset;
+  // Update mode and preset (skip during mode cooldown)
+  if (!this->parent_->mode_cooldown_active()) {
+    climate::ClimateMode new_mode;
+    climate::ClimatePreset new_preset;
+    if (aurora_to_esphome_mode(this->parent_->get_hvac_mode(), new_mode, new_preset)) {
+      this->mode = new_mode;
+      this->preset = new_preset;
+    }
   }
 
   // Update action based on system outputs
@@ -206,8 +215,10 @@ void AuroraClimate::update_state_() {
     this->action = climate::CLIMATE_ACTION_IDLE;
   }
 
-  // Update fan mode
-  this->fan_mode = aurora_to_esphome_fan(this->parent_->get_fan_mode());
+  // Update fan mode (skip during fan cooldown)
+  if (!this->parent_->fan_cooldown_active()) {
+    this->fan_mode = aurora_to_esphome_fan(this->parent_->get_fan_mode());
+  }
 
   this->publish_state();
 }

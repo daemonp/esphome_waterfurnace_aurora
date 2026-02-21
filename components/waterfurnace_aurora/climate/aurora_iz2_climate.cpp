@@ -151,19 +151,24 @@ void AuroraIZ2Climate::update_state_() {
   }
 
   // Update setpoints (hardware reports °F, climate entity uses °C)
-  if (!std::isnan(zone.heating_setpoint)) {
-    this->target_temperature_low = fahrenheit_to_celsius(zone.heating_setpoint);
-  }
-  if (!std::isnan(zone.cooling_setpoint)) {
-    this->target_temperature_high = fahrenheit_to_celsius(zone.cooling_setpoint);
+  // Skip during cooldown to preserve optimistic values from control()
+  if (!this->parent_->setpoint_cooldown_active()) {
+    if (!std::isnan(zone.heating_setpoint)) {
+      this->target_temperature_low = fahrenheit_to_celsius(zone.heating_setpoint);
+    }
+    if (!std::isnan(zone.cooling_setpoint)) {
+      this->target_temperature_high = fahrenheit_to_celsius(zone.cooling_setpoint);
+    }
   }
 
-  // Update mode and preset
-  climate::ClimateMode new_mode;
-  climate::ClimatePreset new_preset;
-  if (aurora_to_esphome_mode(zone.target_mode, new_mode, new_preset)) {
-    this->mode = new_mode;
-    this->preset = new_preset;
+  // Update mode and preset (skip during mode cooldown)
+  if (!this->parent_->mode_cooldown_active()) {
+    climate::ClimateMode new_mode;
+    climate::ClimatePreset new_preset;
+    if (aurora_to_esphome_mode(zone.target_mode, new_mode, new_preset)) {
+      this->mode = new_mode;
+      this->preset = new_preset;
+    }
   }
 
   // Update action based on zone current call and damper state
@@ -186,8 +191,10 @@ void AuroraIZ2Climate::update_state_() {
     }
   }
 
-  // Update fan mode
-  this->fan_mode = aurora_to_esphome_fan(zone.target_fan_mode);
+  // Update fan mode (skip during fan cooldown)
+  if (!this->parent_->fan_cooldown_active()) {
+    this->fan_mode = aurora_to_esphome_fan(zone.target_fan_mode);
+  }
 
   this->publish_state();
 }

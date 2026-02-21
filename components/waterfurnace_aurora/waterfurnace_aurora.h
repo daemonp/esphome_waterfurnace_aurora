@@ -246,6 +246,11 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   float get_cooling_setpoint() const { return cooling_setpoint_; }
   HeatingMode get_hvac_mode() const { return hvac_mode_; }
   FanMode get_fan_mode() const { return fan_mode_; }
+  
+  // Cooldown state queries — used by climate entities to skip stale overwrites
+  bool setpoint_cooldown_active() const { return (millis() - last_setpoint_write_) <= WRITE_COOLDOWN_MS; }
+  bool mode_cooldown_active() const { return (millis() - last_mode_write_) <= WRITE_COOLDOWN_MS; }
+  bool fan_cooldown_active() const { return (millis() - last_fan_write_) <= WRITE_COOLDOWN_MS; }
   bool is_dhw_enabled() const { return dhw_enabled_; }
   float get_dhw_setpoint() const { return dhw_setpoint_; }
   float get_dhw_temperature() const { return dhw_temp_; }
