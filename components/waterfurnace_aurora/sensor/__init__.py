@@ -8,6 +8,7 @@ from esphome.const import (
     DEVICE_CLASS_VOLTAGE,
     DEVICE_CLASS_POWER,
     DEVICE_CLASS_PRESSURE,
+    ENTITY_CATEGORY_DIAGNOSTIC,
     STATE_CLASS_MEASUREMENT,
     UNIT_CELSIUS,
     UNIT_PERCENT,
@@ -18,7 +19,7 @@ from esphome.const import (
 from .. import waterfurnace_aurora_ns, WaterFurnaceAurora, CONF_AURORA_ID
 
 DEPENDENCIES = ["waterfurnace_aurora"]
-CODEOWNERS = ["@damonmaria"]
+CODEOWNERS = ["@daemonp"]
 
 # Sensor configuration keys
 CONF_ENTERING_AIR_TEMPERATURE = "entering_air_temperature"
@@ -46,6 +47,7 @@ CONF_PUMP_WATTS = "pump_watts"
 CONF_WATERFLOW = "waterflow"
 CONF_LOOP_PRESSURE = "loop_pressure"
 CONF_FAULT_CODE = "fault_code"
+CONF_LOCKOUT_FAULT_CODE = "lockout_fault_code"
 CONF_FP1_TEMPERATURE = "fp1_temperature"
 CONF_FP2_TEMPERATURE = "fp2_temperature"
 CONF_LINE_VOLTAGE_SETTING = "line_voltage_setting"
@@ -184,6 +186,11 @@ CONFIG_SCHEMA = cv.Schema(
         # Fault
         cv.Optional(CONF_FAULT_CODE): sensor.sensor_schema(
             accuracy_decimals=0,
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+        ),
+        cv.Optional(CONF_LOCKOUT_FAULT_CODE): sensor.sensor_schema(
+            accuracy_decimals=0,
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
         ),
         # FP1/FP2 refrigerant temperatures
         cv.Optional(CONF_FP1_TEMPERATURE): TEMPERATURE_SENSOR_SCHEMA,
@@ -194,12 +201,14 @@ CONFIG_SCHEMA = cv.Schema(
             accuracy_decimals=0,
             device_class=DEVICE_CLASS_VOLTAGE,
             state_class=STATE_CLASS_MEASUREMENT,
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
         ),
         # Anti-short-cycle countdown (seconds)
         cv.Optional(CONF_ANTI_SHORT_CYCLE): sensor.sensor_schema(
             unit_of_measurement="s",
             accuracy_decimals=0,
             state_class=STATE_CLASS_MEASUREMENT,
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
         ),
         # Additional VS Drive sensors
         cv.Optional(CONF_COMPRESSOR_DESIRED_SPEED): sensor.sensor_schema(
@@ -419,6 +428,10 @@ async def to_code(config):
     if CONF_FAULT_CODE in config:
         sens = await sensor.new_sensor(config[CONF_FAULT_CODE])
         cg.add(parent.set_fault_code_sensor(sens))
+
+    if CONF_LOCKOUT_FAULT_CODE in config:
+        sens = await sensor.new_sensor(config[CONF_LOCKOUT_FAULT_CODE])
+        cg.add(parent.set_lockout_fault_sensor(sens))
 
     # FP1/FP2 refrigerant temperatures
     if CONF_FP1_TEMPERATURE in config:

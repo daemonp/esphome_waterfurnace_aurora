@@ -3,6 +3,8 @@
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"  // for fahrenheit_to_celsius / celsius_to_fahrenheit
 
+#include <cmath>
+
 namespace esphome {
 namespace waterfurnace_aurora {
 
@@ -74,18 +76,16 @@ void AuroraClimate::control(const climate::ClimateCall &call) {
   // Handle target temperature changes (dual setpoint)
   // HA sends Celsius; hardware expects Fahrenheit
   if (call.get_target_temperature_low().has_value()) {
-    float temp_c = *call.get_target_temperature_low();
-    float temp_f = celsius_to_fahrenheit(temp_c);
+    float temp_f = celsius_to_fahrenheit(*call.get_target_temperature_low());
     if (this->parent_->set_heating_setpoint(temp_f)) {
-      this->target_temperature_low = temp_c;
+      this->target_temperature_low = *call.get_target_temperature_low();
     }
   }
   
   if (call.get_target_temperature_high().has_value()) {
-    float temp_c = *call.get_target_temperature_high();
-    float temp_f = celsius_to_fahrenheit(temp_c);
+    float temp_f = celsius_to_fahrenheit(*call.get_target_temperature_high());
     if (this->parent_->set_cooling_setpoint(temp_f)) {
-      this->target_temperature_high = temp_c;
+      this->target_temperature_high = *call.get_target_temperature_high();
     }
   }
 
@@ -126,15 +126,12 @@ void AuroraClimate::update_state_() {
 
   // Warn if IZ2 is detected - the main climate entity reads system-wide registers
   // which are not meaningful on IZ2 systems. Use zone climate entities instead.
-  if (this->parent_->has_iz2()) {
-    static bool warned = false;
-    if (!warned) {
-      ESP_LOGW(TAG, "IZ2 detected - the main climate entity reads system-wide registers");
-      ESP_LOGW(TAG, "which may show incorrect values on IZ2 systems.");
-      ESP_LOGW(TAG, "Use the zone climate entities (zone: 1, zone: 2, etc.) instead");
-      ESP_LOGW(TAG, "and consider removing or commenting out this main climate entity.");
-      warned = true;
-    }
+  if (this->parent_->has_iz2() && !this->iz2_warned_) {
+    ESP_LOGW(TAG, "IZ2 detected - the main climate entity reads system-wide registers");
+    ESP_LOGW(TAG, "which may show incorrect values on IZ2 systems.");
+    ESP_LOGW(TAG, "Use the zone climate entities (zone: 1, zone: 2, etc.) instead");
+    ESP_LOGW(TAG, "and consider removing or commenting out this main climate entity.");
+    this->iz2_warned_ = true;
   }
 
   // Update current temperature (hardware reports °F, climate entity uses °C)
@@ -144,30 +141,35 @@ void AuroraClimate::update_state_() {
   }
 
   // Update setpoints (hardware reports °F, climate entity uses °C)
-  float heating_sp = this->parent_->get_heating_setpoint();
-  float cooling_sp = this->parent_->get_cooling_setpoint();
-  
-  if (!std::isnan(heating_sp)) {
-    this->target_temperature_low = fahrenheit_to_celsius(heating_sp);
-  }
-  if (!std::isnan(cooling_sp)) {
-    this->target_temperature_high = fahrenheit_to_celsius(cooling_sp);
+  // Skip during write cooldown — prevents stale device read-back from
+  // overwriting the optimistic value set by control().
+  if (!this->parent_->setpoint_cooldown_active()) {
+    float heating_sp = this->parent_->get_heating_setpoint();
+    if (!std::isnan(heating_sp)) {
+      this->target_temperature_low = fahrenheit_to_celsius(heating_sp);
+    }
+    float cooling_sp = this->parent_->get_cooling_setpoint();
+    if (!std::isnan(cooling_sp)) {
+      this->target_temperature_high = fahrenheit_to_celsius(cooling_sp);
+    }
   }
 
-  // Update mode and preset
-  climate::ClimateMode new_mode;
-  climate::ClimatePreset new_preset;
-  if (aurora_to_esphome_mode(this->parent_->get_hvac_mode(), new_mode, new_preset)) {
-    this->mode = new_mode;
-    this->preset = new_preset;
+  // Update mode and preset (skip during mode cooldown)
+  if (!this->parent_->mode_cooldown_active()) {
+    climate::ClimateMode new_mode;
+    climate::ClimatePreset new_preset;
+    if (aurora_to_esphome_mode(this->parent_->get_hvac_mode(), new_mode, new_preset)) {
+      this->mode = new_mode;
+      this->preset = new_preset;
+    }
   }
 
   // Update action based on system outputs
   uint16_t outputs = this->parent_->get_system_outputs();
-  bool compressor = outputs & (OUTPUT_CC | OUTPUT_CC2);
-  bool cooling = outputs & OUTPUT_RV;
-  bool aux_heat = outputs & (OUTPUT_EH1 | OUTPUT_EH2);
-  bool blower = outputs & OUTPUT_BLOWER;
+  bool compressor = (outputs & (OUTPUT_CC | OUTPUT_CC2)) != 0;
+  bool cooling = (outputs & OUTPUT_RV) != 0;
+  bool aux_heat = (outputs & (OUTPUT_EH1 | OUTPUT_EH2)) != 0;
+  bool blower = (outputs & OUTPUT_BLOWER) != 0;
   
   if (this->parent_->is_locked_out()) {
     this->action = climate::CLIMATE_ACTION_OFF;
@@ -181,8 +183,10 @@ void AuroraClimate::update_state_() {
     this->action = climate::CLIMATE_ACTION_IDLE;
   }
 
-  // Update fan mode
-  this->fan_mode = aurora_to_esphome_fan(this->parent_->get_fan_mode());
+  // Update fan mode (skip during fan cooldown)
+  if (!this->parent_->fan_cooldown_active()) {
+    this->fan_mode = aurora_to_esphome_fan(this->parent_->get_fan_mode());
+  }
 
   this->publish_state();
 }

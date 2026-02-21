@@ -17,7 +17,7 @@ from .. import waterfurnace_aurora_ns, WaterFurnaceAurora, CONF_AURORA_ID
 UNIT_FAHRENHEIT = "°F"
 
 DEPENDENCIES = ["waterfurnace_aurora"]
-CODEOWNERS = ["@damonmaria"]
+CODEOWNERS = ["@daemonp"]
 
 # Configuration keys
 CONF_DHW_SETPOINT = "dhw_setpoint"
@@ -108,12 +108,16 @@ FAN_OFF_TIME_SCHEMA = number.number_schema(
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
-# Schema for humidity targets
+# Schema for humidity targets (base — extended with per-target min/max below)
 HUMIDITY_TARGET_SCHEMA = number.number_schema(
     AuroraNumber,
     unit_of_measurement=UNIT_PERCENT,
     device_class=DEVICE_CLASS_HUMIDITY,
     icon="mdi:water-percent",
+).extend(
+    {
+        cv.Optional(CONF_STEP, default=1): cv.float_,
+    }
 ).extend(cv.COMPONENT_SCHEMA)
 
 CONFIG_SCHEMA = cv.Schema(

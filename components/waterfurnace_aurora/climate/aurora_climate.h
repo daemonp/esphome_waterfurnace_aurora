@@ -26,6 +26,7 @@ class AuroraClimate : public climate::Climate, public Component {
   void update_state_();
 
   WaterFurnaceAurora *parent_{nullptr};
+  bool iz2_warned_{false};  // Per-instance IZ2 warning flag (avoids static local)
 };
 
 }  // namespace waterfurnace_aurora

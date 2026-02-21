@@ -1,11 +1,12 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import text_sensor
+from esphome.const import ENTITY_CATEGORY_DIAGNOSTIC
 
 from .. import waterfurnace_aurora_ns, WaterFurnaceAurora, CONF_AURORA_ID
 
 DEPENDENCIES = ["waterfurnace_aurora"]
-CODEOWNERS = ["@damonmaria"]
+CODEOWNERS = ["@daemonp"]
 
 # Text sensor configuration keys
 CONF_CURRENT_MODE = "current_mode"
@@ -22,6 +23,13 @@ CONF_AXB_INPUTS = "axb_inputs"
 CONF_HUMIDIFIER_MODE = "humidifier_mode"
 CONF_DEHUMIDIFIER_MODE = "dehumidifier_mode"
 CONF_PUMP_TYPE = "pump_type"
+CONF_LOCKOUT_FAULT_DESCRIPTION = "lockout_fault_description"
+CONF_OUTPUTS_AT_LOCKOUT = "outputs_at_lockout"
+CONF_INPUTS_AT_LOCKOUT = "inputs_at_lockout"
+
+DIAGNOSTIC_TEXT_SCHEMA = text_sensor.text_sensor_schema(
+    entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+)
 
 CONFIG_SCHEMA = cv.Schema(
     {
@@ -29,17 +37,20 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_CURRENT_MODE): text_sensor.text_sensor_schema(),
         cv.Optional(CONF_HVAC_MODE): text_sensor.text_sensor_schema(),
         cv.Optional(CONF_FAN_MODE): text_sensor.text_sensor_schema(),
-        cv.Optional(CONF_FAULT_DESCRIPTION): text_sensor.text_sensor_schema(),
-        cv.Optional(CONF_MODEL_NUMBER): text_sensor.text_sensor_schema(),
-        cv.Optional(CONF_SERIAL_NUMBER): text_sensor.text_sensor_schema(),
-        cv.Optional(CONF_FAULT_HISTORY): text_sensor.text_sensor_schema(),
-        cv.Optional(CONF_VS_DERATE): text_sensor.text_sensor_schema(),
-        cv.Optional(CONF_VS_SAFE_MODE): text_sensor.text_sensor_schema(),
-        cv.Optional(CONF_VS_ALARM): text_sensor.text_sensor_schema(),
-        cv.Optional(CONF_AXB_INPUTS): text_sensor.text_sensor_schema(),
+        cv.Optional(CONF_FAULT_DESCRIPTION): DIAGNOSTIC_TEXT_SCHEMA,
+        cv.Optional(CONF_MODEL_NUMBER): DIAGNOSTIC_TEXT_SCHEMA,
+        cv.Optional(CONF_SERIAL_NUMBER): DIAGNOSTIC_TEXT_SCHEMA,
+        cv.Optional(CONF_FAULT_HISTORY): DIAGNOSTIC_TEXT_SCHEMA,
+        cv.Optional(CONF_VS_DERATE): DIAGNOSTIC_TEXT_SCHEMA,
+        cv.Optional(CONF_VS_SAFE_MODE): DIAGNOSTIC_TEXT_SCHEMA,
+        cv.Optional(CONF_VS_ALARM): DIAGNOSTIC_TEXT_SCHEMA,
+        cv.Optional(CONF_AXB_INPUTS): DIAGNOSTIC_TEXT_SCHEMA,
         cv.Optional(CONF_HUMIDIFIER_MODE): text_sensor.text_sensor_schema(),
         cv.Optional(CONF_DEHUMIDIFIER_MODE): text_sensor.text_sensor_schema(),
-        cv.Optional(CONF_PUMP_TYPE): text_sensor.text_sensor_schema(),
+        cv.Optional(CONF_PUMP_TYPE): DIAGNOSTIC_TEXT_SCHEMA,
+        cv.Optional(CONF_LOCKOUT_FAULT_DESCRIPTION): DIAGNOSTIC_TEXT_SCHEMA,
+        cv.Optional(CONF_OUTPUTS_AT_LOCKOUT): DIAGNOSTIC_TEXT_SCHEMA,
+        cv.Optional(CONF_INPUTS_AT_LOCKOUT): DIAGNOSTIC_TEXT_SCHEMA,
     }
 )
 
@@ -102,3 +113,15 @@ async def to_code(config):
     if CONF_PUMP_TYPE in config:
         sens = await text_sensor.new_text_sensor(config[CONF_PUMP_TYPE])
         cg.add(parent.set_pump_type_sensor(sens))
+
+    if CONF_LOCKOUT_FAULT_DESCRIPTION in config:
+        sens = await text_sensor.new_text_sensor(config[CONF_LOCKOUT_FAULT_DESCRIPTION])
+        cg.add(parent.set_lockout_fault_description_sensor(sens))
+
+    if CONF_OUTPUTS_AT_LOCKOUT in config:
+        sens = await text_sensor.new_text_sensor(config[CONF_OUTPUTS_AT_LOCKOUT])
+        cg.add(parent.set_outputs_at_lockout_sensor(sens))
+
+    if CONF_INPUTS_AT_LOCKOUT in config:
+        sens = await text_sensor.new_text_sensor(config[CONF_INPUTS_AT_LOCKOUT])
+        cg.add(parent.set_inputs_at_lockout_sensor(sens))

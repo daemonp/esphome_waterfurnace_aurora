@@ -18,22 +18,24 @@ The AID Tool port on the front of your heat pump uses an RJ45 jack. The 8 pins c
 
 ### RJ45 Plug Pin Numbering
 
-When building your cable, you need to know how pin numbers map to wire positions. Hold the RJ45 plug with the **clip on top** and the gold contacts facing you. **Pin 1 is on the left**:
+When building your cable, you need to know how pin numbers map to wire positions. Hold the RJ45 plug with the **clip on the bottom** (facing away from you) and the gold contacts facing you. **Pin 1 is on the left**.
+
+> **Tip**: Most crimping guides show the plug from the *back* (contacts pointing away) with the clip on *top* — pin 1 is still on the left from that angle. Both views describe the same pin positions.
 
 ```
                  RJ45 Plug
-  (clip on top, contacts facing you)
+  (clip on bottom, contacts facing you)
 
-                 +-----------+
-                 |   clip    |
-  +--------------+-----------+---------------+
+  +------------------------------------------+
   |                                          |
   |  +----+----+----+----+----+----+----+----+
   |  | 1  | 2  | 3  | 4  | 5  | 6  | 7  | 8  |
   |  |W/Or| Or |W/Gn| Bl |W/Bl| Gn |W/Br| Br |
   |  +----+----+----+----+----+----+----+----+
   |                                          |
-  +------------------------------------------+
+  +--------------+-----------+---------------+
+                 |   clip    |
+                 +-----------+
                        |
                     to cable
 

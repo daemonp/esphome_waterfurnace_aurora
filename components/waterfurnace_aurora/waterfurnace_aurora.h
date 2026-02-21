@@ -7,331 +7,74 @@
 #include "esphome/components/binary_sensor/binary_sensor.h"
 #include "esphome/components/text_sensor/text_sensor.h"
 
-#include <vector>
-#include <algorithm>
-#include <functional>
+#ifdef USE_API_CUSTOM_SERVICES
+#include "esphome/components/api/custom_api_device.h"
+#endif
+
+#include "registers.h"
+#include "protocol.h"
+
 #include <cmath>
+#include <cstring>
+#include <functional>
+#include <utility>
+#include <vector>
 
 namespace esphome {
 namespace waterfurnace_aurora {
 
-// WaterFurnace Aurora uses custom Modbus function codes:
-// Function Code 0x41 ('A') - Read multiple register ranges (address + length pairs)
-// Function Code 0x42 ('B') - Read specific individual registers (list of addresses)
-// Function Code 0x03 - Standard read holding registers (also supported)
-// Function Code 0x06 - Standard write single register
+// ============================================================================
+// State Machine
+// ============================================================================
 
-// Heating modes (from registers.rb HEATING_MODE)
-enum class HeatingMode : uint8_t {
-  OFF = 0,
-  AUTO = 1,
-  COOL = 2,
-  HEAT = 3,
-  EHEAT = 4
+enum class State : uint8_t {
+  SETUP_READ_ID,            // Read model/serial/program info
+  SETUP_DETECT_COMPONENTS,  // Detect AXB, VS Drive, IZ2, blower, pump, energy
+  SETUP_DETECT_VS,          // VS Drive probe (optional second detect step)
+  IDLE,                     // Ready for next operation
+  TX_PENDING,               // Frame written to UART TX FIFO, waiting for transmit to complete
+  WAITING_RESPONSE,         // Request sent, collecting bytes
+  ERROR_BACKOFF,            // Communication error, waiting before retry
 };
 
-// Fan modes (from registers.rb FAN_MODE)
-enum class FanMode : uint8_t {
-  AUTO = 0,
-  CONTINUOUS = 1,
-  INTERMITTENT = 2
+// Identifies what type of request is currently in-flight (for response routing)
+enum class PendingRequest : uint8_t {
+  NONE,
+  SETUP_ID,          // func 0x03 read for model/serial
+  SETUP_DETECT,      // func 0x42 read for hardware detection
+  SETUP_VS_PROBE,    // func 0x42 read for VS drive probing
+  POLL_REGISTERS,    // func 0x42 read for normal polling
+  POLL_FAULT_HISTORY,// func 0x03 read for fault history
+  WRITE_SINGLE,      // func 0x06 write
+  // Note: func 0x43 (batch write) is supported by the protocol layer but NOT used
+  // by the hub. The Aurora firmware rejects 0x43 with error 0x02. All writes use
+  // individual 0x06 calls, matching the ccutrer/waterfurnace_aurora Ruby gem behavior.
 };
 
-// System outputs bitmask (register 30, from registers.rb SYSTEM_OUTPUTS)
-constexpr uint16_t OUTPUT_CC = 0x01;       // Compressor stage 1
-constexpr uint16_t OUTPUT_CC2 = 0x02;      // Compressor stage 2
-constexpr uint16_t OUTPUT_RV = 0x04;       // Reversing valve (cool instead of heat)
-constexpr uint16_t OUTPUT_BLOWER = 0x08;
-constexpr uint16_t OUTPUT_EH1 = 0x10;      // Aux heat 1
-constexpr uint16_t OUTPUT_EH2 = 0x20;      // Aux heat 2
-constexpr uint16_t OUTPUT_ACCESSORY = 0x200;
-constexpr uint16_t OUTPUT_LOCKOUT = 0x400;
-constexpr uint16_t OUTPUT_ALARM = 0x800;
+// ============================================================================
+// Hub Class
+// ============================================================================
 
-// AXB outputs bitmask (register 1104, from registers.rb AXB_OUTPUTS)
-constexpr uint16_t AXB_OUTPUT_DHW = 0x01;
-constexpr uint16_t AXB_OUTPUT_LOOP_PUMP = 0x02;
-constexpr uint16_t AXB_OUTPUT_DIVERTING_VALVE = 0x04;
-
-// System status bitmask (register 31, from registers.rb status method)
-constexpr uint16_t STATUS_LPS = 0x80;          // Low pressure switch (bit 7)
-constexpr uint16_t STATUS_HPS = 0x100;         // High pressure switch (bit 8)
-constexpr uint16_t STATUS_Y1 = 0x01;
-constexpr uint16_t STATUS_Y2 = 0x02;
-constexpr uint16_t STATUS_W = 0x04;
-constexpr uint16_t STATUS_O = 0x08;
-constexpr uint16_t STATUS_G = 0x10;
-constexpr uint16_t STATUS_DH_RH = 0x20;
-constexpr uint16_t STATUS_EMERGENCY_SHUTDOWN = 0x40;
-constexpr uint16_t STATUS_LOAD_SHED = 0x200;
-
-// VS Drive Derate flags (registers 214, 3223)
-constexpr uint16_t VS_DERATE_DRIVE_OVER_TEMP = 0x01;
-constexpr uint16_t VS_DERATE_LOW_SUCTION_PRESSURE = 0x04;
-constexpr uint16_t VS_DERATE_LOW_DISCHARGE_PRESSURE = 0x10;
-constexpr uint16_t VS_DERATE_HIGH_DISCHARGE_PRESSURE = 0x20;
-constexpr uint16_t VS_DERATE_OUTPUT_POWER_LIMIT = 0x40;
-
-// VS Drive Safe Mode flags (registers 216, 3225)
-constexpr uint16_t VS_SAFE_EEV_INDOOR_FAILED = 0x01;
-constexpr uint16_t VS_SAFE_EEV_OUTDOOR_FAILED = 0x02;
-constexpr uint16_t VS_SAFE_INVALID_AMBIENT_TEMP = 0x04;
-
-// Key register addresses (from registers.rb)
-namespace registers {
-  // System info
-  constexpr uint16_t ABC_VERSION = 2;
-  constexpr uint16_t COMPRESSOR_ANTI_SHORT_CYCLE = 6;
-  constexpr uint16_t LINE_VOLTAGE = 16;
-  constexpr uint16_t FP1_TEMP = 19;           // Cooling liquid line temp
-  constexpr uint16_t FP2_TEMP = 20;           // Air coil temp
-  constexpr uint16_t LAST_FAULT = 25;
-  constexpr uint16_t SYSTEM_OUTPUTS = 30;
-  constexpr uint16_t SYSTEM_STATUS = 31;
-  constexpr uint16_t MODEL_NUMBER = 92;       // 12 registers (92-103)
-  constexpr uint16_t SERIAL_NUMBER = 105;     // 5 registers (105-109)
-  constexpr uint16_t LINE_VOLTAGE_SETTING = 112;
-  
-  // VS Drive details (from registers.rb)
-  constexpr uint16_t VS_DERATE = 214;         // Also at 3223
-  constexpr uint16_t VS_SAFE_MODE = 216;      // Also at 3225
-  constexpr uint16_t VS_ALARM1 = 217;         // Also at 3226
-  constexpr uint16_t VS_ALARM2 = 218;         // Also at 3227
-  
-  // Fault history (registers 601-699)
-  constexpr uint16_t FAULT_HISTORY_START = 601;
-  constexpr uint16_t FAULT_HISTORY_END = 699;
-  
-  // DHW (requires AXB)
-  constexpr uint16_t DHW_ENABLED = 400;
-  constexpr uint16_t DHW_SETPOINT = 401;
-  
-  // Thermostat
-  constexpr uint16_t AMBIENT_TEMP = 502;
-  constexpr uint16_t ENTERING_AIR = 567;
-  constexpr uint16_t ENTERING_AIR_AWL = 740;
-  constexpr uint16_t RELATIVE_HUMIDITY = 741;
-  constexpr uint16_t OUTDOOR_TEMP = 742;
-  constexpr uint16_t HEATING_SETPOINT = 745;
-  constexpr uint16_t COOLING_SETPOINT = 746;
-  constexpr uint16_t THERMOSTAT_INSTALLED = 800;
-  constexpr uint16_t THERMOSTAT_VERSION = 801;
-  constexpr uint16_t AXB_INSTALLED = 806;
-  constexpr uint16_t AXB_VERSION = 807;
-  constexpr uint16_t LEAVING_AIR = 900;
-  
-  // AXB
-  constexpr uint16_t AXB_INPUTS = 1103;
-  constexpr uint16_t AXB_OUTPUTS = 1104;
-  constexpr uint16_t LEAVING_WATER = 1110;
-  constexpr uint16_t ENTERING_WATER = 1111;
-  constexpr uint16_t DHW_TEMP = 1114;
-  constexpr uint16_t DISCHARGE_PRESSURE = 1115;
-  constexpr uint16_t SUCTION_PRESSURE = 1116;
-  constexpr uint16_t WATERFLOW = 1117;
-  constexpr uint16_t LOOP_PRESSURE = 1119;
-  
-  // Blower / ECM (from blower.rb)
-  constexpr uint16_t BLOWER_ONLY_SPEED = 340;
-  constexpr uint16_t LO_COMPRESSOR_ECM_SPEED = 341;
-  constexpr uint16_t HI_COMPRESSOR_ECM_SPEED = 342;
-  constexpr uint16_t ECM_SPEED = 344;
-  constexpr uint16_t AUX_HEAT_ECM_SPEED = 347;
-  
-  // VS Pump (from pump.rb)
-  constexpr uint16_t VS_PUMP_MIN = 321;
-  constexpr uint16_t VS_PUMP_MAX = 322;
-  constexpr uint16_t VS_PUMP_MANUAL = 323;
-  constexpr uint16_t VS_PUMP_SPEED = 325;
-  
-  // Refrigeration monitoring (from compressor.rb)
-  constexpr uint16_t HEATING_LIQUID_LINE_TEMP = 1109;
-  constexpr uint16_t SATURATED_CONDENSER_TEMP = 1134;
-  constexpr uint16_t SUBCOOL_HEATING = 1135;
-  constexpr uint16_t SUBCOOL_COOLING = 1136;
-  
-  // Energy monitoring (32-bit values, high word first)
-  constexpr uint16_t COMPRESSOR_WATTS = 1146;
-  constexpr uint16_t BLOWER_WATTS = 1148;
-  constexpr uint16_t AUX_WATTS = 1150;
-  constexpr uint16_t TOTAL_WATTS = 1152;
-  constexpr uint16_t HEAT_OF_EXTRACTION = 1154;
-  constexpr uint16_t HEAT_OF_REJECTION = 1156;
-  constexpr uint16_t PUMP_WATTS = 1164;
-  
-  // VS Drive
-  constexpr uint16_t COMPRESSOR_SPEED_DESIRED = 3000;
-  constexpr uint16_t COMPRESSOR_SPEED_ACTUAL = 3001;
-  constexpr uint16_t VS_DISCHARGE_PRESSURE = 3322;
-  constexpr uint16_t VS_SUCTION_PRESSURE = 3323;
-  constexpr uint16_t VS_DISCHARGE_TEMP = 3325;
-  constexpr uint16_t VS_AMBIENT_TEMP = 3326;
-  constexpr uint16_t VS_DRIVE_TEMP = 3327;
-  constexpr uint16_t VS_COMPRESSOR_WATTS = 3422;   // + 3423 low word (uint32, Watts)
-  constexpr uint16_t VS_INVERTER_TEMP = 3522;
-  constexpr uint16_t VS_FAN_SPEED = 3524;           // Fan speed percentage (0-100%)
-  constexpr uint16_t VS_EEV_OPEN = 3808;
-  constexpr uint16_t VS_SUCTION_TEMP = 3903;
-  constexpr uint16_t VS_SAT_EVAP_DISCHARGE_TEMP = 3905;  // Saturated evaporator discharge temp
-  constexpr uint16_t VS_SUPERHEAT_TEMP = 3906;
-  
-  // Thermostat config (read)
-  constexpr uint16_t FAN_CONFIG = 12005;
-  constexpr uint16_t HEATING_MODE_READ = 12006;
-  
-  // Humidistat (from humidistat.rb)
-  constexpr uint16_t HUMIDISTAT_SETTINGS = 12309;    // For non-IZ2
-  constexpr uint16_t HUMIDISTAT_TARGETS = 12310;     // For non-IZ2
-  constexpr uint16_t IZ2_HUMIDISTAT_SETTINGS = 21114;   // Write: mode bitmask (0x8000=auto humidify, 0x4000=auto dehumidify)
-  constexpr uint16_t IZ2_HUMIDISTAT_TARGETS_WRITE = 21115;  // Write: (humidify_target << 8) | dehumidify_target
-  constexpr uint16_t IZ2_HUMIDISTAT_MODE = 31109;       // Read: mode bitmask (same format as 21114)
-  constexpr uint16_t IZ2_HUMIDISTAT_TARGETS = 31110;    // Read: (humidify_target << 8) | dehumidify_target
-  
-  // Thermostat config (write)
-  constexpr uint16_t HEATING_MODE_WRITE = 12606;
-  constexpr uint16_t HEATING_SETPOINT_WRITE = 12619;
-  constexpr uint16_t COOLING_SETPOINT_WRITE = 12620;
-  constexpr uint16_t FAN_MODE_WRITE = 12621;
-  constexpr uint16_t FAN_INTERMITTENT_ON_WRITE = 12622;
-  constexpr uint16_t FAN_INTERMITTENT_OFF_WRITE = 12623;
-  
-  // System commands
-  constexpr uint16_t CLEAR_FAULT_HISTORY = 47;
-  constexpr uint16_t CLEAR_FAULT_MAGIC = 0x5555;
-  
-  // VS Drive / active dehumidification
-  constexpr uint16_t ACTIVE_DEHUMIDIFY = 362;
-  
-  // IZ2 system-wide desired speeds (from compressor.rb / blower.rb)
-  constexpr uint16_t IZ2_COMPRESSOR_SPEED_DESIRED = 564;
-  constexpr uint16_t IZ2_BLOWER_SPEED_DESIRED = 565;
-
-  // IZ2 Zone registers (base addresses, add (zone-1)*offset for each zone)
-  constexpr uint16_t IZ2_MODE_WRITE_BASE = 21202;      // +9 per zone
-  constexpr uint16_t IZ2_HEAT_SP_WRITE_BASE = 21203;
-  constexpr uint16_t IZ2_COOL_SP_WRITE_BASE = 21204;
-  constexpr uint16_t IZ2_FAN_MODE_WRITE_BASE = 21205;
-  constexpr uint16_t IZ2_FAN_ON_WRITE_BASE = 21206;
-  constexpr uint16_t IZ2_FAN_OFF_WRITE_BASE = 21207;
-  constexpr uint16_t IZ2_AMBIENT_BASE = 31007;         // +3 per zone
-  constexpr uint16_t IZ2_CONFIG1_BASE = 31008;
-  constexpr uint16_t IZ2_CONFIG2_BASE = 31009;
-  constexpr uint16_t IZ2_CONFIG3_BASE = 31200;         // +3 per zone
-  
-  // Hardware detection registers
-  constexpr uint16_t BLOWER_TYPE = 404;
-  constexpr uint16_t ENERGY_MONITOR = 412;
-  constexpr uint16_t PUMP_TYPE = 413;
-
-  // IZ2 system registers
-  constexpr uint16_t IZ2_INSTALLED = 812;
-  constexpr uint16_t IZ2_VERSION = 813;
-  constexpr uint16_t IZ2_NUM_ZONES = 483;
-  constexpr uint16_t IZ2_OUTDOOR_TEMP = 31003;
-  constexpr uint16_t IZ2_DEMAND = 31005;
-}
-
-// Flat sorted vector as register map — eliminates per-element heap overhead of std::map.
-// With ~90 registers, this saves ~4KB of fragmented heap vs std::map's tree nodes.
-// Lookup is O(log n) via std::lower_bound on a contiguous array (cache-friendly).
-using RegisterMap = std::vector<std::pair<uint16_t, uint16_t>>;
-
-// Find a register value in a sorted RegisterMap. Returns pointer to value or nullptr.
-inline const uint16_t *reg_find(const RegisterMap &map, uint16_t addr) {
-  auto it = std::lower_bound(map.begin(), map.end(), addr,
-      [](const std::pair<uint16_t, uint16_t> &p, uint16_t a) { return p.first < a; });
-  if (it != map.end() && it->first == addr)
-    return &it->second;
-  return nullptr;
-}
-
-// Insert or update a register value in a sorted RegisterMap.
-inline void reg_insert(RegisterMap &map, uint16_t addr, uint16_t value) {
-  auto it = std::lower_bound(map.begin(), map.end(), addr,
-      [](const std::pair<uint16_t, uint16_t> &p, uint16_t a) { return p.first < a; });
-  if (it != map.end() && it->first == addr) {
-    it->second = value;
-  } else {
-    map.insert(it, {addr, value});
-  }
-}
-
-// Blower type (register 404, from registers.rb BLOWER_TYPE)
-enum class BlowerType : uint8_t {
-  PSC = 0,
-  ECM_208 = 1,
-  ECM_265 = 2,
-  FIVE_SPEED = 3
-};
-
-// Pump type (register 413, from registers.rb PUMP_TYPE)
-enum class PumpType : uint8_t {
-  OPEN_LOOP = 0,
-  FC1 = 1,
-  FC2 = 2,
-  VS_PUMP = 3,
-  VS_PUMP_26_99 = 4,
-  VS_PUMP_UPS26_99 = 5,
-  FC1_GLNP = 6,
-  FC2_GLNP = 7,
-  OTHER = 255
-};
-
-// Maximum number of IZ2 zones
-constexpr uint8_t MAX_IZ2_ZONES = 6;
-
-// IZ2 Zone current mode/call (from registers.rb CALLS hash)
-// Values must match the Ruby gem's CALLS mapping exactly:
-//   0=standby, 1=unknown1, 2=h1, 3=h2, 4=h3, 5=c1, 6=c2, 7=unknown7
-enum class ZoneCall : uint8_t {
-  STANDBY = 0,
-  UNKNOWN1 = 1,
-  H1 = 2,
-  H2 = 3,
-  H3 = 4,
-  C1 = 5,
-  C2 = 6,
-  UNKNOWN7 = 7
-};
-
-// Zone priority
-enum class ZonePriority : uint8_t {
-  COMFORT = 0,
-  ECONOMY = 1
-};
-
-// Zone size
-enum class ZoneSize : uint8_t {
-  QUARTER = 0,
-  HALF = 1,
-  THREE_QUARTER = 2,
-  FULL = 3
-};
-
-// Structure to hold IZ2 zone data
-struct IZ2ZoneData {
-  float ambient_temperature{NAN};
-  float heating_setpoint{NAN};
-  float cooling_setpoint{NAN};
-  HeatingMode target_mode{HeatingMode::OFF};
-  FanMode target_fan_mode{FanMode::AUTO};
-  ZoneCall current_call{ZoneCall::STANDBY};
-  bool damper_open{false};
-  uint8_t fan_on_time{0};
-  uint8_t fan_off_time{0};
-  ZonePriority priority{ZonePriority::COMFORT};
-  ZoneSize size{ZoneSize::FULL};
-  uint8_t normalized_size{0};
-};
-
-class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
+class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
+#ifdef USE_API_CUSTOM_SERVICES
+    , public api::CustomAPIDevice
+#endif
+{
  public:
+  // --- Timing constants ---
+  static constexpr uint32_t RESPONSE_TIMEOUT_MS = 2000;
+  static constexpr uint32_t ERROR_BACKOFF_MS = 5000;
+  static constexpr size_t MAX_LISTENERS = 16;
+  static constexpr uint32_t DEFAULT_CONNECTED_TIMEOUT_MS = 30000;
+  static constexpr uint32_t WRITE_COOLDOWN_MS = 7000;
+
   WaterFurnaceAurora() = default;
 
   void setup() override;
   void loop() override;
   void update() override;
   void dump_config() override;
+  void on_shutdown() override;
   
   float get_setup_priority() const override { return setup_priority::DATA; }
 
@@ -344,6 +87,10 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   void set_has_vs_drive_override(bool value) { this->has_vs_drive_ = value; this->vs_drive_override_ = true; }
   void set_has_iz2_override(bool value) { this->has_iz2_ = value; this->iz2_override_ = true; }
   void set_num_iz2_zones_override(uint8_t value) { this->num_iz2_zones_ = value; this->iz2_zones_override_ = true; }
+
+  // Connected sensor
+  void set_connected_sensor(binary_sensor::BinarySensor *sensor) { this->connected_sensor_ = sensor; }
+  void set_connected_timeout(uint32_t ms) { this->connected_timeout_ = ms; }
 
   // Register sensors
   void set_entering_air_sensor(sensor::Sensor *sensor) { entering_air_sensor_ = sensor; }
@@ -390,12 +137,11 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   void set_sat_evap_discharge_temp_sensor(sensor::Sensor *sensor) { sat_evap_discharge_temp_sensor_ = sensor; }
   void set_aux_heat_stage_sensor(sensor::Sensor *sensor) { aux_heat_stage_sensor_ = sensor; }
 
-  // IZ2 desired speed sensors (from compressor.rb / blower.rb)
+  // IZ2 desired speed sensors
   void set_iz2_compressor_speed_sensor(sensor::Sensor *sensor) { iz2_compressor_speed_sensor_ = sensor; }
   void set_iz2_blower_speed_sensor(sensor::Sensor *sensor) { iz2_blower_speed_sensor_ = sensor; }
 
-  // Derived sensors — computed on-device from raw register values.
-  // These go beyond the Ruby gem which only publishes raw values.
+  // Derived sensors
   void set_cop_sensor(sensor::Sensor *sensor) { cop_sensor_ = sensor; }
   void set_water_delta_t_sensor(sensor::Sensor *sensor) { water_delta_t_sensor_ = sensor; }
   void set_approach_temp_sensor(sensor::Sensor *sensor) { approach_temp_sensor_ = sensor; }
@@ -452,8 +198,14 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   void set_humidifier_mode_sensor(text_sensor::TextSensor *sensor) { humidifier_mode_sensor_ = sensor; }
   void set_dehumidifier_mode_sensor(text_sensor::TextSensor *sensor) { dehumidifier_mode_sensor_ = sensor; }
   void set_pump_type_sensor(text_sensor::TextSensor *sensor) { pump_type_sensor_ = sensor; }
+  void set_lockout_fault_sensor(sensor::Sensor *sensor) { lockout_fault_sensor_ = sensor; }
+  void set_lockout_fault_description_sensor(text_sensor::TextSensor *sensor) { lockout_fault_description_sensor_ = sensor; }
+  void set_outputs_at_lockout_sensor(text_sensor::TextSensor *sensor) { outputs_at_lockout_sensor_ = sensor; }
+  void set_inputs_at_lockout_sensor(text_sensor::TextSensor *sensor) { inputs_at_lockout_sensor_ = sensor; }
 
-  // Control methods (called by climate/water_heater components)
+  // Control methods — now queue writes instead of blocking
+  void write_register(uint16_t addr, uint16_t value);
+  
   bool set_heating_setpoint(float temp);
   bool set_cooling_setpoint(float temp);
   bool set_hvac_mode(HeatingMode mode);
@@ -461,22 +213,22 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   bool set_dhw_enabled(bool enabled);
   bool set_dhw_setpoint(float temp);
   
-  // Blower speed controls (from blower.rb)
+  // Blower speed controls
   bool set_blower_only_speed(uint8_t speed);
   bool set_lo_compressor_speed(uint8_t speed);
   bool set_hi_compressor_speed(uint8_t speed);
   bool set_aux_heat_ecm_speed(uint8_t speed);
   
-  // Pump speed controls (from pump.rb)
+  // Pump speed controls
   bool set_pump_speed(uint8_t speed);
   bool set_pump_min_speed(uint8_t speed);
   bool set_pump_max_speed(uint8_t speed);
   
-  // Fan intermittent timing (from thermostat.rb)
+  // Fan intermittent timing
   bool set_fan_intermittent_on(uint8_t minutes);
   bool set_fan_intermittent_off(uint8_t minutes);
   
-  // Humidifier controls (from humidistat.rb)
+  // Humidifier controls
   bool set_humidification_target(uint8_t percent);
   bool set_dehumidification_target(uint8_t percent);
   
@@ -497,19 +249,49 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   float get_cooling_setpoint() const { return cooling_setpoint_; }
   HeatingMode get_hvac_mode() const { return hvac_mode_; }
   FanMode get_fan_mode() const { return fan_mode_; }
+  
+  // Cooldown state queries — used by climate entities to skip stale overwrites
+  bool setpoint_cooldown_active() const { return (millis() - last_setpoint_write_) <= WRITE_COOLDOWN_MS; }
+  bool mode_cooldown_active() const { return (millis() - last_mode_write_) <= WRITE_COOLDOWN_MS; }
+  bool fan_cooldown_active() const { return (millis() - last_fan_write_) <= WRITE_COOLDOWN_MS; }
   bool is_dhw_enabled() const { return dhw_enabled_; }
   float get_dhw_setpoint() const { return dhw_setpoint_; }
   float get_dhw_temperature() const { return dhw_temp_; }
   uint16_t get_system_outputs() const { return system_outputs_; }
   uint16_t get_axb_outputs() const { return axb_outputs_; }
   bool is_locked_out() const { return locked_out_; }
+  bool is_setup_complete() const { return setup_complete_; }
+  
+  /// Look up a raw register value from the cache. Returns NAN if not found.
+  /// Used by AuroraNumber entities to get current read-back values.
+  float get_cached_register(uint16_t addr) const {
+    const uint16_t *val = reg_find(this->register_cache_, addr);
+    return val ? static_cast<float>(*val) : NAN;
+  }
+  
+  /// Look up a register value and return it divided by 10. Returns NAN if not found.
+  float get_cached_register_tenths(uint16_t addr) const {
+    const uint16_t *val = reg_find(this->register_cache_, addr);
+    return val ? to_tenths(*val) : NAN;
+  }
   
   // Observer pattern: sub-entities register a callback to be notified when data updates.
-  // Callbacks are invoked at the end of refresh_all_data(), replacing the 5-second
-  // polling loop in each sub-entity. Matches the Ruby gem's "parent polls, pushes
-  // to children" pattern (ABCClient#refresh → zone.refresh, component.refresh).
   void register_listener(std::function<void()> callback) {
+    if (this->listeners_.size() >= MAX_LISTENERS) {
+      // Bounded by YAML config; if we hit this, the YAML has more sub-entities than expected.
+      return;
+    }
     this->listeners_.push_back(std::move(callback));
+  }
+
+  // Deferred setup callbacks — fired when hardware detection completes.
+  // If setup is already complete, the callback fires immediately.
+  void register_setup_callback(std::function<void()> callback) {
+    if (this->setup_complete_) {
+      callback();
+    } else {
+      this->setup_callbacks_.push_back(std::move(callback));
+    }
   }
 
   // IZ2 Zone getters
@@ -518,68 +300,61 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   const IZ2ZoneData& get_zone_data(uint8_t zone_number) const;
 
  protected:
-  // WaterFurnace custom Modbus protocol implementation
-  // Based on lib/aurora/modbus/slave.rb
+  // --- State machine operations ---
+  void transition_(State new_state);
+  /// Send a Modbus request frame and transition to WAITING_RESPONSE.
+  /// expected_addrs is copied into the member; use the move overload when possible.
+  void send_request_(const std::vector<uint8_t> &frame, PendingRequest type,
+                     const std::vector<uint16_t> &expected_addrs);
+  void send_request_(const std::vector<uint8_t> &frame, PendingRequest type,
+                     std::vector<uint16_t> &&expected_addrs);
+  /// Overload with no expected addresses (for writes).
+  void send_request_(const std::vector<uint8_t> &frame, PendingRequest type);
+  bool read_frame_(std::vector<uint8_t> &frame);
+  void process_response_(const std::vector<uint8_t> &frame);
+  void handle_timeout_();
   
-  // Function code 0x41 ('A') - Read multiple register ranges
-  // Request: [addr][0x41][start1_hi][start1_lo][count1_hi][count1_lo]...[CRC]
-  // Response: [addr][0x41][byte_count][data...][CRC]
-  bool read_register_ranges(const std::vector<std::pair<uint16_t, uint16_t>> &ranges,
-                            RegisterMap &result);
+  // --- Setup steps (called from loop() state machine) ---
+  void start_setup_read_id_();
+  void start_setup_detect_();
+  void start_setup_vs_probe_();
+  void process_setup_id_response_(const protocol::ParsedResponse &resp);
+  void process_setup_detect_response_(const protocol::ParsedResponse &resp);
+  void process_setup_vs_probe_response_(const protocol::ParsedResponse &resp);
+  void finish_setup_();
   
-  // Function code 0x42 ('B') - Read specific registers (non-contiguous)
-  // Request: [addr][0x42][addr1_hi][addr1_lo][addr2_hi][addr2_lo]...[CRC]
-  // Response: [addr][0x42][byte_count][data...][CRC]
-  bool read_specific_registers(const std::vector<uint16_t> &addresses,
-                               RegisterMap &result);
+  // --- Polling ---
+  void start_poll_cycle_();
+  void start_fault_history_read_();
+  void process_poll_response_(const protocol::ParsedResponse &resp);
+  void process_fault_history_response_(const protocol::ParsedResponse &resp);
+  void publish_all_sensors_();
   
-  // Standard Modbus function code 0x03 - Read holding registers
-  bool read_holding_registers(uint16_t start_addr, uint16_t count, std::vector<uint16_t> &result);
+  // --- Write handling ---
+  void process_pending_writes_();
   
-  // Standard Modbus function code 0x06 - Write single register
-  bool write_holding_register(uint16_t addr, uint16_t value);
+  // --- Connectivity ---
+  void update_connected_(bool connected);
   
-  // CRC calculation (standard Modbus CRC-16)
-  uint16_t calculate_crc(const uint8_t *data, size_t len);
+  // Current mode string (computed from system outputs and state).
+  // Returns a string literal (const char*) to avoid heap allocation in loop().
+  const char *get_current_mode_string();
   
-  // Send a Modbus request and receive response (shared transport for all function codes)
-  // Handles: clear pending data, TX/RX flow control, write, flush, delay, wait_for_response
-  bool send_and_receive(const uint8_t *request, size_t request_len,
-                        std::vector<uint8_t> &response, uint32_t timeout_ms = 1000);
-  
-  // Wait for and parse response
-  bool wait_for_response(std::vector<uint8_t> &response, uint32_t timeout_ms = 1000);
-  
-  // Data parsing helpers (from registers.rb)
-  static float to_signed_tenths(uint16_t value);
-  static float to_tenths(uint16_t value);
-  static uint32_t to_uint32(uint16_t high, uint16_t low);
-  static int32_t to_int32(uint16_t high, uint16_t low);
-  static std::string registers_to_string(const std::vector<uint16_t> &regs);
-  
-  // Refresh data from device
-  void refresh_all_data();
-  
-  // Hardware auto-detection (called from setup)
-  void detect_hardware();
-  
-  // Read model and serial number (called from setup)
-  void read_device_info();
-  
-  // Get mode/fault strings (from registers.rb FAULTS hash)
-  std::string get_current_mode_string();
-  static const char* get_fault_description(uint8_t code);
-  static const char* get_hvac_mode_string(HeatingMode mode);
-  static const char* get_fan_mode_string(FanMode mode);
-  static std::string get_vs_derate_string(uint16_t value);
-  static std::string get_vs_safe_mode_string(uint16_t value);
-  static std::string get_vs_alarm_string(uint16_t alarm1, uint16_t alarm2);
-  static std::string get_axb_inputs_string(uint16_t value);
-  
-  // Zone number validation helper (DRY: used by all 6 zone control methods)
+  // Zone number validation helper
   bool validate_zone_number(uint8_t zone_number) const;
+
+#ifdef USE_API_CUSTOM_SERVICES
+  // HA API custom service handler
+  void on_write_register_service_(int32_t address, int32_t value);
+#endif
   
-  // AWL version helpers (from Ruby gem abc_client.rb)
+  /// Estimate TX time in milliseconds for a given frame size at 19200 baud.
+  /// 19200 baud with 8E1 = 11 bits/byte → ~0.573ms/byte. We add 1ms margin.
+  uint32_t tx_time_ms_(size_t frame_bytes) const {
+    return static_cast<uint32_t>((frame_bytes * 11 * 1000) / 19200) + 2;
+  }
+
+  // AWL version helpers
   bool awl_axb() const { return has_axb_ && axb_version_ >= 2.0f; }
   bool awl_thermostat() const { return thermostat_version_ >= 3.0f; }
   bool awl_iz2() const { return has_iz2_ && iz2_version_ >= 2.0f; }
@@ -588,105 +363,160 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   bool is_vs_pump() const { return pump_type_ == PumpType::VS_PUMP || pump_type_ == PumpType::VS_PUMP_26_99 || pump_type_ == PumpType::VS_PUMP_UPS26_99; }
   bool refrigeration_monitoring() const { return energy_monitor_level_ >= 1; }
   bool energy_monitoring() const { return energy_monitor_level_ >= 2; }
-  static const char* get_pump_type_string(PumpType type);
-  
-  // IZ2 blower speed conversion (from registers.rb iz2_fan_desired)
-  // Maps IZ2 speed codes 1-6 to percentages: 25%, 40%, 55%, 70%, 85%, 100%
-  static uint8_t iz2_fan_desired(uint16_t value);
+
+  // Build the addresses list for the current poll cycle based on tier
+  void build_poll_addresses_();
 
   // Sensor publication helpers — DRY extraction for the 50+ find-and-publish patterns.
-  // Ruby gem equivalent: REGISTER_CONVERTERS hash mapping lambdas to register arrays.
-  // Each helper finds the register in the result map, applies a conversion, and publishes.
-  // Returns true if the register was found (regardless of whether a sensor was configured).
-  
-  // Publish raw uint16_t value
+  // Each helper skips publish_state() if the sensor already has state and the value
+  // is unchanged. This avoids ~5-7ms of API/TCP overhead per sensor per cycle,
+  // reducing total publish time from ~333ms to ~20-40ms for typical polling.
+  static bool sensor_value_changed_(sensor::Sensor *sensor, float value) {
+    if (sensor == nullptr) return false;
+    if (!sensor->has_state()) return true;  // First publish — always send
+    // Both NaN → no change; one NaN → changed; otherwise compare values
+    if (std::isnan(value)) return !std::isnan(sensor->raw_state);
+    if (std::isnan(sensor->raw_state)) return true;
+    return value != sensor->raw_state;
+  }
+
   bool publish_sensor(const RegisterMap &result, uint16_t reg,
                       sensor::Sensor *sensor) {
     const uint16_t *val = reg_find(result, reg);
     if (!val) return false;
-    if (sensor != nullptr) sensor->publish_state(*val);
+    float fval = static_cast<float>(*val);
+    if (sensor_value_changed_(sensor, fval)) sensor->publish_state(fval);
     return true;
   }
   
-  // Publish with to_tenths() conversion (unsigned value / 10.0)
   bool publish_sensor_tenths(const RegisterMap &result, uint16_t reg,
                              sensor::Sensor *sensor) {
     const uint16_t *val = reg_find(result, reg);
     if (!val) return false;
-    if (sensor != nullptr) sensor->publish_state(to_tenths(*val));
+    float fval = to_tenths(*val);
+    if (sensor_value_changed_(sensor, fval)) sensor->publish_state(fval);
     return true;
   }
   
-  // Publish with to_signed_tenths() conversion (signed value / 10.0)
   bool publish_sensor_signed_tenths(const RegisterMap &result, uint16_t reg,
                                      sensor::Sensor *sensor) {
     const uint16_t *val = reg_find(result, reg);
     if (!val) return false;
-    if (sensor != nullptr) sensor->publish_state(to_signed_tenths(*val));
+    float fval = to_signed_tenths(*val);
+    if (sensor_value_changed_(sensor, fval)) sensor->publish_state(fval);
     return true;
   }
   
-  // Publish 32-bit unsigned value from two consecutive registers (high, low)
   bool publish_sensor_uint32(const RegisterMap &result, uint16_t reg_high,
                               sensor::Sensor *sensor) {
     const uint16_t *val_h = reg_find(result, reg_high);
     const uint16_t *val_l = reg_find(result, reg_high + 1);
     if (!val_h || !val_l) return false;
-    if (sensor != nullptr) sensor->publish_state(to_uint32(*val_h, *val_l));
+    float fval = static_cast<float>(to_uint32(*val_h, *val_l));
+    if (sensor_value_changed_(sensor, fval)) sensor->publish_state(fval);
     return true;
   }
   
-  // Publish 32-bit signed value from two consecutive registers (high, low)
   bool publish_sensor_int32(const RegisterMap &result, uint16_t reg_high,
                              sensor::Sensor *sensor) {
     const uint16_t *val_h = reg_find(result, reg_high);
     const uint16_t *val_l = reg_find(result, reg_high + 1);
     if (!val_h || !val_l) return false;
-    if (sensor != nullptr) sensor->publish_state(to_int32(*val_h, *val_l));
+    float fval = static_cast<float>(to_int32(*val_h, *val_l));
+    if (sensor_value_changed_(sensor, fval)) sensor->publish_state(fval);
     return true;
   }
 
-  // Publish text sensor only when value has changed (avoid redundant API traffic)
+  /// Publish a binary sensor only if its value has changed from the last published state.
+  static void publish_binary_if_changed_(binary_sensor::BinarySensor *sensor, bool value) {
+    if (sensor == nullptr) return;
+    if (!sensor->has_state() || sensor->state != value) sensor->publish_state(value);
+  }
+
+  /// Publish a text sensor value only if it has changed from the cached value.
+  /// Uses std::string comparison to avoid redundant publishes.
   void publish_text_if_changed(text_sensor::TextSensor *sensor, std::string &cached,
-                                const std::string &value) {
+                                 const std::string &value) {
     if (sensor != nullptr && value != cached) {
       sensor->publish_state(value);
       cached = value;
     }
   }
+  /// Overload for const char* — uses strcmp to avoid implicit std::string construction.
   void publish_text_if_changed(text_sensor::TextSensor *sensor, std::string &cached,
-                                const char *value) {
-    if (sensor != nullptr && cached != value) {
-      sensor->publish_state(value);
+                                 const char *value) {
+    if (sensor == nullptr || value == nullptr) return;
+    if (cached.empty() || strcmp(cached.c_str(), value) != 0) {
       cached = value;
+      sensor->publish_state(cached);
     }
   }
   
-  // Compute and publish derived sensors (COP, delta-T, approach)
+  // Derived sensors (COP, delta-T, approach)
   void publish_derived_sensors(const RegisterMap &regs);
-  
-  // Read fault history (registers 601-699)
-  void read_fault_history();
 
+  // --- Configuration ---
   uint8_t address_{1};
-  uint8_t read_retries_{2};  // Number of retries on read failure (default 2, like Ruby)
-  
-  // RS485 flow control pin (optional, for half-duplex RS485)
+  uint8_t read_retries_{2};
   GPIOPin *flow_control_pin_{nullptr};
   
-  // Hardware override flags (true = user explicitly set via YAML, skip auto-detection)
+  // Hardware override flags
   bool axb_override_{false};
   bool vs_drive_override_{false};
   bool iz2_override_{false};
   bool iz2_zones_override_{false};
   
-  // Cached register values — flat sorted vector, no per-element heap overhead
+  // --- State machine ---
+  State state_{State::SETUP_READ_ID};
+  PendingRequest pending_request_{PendingRequest::NONE};
+  bool setup_complete_{false};
+  uint8_t setup_retry_count_{0};
+  uint8_t poll_retry_count_{0};     // Retry counter for normal poll-cycle timeouts
+  static constexpr uint8_t MAX_SETUP_RETRIES = 5;
+  
+  // RX buffer — persists across loop() calls for incremental frame reading
+  std::vector<uint8_t> rx_buffer_;
+  
+  // Response frame buffer — reused across loop() calls to avoid heap allocation
+  std::vector<uint8_t> response_frame_;
+  
+  // Expected addresses for the current in-flight request
+  std::vector<uint16_t> expected_addresses_;
+  
+  // Timing
+  uint32_t last_request_time_{0};
+  uint32_t error_backoff_until_{0};
+  uint32_t last_successful_response_{0};
+  uint32_t tx_complete_time_{0};  // millis() when TX FIFO is expected to drain
+  
+  // Connectivity
+  binary_sensor::BinarySensor *connected_sensor_{nullptr};
+  uint32_t connected_timeout_{DEFAULT_CONNECTED_TIMEOUT_MS};
+  bool connected_{false};
+  
+  // Write queue — writes are queued and dispatched non-blockingly from IDLE.
+  // Capped at MAX_PENDING_WRITES to prevent unbounded heap growth.
+  static constexpr size_t MAX_PENDING_WRITES = 16;
+  std::vector<std::pair<uint16_t, uint16_t>> pending_writes_;
+  
+  // Write cooldowns — prevent stale read-backs from reverting optimistic UI updates.
+  // Initialized to ensure cooldown is INACTIVE at boot (unsigned wraparound arithmetic:
+  // millis() - COOLDOWN_BOOT_INIT > WRITE_COOLDOWN_MS is true even when millis() == 0).
+  static constexpr uint32_t COOLDOWN_BOOT_INIT = 0u - WRITE_COOLDOWN_MS - 1u;
+  uint32_t last_mode_write_{COOLDOWN_BOOT_INIT};
+  uint32_t last_setpoint_write_{COOLDOWN_BOOT_INIT};
+  uint32_t last_fan_write_{COOLDOWN_BOOT_INIT};
+  
+  // Setup callbacks — fired once when hardware detection completes
+  std::vector<std::function<void()>> setup_callbacks_;
+  
+  // Cached register values — flat sorted vector
   RegisterMap register_cache_;
   
-  // Pre-allocated vector for register addresses to reduce stack usage
+  // Pre-allocated vector for register addresses
   std::vector<uint16_t> addresses_to_read_;
   
-  // State — NAN until first successful poll (matches Ruby gem's nil default)
+  // --- Heat pump state ---
   float ambient_temp_{NAN};
   float heating_setpoint_{NAN};
   float cooling_setpoint_{NAN};
@@ -705,20 +535,20 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   uint8_t num_iz2_zones_{0};
   bool active_dehumidify_{false};
 
-  // AWL version fields (from Ruby gem abc_client.rb)
+  // AWL version fields
   float thermostat_version_{0.0f};
   float axb_version_{0.0f};
   float iz2_version_{0.0f};
 
-  // Hardware type detection (from Ruby gem abc_client.rb)
+  // Hardware type detection
   BlowerType blower_type_{BlowerType::PSC};
   PumpType pump_type_{PumpType::OTHER};
-  uint8_t energy_monitor_level_{0};  // 0=None, 1=Compressor Monitor, 2=Energy Monitor
+  uint8_t energy_monitor_level_{0};
   
   // IZ2 Zone data
   IZ2ZoneData iz2_zones_[MAX_IZ2_ZONES];
   
-  // Sensors
+  // --- Sensors ---
   sensor::Sensor *entering_air_sensor_{nullptr};
   sensor::Sensor *leaving_air_sensor_{nullptr};
   sensor::Sensor *ambient_temp_sensor_{nullptr};
@@ -749,49 +579,41 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   sensor::Sensor *line_voltage_setting_sensor_{nullptr};
   sensor::Sensor *anti_short_cycle_sensor_{nullptr};
   
-  // Additional VS Drive sensors
   sensor::Sensor *compressor_desired_speed_sensor_{nullptr};
   sensor::Sensor *discharge_temp_sensor_{nullptr};
   sensor::Sensor *suction_temp_sensor_{nullptr};
   sensor::Sensor *vs_drive_temp_sensor_{nullptr};
   sensor::Sensor *vs_inverter_temp_sensor_{nullptr};
   
-  // Additional VS Drive sensors (Phase 5 parity)
   sensor::Sensor *vs_fan_speed_sensor_{nullptr};
   sensor::Sensor *vs_ambient_temp_sensor_{nullptr};
   sensor::Sensor *vs_compressor_watts_sensor_{nullptr};
   sensor::Sensor *sat_evap_discharge_temp_sensor_{nullptr};
   sensor::Sensor *aux_heat_stage_sensor_{nullptr};
   
-  // IZ2 desired speed sensors
   sensor::Sensor *iz2_compressor_speed_sensor_{nullptr};
   sensor::Sensor *iz2_blower_speed_sensor_{nullptr};
   
-  // Derived sensors (computed on-device, not in Ruby gem)
   sensor::Sensor *cop_sensor_{nullptr};
   sensor::Sensor *water_delta_t_sensor_{nullptr};
   sensor::Sensor *approach_temp_sensor_{nullptr};
   
-  // Blower/ECM sensors
   sensor::Sensor *blower_speed_sensor_{nullptr};
   sensor::Sensor *blower_only_speed_sensor_{nullptr};
   sensor::Sensor *lo_compressor_speed_sensor_{nullptr};
   sensor::Sensor *hi_compressor_speed_sensor_{nullptr};
   sensor::Sensor *aux_heat_speed_sensor_{nullptr};
   
-  // VS Pump sensors
   sensor::Sensor *pump_speed_sensor_{nullptr};
   sensor::Sensor *pump_min_speed_sensor_{nullptr};
   sensor::Sensor *pump_max_speed_sensor_{nullptr};
   
-  // Refrigeration monitoring sensors
   sensor::Sensor *heating_liquid_line_temp_sensor_{nullptr};
   sensor::Sensor *saturated_condenser_temp_sensor_{nullptr};
   sensor::Sensor *subcool_temp_sensor_{nullptr};
   sensor::Sensor *heat_of_extraction_sensor_{nullptr};
   sensor::Sensor *heat_of_rejection_sensor_{nullptr};
   
-  // Humidifier sensors
   sensor::Sensor *humidification_target_sensor_{nullptr};
   sensor::Sensor *dehumidification_target_sensor_{nullptr};
   
@@ -825,27 +647,51 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   text_sensor::TextSensor *dehumidifier_mode_sensor_{nullptr};
   text_sensor::TextSensor *pump_type_sensor_{nullptr};
   
-  // Observer callbacks — sub-entities register to be notified on data update
+  // Lockout diagnostic sensors
+  sensor::Sensor *lockout_fault_sensor_{nullptr};
+  text_sensor::TextSensor *lockout_fault_description_sensor_{nullptr};
+  text_sensor::TextSensor *outputs_at_lockout_sensor_{nullptr};
+  text_sensor::TextSensor *inputs_at_lockout_sensor_{nullptr};
+  
+  // Observer callbacks — bounded at init time by the number of sub-entities
+  // configured in YAML; no runtime growth path exists.
   std::vector<std::function<void()>> listeners_;
   
-  // Cached text sensor values for publish-on-change (avoid republishing identical strings)
+  // Cached text sensor values for publish-on-change.
+  // Bitmask-derived strings also cache the raw register value to avoid
+  // calling bitmask_to_string() (which heap-allocates) when unchanged.
   std::string cached_mode_string_;
   std::string cached_fault_description_;
   std::string cached_hvac_mode_;
   std::string cached_fan_mode_;
   std::string cached_vs_derate_;
+  uint16_t cached_vs_derate_raw_{0xFFFF};
   std::string cached_vs_safe_mode_;
+  uint16_t cached_vs_safe_mode_raw_{0xFFFF};
   std::string cached_vs_alarm_;
+  uint16_t cached_vs_alarm1_raw_{0xFFFF};
+  uint16_t cached_vs_alarm2_raw_{0xFFFF};
   std::string cached_axb_inputs_;
+  uint16_t cached_axb_inputs_raw_{0xFFFF};
   std::string cached_humidifier_mode_;
   std::string cached_dehumidifier_mode_;
+  std::string cached_lockout_fault_description_;
+  std::string cached_outputs_at_lockout_;
+  uint16_t cached_outputs_at_lockout_raw_{0xFFFF};
+  std::string cached_inputs_at_lockout_;
+  uint16_t cached_inputs_at_lockout_raw_{0xFFFF};
   
-  // Adaptive polling tier counter — medium/slow registers update less frequently
+  // Adaptive polling tier counter — intentionally uint8_t.
+  // Wraps at 255; the modulo checks (% 6, % 60) produce correct results at all values.
   uint8_t poll_tier_counter_{0};
   
   // Cached device info
   std::string model_number_;
   std::string serial_number_;
+  
+  // Cached fault history string — reused across slow-tier poll cycles
+  // to avoid heap allocation in loop(). Only rebuilt when content changes.
+  std::string cached_fault_history_;
 };
 
 }  // namespace waterfurnace_aurora
