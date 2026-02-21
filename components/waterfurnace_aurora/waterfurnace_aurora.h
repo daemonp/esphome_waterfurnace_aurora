@@ -254,6 +254,19 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   bool is_locked_out() const { return locked_out_; }
   bool is_setup_complete() const { return setup_complete_; }
   
+  /// Look up a raw register value from the cache. Returns NAN if not found.
+  /// Used by AuroraNumber entities to get current read-back values.
+  float get_cached_register(uint16_t addr) const {
+    const uint16_t *val = reg_find(this->register_cache_, addr);
+    return val ? static_cast<float>(*val) : NAN;
+  }
+  
+  /// Look up a register value and return it divided by 10. Returns NAN if not found.
+  float get_cached_register_tenths(uint16_t addr) const {
+    const uint16_t *val = reg_find(this->register_cache_, addr);
+    return val ? to_tenths(*val) : NAN;
+  }
+  
   // Observer pattern: sub-entities register a callback to be notified when data updates.
   void register_listener(std::function<void()> callback) {
     this->listeners_.push_back(std::move(callback));

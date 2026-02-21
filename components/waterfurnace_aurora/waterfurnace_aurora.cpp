@@ -829,9 +829,14 @@ void WaterFurnaceAurora::start_poll_cycle_() {
     return;
   }
   
+  ESP_LOGD(TAG, "Poll cycle: %d registers to read (medium=%s)",
+           this->addresses_to_read_.size(),
+           (this->poll_tier_counter_ % 6 == 0) ? "yes" : "no");
+  
   auto frame = protocol::build_read_registers_request(this->address_, this->addresses_to_read_);
   if (frame.empty()) {
-    ESP_LOGW(TAG, "Failed to build poll request (%d registers)", this->addresses_to_read_.size());
+    ESP_LOGW(TAG, "Failed to build poll request (%d registers — max is %d)",
+             this->addresses_to_read_.size(), protocol::MAX_REGISTERS_PER_REQUEST);
     return;
   }
   
@@ -840,11 +845,28 @@ void WaterFurnaceAurora::start_poll_cycle_() {
 }
 
 void WaterFurnaceAurora::process_poll_response_(const protocol::ParsedResponse &resp) {
+  ESP_LOGD(TAG, "Poll response: %d values received, %d expected, cache has %d entries",
+           resp.registers.size(), this->expected_addresses_.size(), this->register_cache_.size());
+  
+  // Log any mismatch for debugging
+  if (resp.registers.size() != this->expected_addresses_.size()) {
+    ESP_LOGW(TAG, "Register count mismatch! Got %d, expected %d — some sensors will be missing",
+             resp.registers.size(), this->expected_addresses_.size());
+  }
+  
   // Merge response directly into cache — no intermediate allocation.
   // reg_insert() handles insert-or-update in the sorted vector.
   for (const auto &rv : resp.registers) {
     reg_insert(this->register_cache_, rv.address, rv.value);
   }
+  
+  // After cache update, verify key registers are present
+  ESP_LOGD(TAG, "Cache check: fault=%s outputs=%s ambient=%s vs_desired=%s vs_drive_temp=%s",
+           reg_find(this->register_cache_, registers::LAST_FAULT) ? "yes" : "NO",
+           reg_find(this->register_cache_, registers::SYSTEM_OUTPUTS) ? "yes" : "NO",
+           reg_find(this->register_cache_, registers::AMBIENT_TEMP) ? "yes" : "NO",
+           reg_find(this->register_cache_, registers::COMPRESSOR_SPEED_DESIRED) ? "yes" : "NO",
+           reg_find(this->register_cache_, registers::VS_DRIVE_TEMP) ? "yes" : "NO");
   
   // Publish all sensors from the cache
   this->publish_all_sensors_();

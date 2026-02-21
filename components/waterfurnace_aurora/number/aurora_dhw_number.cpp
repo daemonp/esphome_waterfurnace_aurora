@@ -1,4 +1,5 @@
 #include "aurora_dhw_number.h"
+#include "../registers.h"
 #include "esphome/core/log.h"
 
 namespace esphome {
@@ -38,7 +39,67 @@ void AuroraDHWNumber::control(float value) {
   }
 }
 
-// Generic AuroraNumber implementation — no listener needed, state is write-only
+// Generic AuroraNumber implementation — register listener for read-back values
+void AuroraNumber::setup() {
+  if (this->parent_ != nullptr) {
+    this->parent_->register_listener([this]() { this->update_state_(); });
+  }
+}
+
+void AuroraNumber::update_state_() {
+  if (this->parent_ == nullptr) return;
+  
+  float value = NAN;
+  switch (this->type_) {
+    case AuroraNumberType::BLOWER_ONLY_SPEED:
+      value = this->parent_->get_cached_register(registers::BLOWER_ONLY_SPEED);
+      break;
+    case AuroraNumberType::LO_COMPRESSOR_SPEED:
+      value = this->parent_->get_cached_register(registers::LO_COMPRESSOR_ECM_SPEED);
+      break;
+    case AuroraNumberType::HI_COMPRESSOR_SPEED:
+      value = this->parent_->get_cached_register(registers::HI_COMPRESSOR_ECM_SPEED);
+      break;
+    case AuroraNumberType::AUX_HEAT_SPEED:
+      value = this->parent_->get_cached_register(registers::AUX_HEAT_ECM_SPEED);
+      break;
+    case AuroraNumberType::PUMP_SPEED:
+      value = this->parent_->get_cached_register(registers::VS_PUMP_SPEED);
+      break;
+    case AuroraNumberType::PUMP_MIN_SPEED:
+      value = this->parent_->get_cached_register(registers::VS_PUMP_MIN);
+      break;
+    case AuroraNumberType::PUMP_MAX_SPEED:
+      value = this->parent_->get_cached_register(registers::VS_PUMP_MAX);
+      break;
+    case AuroraNumberType::FAN_INTERMITTENT_ON:
+    case AuroraNumberType::FAN_INTERMITTENT_OFF:
+      // Write-only registers — no read-back available
+      return;
+    case AuroraNumberType::HUMIDIFICATION_TARGET:
+      // Read from humidistat targets register (high byte)
+      {
+        float raw = this->parent_->get_cached_register(registers::HUMIDISTAT_TARGETS);
+        if (!std::isnan(raw)) value = static_cast<float>((static_cast<uint16_t>(raw) >> 8) & 0xFF);
+      }
+      break;
+    case AuroraNumberType::DEHUMIDIFICATION_TARGET:
+      // Read from humidistat targets register (low byte)
+      {
+        float raw = this->parent_->get_cached_register(registers::HUMIDISTAT_TARGETS);
+        if (!std::isnan(raw)) value = static_cast<float>(static_cast<uint16_t>(raw) & 0xFF);
+      }
+      break;
+    default:
+      return;
+  }
+  
+  if (!std::isnan(value) && value != this->last_value_) {
+    this->publish_state(value);
+    this->last_value_ = value;
+  }
+}
+
 void AuroraNumber::dump_config() {
   const char *type_name = "Unknown";
   switch (this->type_) {

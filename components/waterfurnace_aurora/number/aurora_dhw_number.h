@@ -40,9 +40,11 @@ class AuroraDHWNumber : public number::Number, public Component {
   float last_value_{NAN};
 };
 
-// Generic number class for all Aurora controls
+// Generic number class for all Aurora controls.
+// Registers a listener on the hub to receive read-back values from the register cache.
 class AuroraNumber : public number::Number, public Component {
  public:
+  void setup() override;
   void dump_config() override;
 
   float get_setup_priority() const override { return setup_priority::PROCESSOR; }
@@ -52,9 +54,11 @@ class AuroraNumber : public number::Number, public Component {
 
  protected:
   void control(float value) override;
+  void update_state_();
 
   WaterFurnaceAurora *parent_{nullptr};
   AuroraNumberType type_{AuroraNumberType::DHW_SETPOINT};
+  float last_value_{NAN};
 };
 
 }  // namespace waterfurnace_aurora
