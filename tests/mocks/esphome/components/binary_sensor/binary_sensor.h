@@ -11,6 +11,8 @@ class BinarySensor {
     this->has_state_ = true;
     this->publish_count_++;
   }
+
+  bool has_state() const { return this->has_state_; }
   
   bool state{false};
   bool has_state_{false};
