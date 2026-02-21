@@ -55,6 +55,13 @@ waterfurnace_aurora:
     name: "Test Heat Pump Connected"
   connected_timeout: 30s
 
+# --- Water Heater (DHW) ---
+water_heater:
+  - platform: waterfurnace_aurora
+    id: aurora_dhw
+    name: "Test Domestic Hot Water"
+    aurora_id: aurora
+
 # --- Climate (main thermostat) ---
 climate:
   - platform: waterfurnace_aurora

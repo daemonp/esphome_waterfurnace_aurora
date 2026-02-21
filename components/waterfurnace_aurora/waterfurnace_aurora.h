@@ -254,6 +254,7 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   bool setpoint_cooldown_active() const { return (millis() - last_setpoint_write_) <= WRITE_COOLDOWN_MS; }
   bool mode_cooldown_active() const { return (millis() - last_mode_write_) <= WRITE_COOLDOWN_MS; }
   bool fan_cooldown_active() const { return (millis() - last_fan_write_) <= WRITE_COOLDOWN_MS; }
+  bool dhw_cooldown_active() const { return (millis() - last_dhw_write_) <= WRITE_COOLDOWN_MS; }
   bool is_dhw_enabled() const { return dhw_enabled_; }
   float get_dhw_setpoint() const { return dhw_setpoint_; }
   float get_dhw_temperature() const { return dhw_temp_; }
@@ -506,6 +507,7 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   uint32_t last_mode_write_{COOLDOWN_BOOT_INIT};
   uint32_t last_setpoint_write_{COOLDOWN_BOOT_INIT};
   uint32_t last_fan_write_{COOLDOWN_BOOT_INIT};
+  uint32_t last_dhw_write_{COOLDOWN_BOOT_INIT};
   
   // Setup callbacks — fired once when hardware detection completes
   std::vector<std::function<void()>> setup_callbacks_;

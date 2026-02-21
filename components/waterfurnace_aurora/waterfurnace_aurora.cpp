@@ -1445,6 +1445,7 @@ bool WaterFurnaceAurora::set_dhw_enabled(bool enabled) {
   // DHW enabled (400) and DHW setpoint (401) are read-write at the same address.
   this->write_register(registers::DHW_ENABLED, enabled ? 1 : 0);
   this->dhw_enabled_ = enabled;  // Optimistic update
+  this->last_dhw_write_ = millis();
   return true;
 }
 
@@ -1456,6 +1457,7 @@ bool WaterFurnaceAurora::set_dhw_setpoint(float temp) {
   // Same-address read/write — see set_dhw_enabled() comment.
   this->write_register(registers::DHW_SETPOINT, static_cast<uint16_t>(temp * 10));
   this->dhw_setpoint_ = temp;  // Optimistic update
+  this->last_dhw_write_ = millis();
   return true;
 }
 
