@@ -182,6 +182,7 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   void set_hps_binary_sensor(binary_sensor::BinarySensor *sensor) { hps_sensor_ = sensor; }
   void set_emergency_shutdown_binary_sensor(binary_sensor::BinarySensor *sensor) { emergency_shutdown_sensor_ = sensor; }
   void set_load_shed_binary_sensor(binary_sensor::BinarySensor *sensor) { load_shed_sensor_ = sensor; }
+  void set_fan_call_binary_sensor(binary_sensor::BinarySensor *sensor) { fan_call_sensor_ = sensor; }
 
   // Text sensors
   void set_current_mode_sensor(text_sensor::TextSensor *sensor) { current_mode_sensor_ = sensor; }
@@ -231,6 +232,8 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   // Humidifier controls
   bool set_humidification_target(uint8_t percent);
   bool set_dehumidification_target(uint8_t percent);
+  bool set_humidifier_mode(bool auto_mode);
+  bool set_dehumidifier_mode(bool auto_mode);
   
   // System controls
   bool clear_fault_history();
@@ -262,6 +265,10 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   uint16_t get_axb_outputs() const { return axb_outputs_; }
   bool is_locked_out() const { return locked_out_; }
   bool is_setup_complete() const { return setup_complete_; }
+  bool is_active_dehumidify() const { return active_dehumidify_; }
+  float get_relative_humidity() const { return relative_humidity_; }
+  bool get_humidifier_auto() const { return humidifier_auto_; }
+  bool get_dehumidifier_auto() const { return dehumidifier_auto_; }
   
   /// Look up a raw register value from the cache. Returns NAN if not found.
   /// Used by AuroraNumber entities to get current read-back values.
@@ -536,6 +543,9 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   bool has_iz2_{false};
   uint8_t num_iz2_zones_{0};
   bool active_dehumidify_{false};
+  float relative_humidity_{NAN};
+  bool humidifier_auto_{false};
+  bool dehumidifier_auto_{false};
 
   // AWL version fields
   float thermostat_version_{0.0f};
@@ -632,6 +642,7 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   binary_sensor::BinarySensor *hps_sensor_{nullptr};
   binary_sensor::BinarySensor *emergency_shutdown_sensor_{nullptr};
   binary_sensor::BinarySensor *load_shed_sensor_{nullptr};
+  binary_sensor::BinarySensor *fan_call_sensor_{nullptr};
 
   // Text sensors
   text_sensor::TextSensor *current_mode_sensor_{nullptr};

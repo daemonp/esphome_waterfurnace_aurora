@@ -27,6 +27,7 @@ climate::ClimateTraits AuroraIZ2Climate::traits() {
   
   // Feature flags
   traits.add_feature_flags(climate::CLIMATE_SUPPORTS_CURRENT_TEMPERATURE);
+  traits.add_feature_flags(climate::CLIMATE_SUPPORTS_CURRENT_HUMIDITY);
   traits.add_feature_flags(climate::CLIMATE_REQUIRES_TWO_POINT_TARGET_TEMPERATURE);
   traits.add_feature_flags(climate::CLIMATE_SUPPORTS_ACTION);
   
@@ -35,10 +36,14 @@ climate::ClimateTraits AuroraIZ2Climate::traits() {
   traits.add_supported_mode(climate::CLIMATE_MODE_HEAT_COOL);  // Auto
   traits.add_supported_mode(climate::CLIMATE_MODE_COOL);
   traits.add_supported_mode(climate::CLIMATE_MODE_HEAT);
+  traits.add_supported_mode(climate::CLIMATE_MODE_DRY);  // Active dehumidification (VS Drive)
   
   // Supported fan modes from registers.rb FAN_MODE
+  // Auto and On (Continuous) are built-in ESPHome fan modes.
+  // Intermittent is a WaterFurnace-specific mode exposed as a custom fan mode string.
   traits.add_supported_fan_mode(climate::CLIMATE_FAN_AUTO);
   traits.add_supported_fan_mode(climate::CLIMATE_FAN_ON);  // Continuous
+  traits.set_supported_custom_fan_modes({CUSTOM_FAN_MODE_INTERMITTENT});
   
   // Presets - use BOOST for emergency heat
   traits.add_supported_preset(climate::CLIMATE_PRESET_NONE);
@@ -71,6 +76,11 @@ void AuroraIZ2Climate::control(const climate::ClimateCall &call) {
 
   // Handle mode change
   if (call.get_mode().has_value()) {
+    // DRY mode is display-only — Aurora enters dehumidify automatically based on humidistat settings
+    if (*call.get_mode() == climate::CLIMATE_MODE_DRY) {
+      ESP_LOGW(TAG, "DRY mode is automatic — controlled by the humidistat dehumidifier settings");
+      return;
+    }
     HeatingMode aurora_mode;
     if (!esphome_to_aurora_mode(*call.get_mode(), aurora_mode)) {
       ESP_LOGW(TAG, "Unsupported mode for zone %d", this->zone_number_);
@@ -99,11 +109,17 @@ void AuroraIZ2Climate::control(const climate::ClimateCall &call) {
     }
   }
 
-  // Handle fan mode
+  // Handle fan mode (built-in: Auto/On, or custom: Intermittent)
   if (call.get_fan_mode().has_value()) {
+    // Built-in fan mode selected (Auto or On/Continuous)
     FanMode aurora_fan = esphome_to_aurora_fan(*call.get_fan_mode());
     if (this->parent_->set_zone_fan_mode(this->zone_number_, aurora_fan)) {
       this->fan_mode = *call.get_fan_mode();
+    }
+  } else if (call.has_custom_fan_mode()) {
+    // Custom fan mode selected (Intermittent)
+    if (this->parent_->set_zone_fan_mode(this->zone_number_, FanMode::INTERMITTENT)) {
+      this->set_custom_fan_mode_(CUSTOM_FAN_MODE_INTERMITTENT);
     }
   }
 
@@ -150,6 +166,12 @@ void AuroraIZ2Climate::update_state_() {
     this->current_temperature = fahrenheit_to_celsius(zone.ambient_temperature);
   }
 
+  // Update current humidity (system-wide from register 741 — IZ2 zones share one sensor)
+  float rh = this->parent_->get_relative_humidity();
+  if (!std::isnan(rh)) {
+    this->current_humidity = rh;
+  }
+
   // Update setpoints (hardware reports °F, climate entity uses °C)
   // Skip during cooldown to preserve optimistic values from control()
   if (!this->parent_->setpoint_cooldown_active()) {
@@ -171,8 +193,11 @@ void AuroraIZ2Climate::update_state_() {
     }
   }
 
-  // Update action based on zone current call and damper state
-  if (!zone.damper_open) {
+  // Update action based on zone current call, damper state, and active dehumidification
+  if (this->parent_->is_active_dehumidify()) {
+    // VS Drive active dehumidification is system-wide — show as DRYING for all zones
+    this->action = climate::CLIMATE_ACTION_DRYING;
+  } else if (!zone.damper_open) {
     this->action = climate::CLIMATE_ACTION_IDLE;
   } else {
     switch (zone.current_call) {
@@ -192,8 +217,15 @@ void AuroraIZ2Climate::update_state_() {
   }
 
   // Update fan mode (skip during fan cooldown)
+  // Built-in modes (Auto/On) set fan_mode; Intermittent uses custom_fan_mode.
   if (!this->parent_->fan_cooldown_active()) {
-    this->fan_mode = aurora_to_esphome_fan(zone.target_fan_mode);
+    auto builtin = aurora_to_esphome_fan(zone.target_fan_mode);
+    if (builtin.has_value()) {
+      this->fan_mode = *builtin;
+    } else {
+      // Intermittent — set via protected custom fan mode API
+      this->set_custom_fan_mode_(CUSTOM_FAN_MODE_INTERMITTENT);
+    }
   }
 
   this->publish_state();

@@ -1079,6 +1079,10 @@ void WaterFurnaceAurora::publish_all_sensors_() {
       publish_binary_if_changed_(this->emergency_shutdown_sensor_,
                                  (status & STATUS_EMERGENCY_SHUTDOWN) != 0);
       publish_binary_if_changed_(this->load_shed_sensor_, (status & STATUS_LOAD_SHED) != 0);
+      // Fan call (G signal) — thermostat is requesting fan operation.
+      // On IZ2 systems, the zone damper_open state is more meaningful per-zone;
+      // this reflects the system-wide G signal from the thermostat bus.
+      publish_binary_if_changed_(this->fan_call_sensor_, (status & STATUS_G) != 0);
     }
   }
   
@@ -1130,7 +1134,14 @@ void WaterFurnaceAurora::publish_all_sensors_() {
   this->publish_sensor_signed_tenths(regs, registers::ENTERING_WATER, this->entering_water_sensor_);
   
   // Humidity
-  this->publish_sensor(regs, registers::RELATIVE_HUMIDITY, this->humidity_sensor_);
+  {
+    const uint16_t *val_rh = reg_find(regs, registers::RELATIVE_HUMIDITY);
+    if (val_rh) {
+      this->relative_humidity_ = static_cast<float>(*val_rh);
+      if (sensor_value_changed_(this->humidity_sensor_, this->relative_humidity_))
+        this->humidity_sensor_->publish_state(this->relative_humidity_);
+    }
+  }
   
   // Setpoints (respect write cooldown)
   if ((millis() - this->last_setpoint_write_) > WRITE_COOLDOWN_MS) {
@@ -1318,10 +1329,12 @@ void WaterFurnaceAurora::publish_all_sensors_() {
 
     const uint16_t *val_mode = reg_find(regs, mode_reg);
     if (val_mode) {
+      this->humidifier_auto_ = (*val_mode & 0x8000) != 0;
+      this->dehumidifier_auto_ = (*val_mode & 0x4000) != 0;
       this->publish_text_if_changed(this->humidifier_mode_sensor_, this->cached_humidifier_mode_,
-                                     (*val_mode & 0x8000) ? "Auto" : "Manual");
+                                     this->humidifier_auto_ ? "Auto" : "Manual");
       this->publish_text_if_changed(this->dehumidifier_mode_sensor_, this->cached_dehumidifier_mode_,
-                                     (*val_mode & 0x4000) ? "Auto" : "Manual");
+                                     this->dehumidifier_auto_ ? "Auto" : "Manual");
     }
 
     const uint16_t *val_targets = reg_find(regs, target_reg);
@@ -1581,6 +1594,41 @@ bool WaterFurnaceAurora::set_dehumidification_target(uint8_t percent) {
   const uint16_t *current = reg_find(this->register_cache_, target_reg);
   uint8_t hum_target = current ? ((*current >> 8) & 0xFF) : 35;
   this->write_register(write_reg, (hum_target << 8) | percent);
+  return true;
+}
+
+bool WaterFurnaceAurora::set_humidifier_mode(bool auto_mode) {
+  // Read current settings register to preserve other bits (like the Ruby gem does)
+  uint16_t read_reg = (this->has_iz2_ && this->awl_communicating())
+                          ? registers::IZ2_HUMIDISTAT_MODE
+                          : registers::HUMIDISTAT_SETTINGS;
+  uint16_t write_reg = (this->has_iz2_ && this->awl_communicating())
+                           ? registers::IZ2_HUMIDISTAT_SETTINGS
+                           : registers::HUMIDISTAT_SETTINGS;
+  const uint16_t *current = reg_find(this->register_cache_, read_reg);
+  // Start with prior value, mask off humidifier auto bit (0x8000), preserve everything else
+  uint16_t raw_value = current ? (*current & ~0x8000) : 0;
+  if (auto_mode) raw_value |= 0x8000;
+  ESP_LOGI(TAG, "Setting humidifier mode to %s (reg %d = 0x%04X)", auto_mode ? "Auto" : "Manual", write_reg, raw_value);
+  this->write_register(write_reg, raw_value);
+  this->humidifier_auto_ = auto_mode;
+  return true;
+}
+
+bool WaterFurnaceAurora::set_dehumidifier_mode(bool auto_mode) {
+  uint16_t read_reg = (this->has_iz2_ && this->awl_communicating())
+                          ? registers::IZ2_HUMIDISTAT_MODE
+                          : registers::HUMIDISTAT_SETTINGS;
+  uint16_t write_reg = (this->has_iz2_ && this->awl_communicating())
+                           ? registers::IZ2_HUMIDISTAT_SETTINGS
+                           : registers::HUMIDISTAT_SETTINGS;
+  const uint16_t *current = reg_find(this->register_cache_, read_reg);
+  // Start with prior value, mask off dehumidifier auto bit (0x4000), preserve everything else
+  uint16_t raw_value = current ? (*current & ~0x4000) : 0;
+  if (auto_mode) raw_value |= 0x4000;
+  ESP_LOGI(TAG, "Setting dehumidifier mode to %s (reg %d = 0x%04X)", auto_mode ? "Auto" : "Manual", write_reg, raw_value);
+  this->write_register(write_reg, raw_value);
+  this->dehumidifier_auto_ = auto_mode;
   return true;
 }
 

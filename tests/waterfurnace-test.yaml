@@ -296,6 +296,15 @@ text_sensor:
     inputs_at_lockout:
       name: "Test Inputs at Lockout"
 
+# --- Selects ---
+select:
+  - platform: waterfurnace_aurora
+    aurora_id: aurora
+    humidifier_mode:
+      name: "Test Humidifier Mode Select"
+    dehumidifier_mode:
+      name: "Test Dehumidifier Mode Select"
+
 # --- Buttons ---
 button:
   - platform: waterfurnace_aurora
