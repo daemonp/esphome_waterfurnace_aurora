@@ -6,10 +6,6 @@ namespace waterfurnace_aurora {
 
 static const char *const TAG = "aurora.iz2_climate";
 
-void AuroraIZ2Climate::setup() {
-  // Nothing specific to set up
-}
-
 void AuroraIZ2Climate::loop() {
   // Update state periodically
   uint32_t now = millis();
@@ -21,6 +17,7 @@ void AuroraIZ2Climate::loop() {
 
 void AuroraIZ2Climate::dump_config() {
   ESP_LOGCONFIG(TAG, "Aurora IZ2 Zone %d Climate:", this->zone_number_);
+  ESP_LOGCONFIG(TAG, "  Parent: %s", this->parent_ != nullptr ? "configured" : "NOT SET");
 }
 
 climate::ClimateTraits AuroraIZ2Climate::traits() {

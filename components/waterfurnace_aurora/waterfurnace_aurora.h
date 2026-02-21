@@ -113,7 +113,10 @@ namespace registers {
   constexpr uint16_t OUTDOOR_TEMP = 742;
   constexpr uint16_t HEATING_SETPOINT = 745;
   constexpr uint16_t COOLING_SETPOINT = 746;
+  constexpr uint16_t THERMOSTAT_INSTALLED = 800;
+  constexpr uint16_t THERMOSTAT_VERSION = 801;
   constexpr uint16_t AXB_INSTALLED = 806;
+  constexpr uint16_t AXB_VERSION = 807;
   constexpr uint16_t LEAVING_AIR = 900;
   
   // AXB
@@ -206,12 +209,26 @@ namespace registers {
   constexpr uint16_t IZ2_CONFIG2_BASE = 31009;
   constexpr uint16_t IZ2_CONFIG3_BASE = 31200;         // +3 per zone
   
+  // Hardware detection registers
+  constexpr uint16_t BLOWER_TYPE = 404;
+  constexpr uint16_t ENERGY_MONITOR = 412;
+  constexpr uint16_t PUMP_TYPE = 413;
+
   // IZ2 system registers
   constexpr uint16_t IZ2_INSTALLED = 812;
+  constexpr uint16_t IZ2_VERSION = 813;
   constexpr uint16_t IZ2_NUM_ZONES = 483;
   constexpr uint16_t IZ2_OUTDOOR_TEMP = 31003;
   constexpr uint16_t IZ2_DEMAND = 31005;
 }
+
+// Blower type (register 404, from registers.rb BLOWER_TYPE)
+enum BlowerType : uint8_t {
+  BLOWER_PSC = 0,
+  BLOWER_ECM_208 = 1,
+  BLOWER_ECM_265 = 2,
+  BLOWER_FIVE_SPEED = 3
+};
 
 // Maximum number of IZ2 zones
 constexpr uint8_t MAX_IZ2_ZONES = 6;
@@ -475,6 +492,15 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   static std::string get_vs_alarm_string(uint16_t alarm1, uint16_t alarm2);
   static std::string get_axb_inputs_string(uint16_t value);
   
+  // AWL version helpers (from Ruby gem abc_client.rb)
+  bool awl_axb() const { return has_axb_ && axb_version_ >= 2.0f; }
+  bool awl_thermostat() const { return thermostat_version_ >= 3.0f; }
+  bool awl_iz2() const { return has_iz2_ && iz2_version_ >= 2.0f; }
+  bool awl_communicating() const { return awl_thermostat() || awl_iz2(); }
+  bool is_ecm_blower() const { return blower_type_ == BLOWER_ECM_208 || blower_type_ == BLOWER_ECM_265; }
+  bool refrigeration_monitoring() const { return energy_monitor_level_ >= 1; }
+  bool energy_monitoring() const { return energy_monitor_level_ >= 2; }
+
   // Read fault history (registers 601-699)
   void read_fault_history();
 
@@ -514,6 +540,15 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   bool has_iz2_{false};
   uint8_t num_iz2_zones_{0};
   bool active_dehumidify_{false};
+
+  // AWL version fields (from Ruby gem abc_client.rb)
+  float thermostat_version_{0.0f};
+  float axb_version_{0.0f};
+  float iz2_version_{0.0f};
+
+  // Hardware type detection (from Ruby gem abc_client.rb)
+  BlowerType blower_type_{BLOWER_PSC};
+  uint8_t energy_monitor_level_{0};  // 0=None, 1=Compressor Monitor, 2=Energy Monitor
   uint8_t fault_history_counter_{0};  // Counter to read fault history periodically
   
   // IZ2 Zone data

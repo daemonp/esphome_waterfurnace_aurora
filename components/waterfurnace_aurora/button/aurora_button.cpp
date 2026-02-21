@@ -6,12 +6,9 @@ namespace waterfurnace_aurora {
 
 static const char *const TAG = "aurora.button";
 
-void AuroraClearFaultButton::setup() {
-  // Nothing specific to set up
-}
-
 void AuroraClearFaultButton::dump_config() {
   ESP_LOGCONFIG(TAG, "Aurora Clear Fault History Button:");
+  ESP_LOGCONFIG(TAG, "  Parent: %s", this->parent_ != nullptr ? "configured" : "NOT SET");
 }
 
 void AuroraClearFaultButton::press_action() {

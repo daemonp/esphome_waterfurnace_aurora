@@ -25,11 +25,10 @@ enum class AuroraNumberType : uint8_t {
 
 class AuroraDHWNumber : public number::Number, public Component {
  public:
-  void setup() override;
   void loop() override;
   void dump_config() override;
 
-  float get_setup_priority() const override { return setup_priority::DATA; }
+  float get_setup_priority() const override { return setup_priority::PROCESSOR; }
 
   void set_parent(WaterFurnaceAurora *parent) { this->parent_ = parent; }
 
@@ -38,16 +37,16 @@ class AuroraDHWNumber : public number::Number, public Component {
 
   WaterFurnaceAurora *parent_{nullptr};
   uint32_t last_update_{0};
+  float last_value_{NAN};
 };
 
 // Generic number class for all Aurora controls
 class AuroraNumber : public number::Number, public Component {
  public:
-  void setup() override;
   void loop() override;
   void dump_config() override;
 
-  float get_setup_priority() const override { return setup_priority::DATA; }
+  float get_setup_priority() const override { return setup_priority::PROCESSOR; }
 
   void set_parent(WaterFurnaceAurora *parent) { this->parent_ = parent; }
   void set_type(AuroraNumberType type) { this->type_ = type; }

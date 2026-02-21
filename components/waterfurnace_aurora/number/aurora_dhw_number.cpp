@@ -6,18 +6,15 @@ namespace waterfurnace_aurora {
 
 static const char *const TAG = "aurora.number";
 
-void AuroraDHWNumber::setup() {
-  // Nothing specific to set up
-}
-
 void AuroraDHWNumber::loop() {
   // Update state periodically
   uint32_t now = millis();
   if (now - this->last_update_ >= 5000) {  // Every 5 seconds
     if (this->parent_ != nullptr) {
       float setpoint = this->parent_->get_dhw_setpoint();
-      if (!std::isnan(setpoint)) {
+      if (!std::isnan(setpoint) && setpoint != this->last_value_) {
         this->publish_state(setpoint);
+        this->last_value_ = setpoint;
       }
     }
     this->last_update_ = now;
@@ -26,6 +23,7 @@ void AuroraDHWNumber::loop() {
 
 void AuroraDHWNumber::dump_config() {
   ESP_LOGCONFIG(TAG, "Aurora DHW Setpoint Number:");
+  ESP_LOGCONFIG(TAG, "  Parent: %s", this->parent_ != nullptr ? "configured" : "NOT SET");
 }
 
 void AuroraDHWNumber::control(float value) {
@@ -40,10 +38,6 @@ void AuroraDHWNumber::control(float value) {
 }
 
 // Generic AuroraNumber implementation
-void AuroraNumber::setup() {
-  // Nothing specific to set up
-}
-
 void AuroraNumber::loop() {
   // State updates are handled by the main component's refresh
   // We don't need to poll here since we track what we write

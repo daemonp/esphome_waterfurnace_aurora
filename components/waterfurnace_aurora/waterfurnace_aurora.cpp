@@ -142,16 +142,25 @@ void WaterFurnaceAurora::setup() {
   }
   
   ESP_LOGI(TAG, "WaterFurnace Aurora setup complete");
-  ESP_LOGI(TAG, "  AXB: %s%s", this->has_axb_ ? "detected" : "not detected",
-           this->axb_override_ ? " (manual override)" : "");
+  ESP_LOGI(TAG, "  AXB: %s%s (v%.2f, AWL: %s)", this->has_axb_ ? "detected" : "not detected",
+           this->axb_override_ ? " (manual override)" : "",
+           this->axb_version_, this->awl_axb() ? "yes" : "no");
   ESP_LOGI(TAG, "  VS Drive: %s%s", this->has_vs_drive_ ? "detected" : "not detected",
            this->vs_drive_override_ ? " (manual override)" : "");
-  ESP_LOGI(TAG, "  IZ2: %s%s", this->has_iz2_ ? "detected" : "not detected",
-           this->iz2_override_ ? " (manual override)" : "");
+  ESP_LOGI(TAG, "  IZ2: %s%s (v%.2f, AWL: %s)", this->has_iz2_ ? "detected" : "not detected",
+           this->iz2_override_ ? " (manual override)" : "",
+           this->iz2_version_, this->awl_iz2() ? "yes" : "no");
   if (this->has_iz2_) {
     ESP_LOGI(TAG, "  IZ2 Zones: %d%s", this->num_iz2_zones_,
              this->iz2_zones_override_ ? " (manual override)" : "");
   }
+  ESP_LOGI(TAG, "  Thermostat v%.2f (AWL: %s)", this->thermostat_version_,
+           this->awl_thermostat() ? "yes" : "no");
+  ESP_LOGI(TAG, "  Blower: %s", this->blower_type_ == BLOWER_PSC ? "PSC" :
+           this->blower_type_ == BLOWER_FIVE_SPEED ? "5-Speed" : "ECM");
+  ESP_LOGI(TAG, "  Energy Monitor: %s",
+           this->energy_monitor_level_ == 0 ? "None" :
+           this->energy_monitor_level_ == 1 ? "Compressor Monitor" : "Energy Monitor");
   if (!this->model_number_.empty()) {
     ESP_LOGI(TAG, "  Model: %s", this->model_number_.c_str());
   }
@@ -166,17 +175,25 @@ void WaterFurnaceAurora::detect_hardware() {
   
   // Read hardware detection registers using function 0x42
   std::vector<uint16_t> detect_addrs;
-  detect_addrs.reserve(10);
+  detect_addrs.reserve(20);
   
   if (!this->axb_override_) {
     detect_addrs.push_back(registers::AXB_INSTALLED);  // 806
   }
+  detect_addrs.push_back(registers::AXB_VERSION);       // 807 (always read for AWL check)
+  detect_addrs.push_back(registers::THERMOSTAT_INSTALLED); // 800
+  detect_addrs.push_back(registers::THERMOSTAT_VERSION);   // 801
   if (!this->iz2_override_) {
     detect_addrs.push_back(registers::IZ2_INSTALLED);  // 812
   }
+  detect_addrs.push_back(registers::IZ2_VERSION);       // 813 (always read for AWL check)
   if (!this->iz2_zones_override_) {
     detect_addrs.push_back(registers::IZ2_NUM_ZONES);  // 483
   }
+  // Hardware type detection registers
+  detect_addrs.push_back(registers::BLOWER_TYPE);        // 404
+  detect_addrs.push_back(registers::ENERGY_MONITOR);     // 412
+  detect_addrs.push_back(registers::PUMP_TYPE);           // 413
   // Read register 88 (ABC program) to help detect VS drive
   if (!this->vs_drive_override_) {
     detect_addrs.push_back(88);  // ABC Program (4 registers: 88-91)
@@ -229,6 +246,48 @@ void WaterFurnaceAurora::detect_hardware() {
     } else {
       ESP_LOGW(TAG, "IZ2 zone count register 483 not in response");
     }
+  }
+  
+  // Read AWL version registers for version-gated register selection
+  auto it_tver = result.find(registers::THERMOSTAT_VERSION);
+  if (it_tver != result.end()) {
+    this->thermostat_version_ = static_cast<float>(it_tver->second) / 100.0f;
+    ESP_LOGD(TAG, "Thermostat version: %.2f (raw %d)", this->thermostat_version_, it_tver->second);
+  }
+  
+  auto it_aver = result.find(registers::AXB_VERSION);
+  if (it_aver != result.end()) {
+    this->axb_version_ = static_cast<float>(it_aver->second) / 100.0f;
+    ESP_LOGD(TAG, "AXB version: %.2f (raw %d)", this->axb_version_, it_aver->second);
+  }
+  
+  auto it_iver = result.find(registers::IZ2_VERSION);
+  if (it_iver != result.end()) {
+    this->iz2_version_ = static_cast<float>(it_iver->second) / 100.0f;
+    ESP_LOGD(TAG, "IZ2 version: %.2f (raw %d)", this->iz2_version_, it_iver->second);
+  }
+  
+  // Detect blower type (register 404)
+  auto it_blower = result.find(registers::BLOWER_TYPE);
+  if (it_blower != result.end()) {
+    uint16_t bval = it_blower->second;
+    if (bval == 1 || bval == 2) {
+      this->blower_type_ = static_cast<BlowerType>(bval);
+    } else if (bval == 3) {
+      this->blower_type_ = BLOWER_FIVE_SPEED;
+    } else {
+      this->blower_type_ = BLOWER_PSC;
+    }
+    ESP_LOGD(TAG, "Blower type register 404 = %d -> %s", bval,
+             bval == 0 ? "PSC" : bval == 1 ? "ECM 208/230" : bval == 2 ? "ECM 265/277" : bval == 3 ? "5-Speed" : "Other/PSC");
+  }
+  
+  // Detect energy monitor level (register 412)
+  auto it_energy = result.find(registers::ENERGY_MONITOR);
+  if (it_energy != result.end()) {
+    this->energy_monitor_level_ = std::min(static_cast<uint8_t>(it_energy->second), static_cast<uint8_t>(2));
+    ESP_LOGD(TAG, "Energy monitor register 412 = %d -> %s", it_energy->second,
+             this->energy_monitor_level_ == 0 ? "None" : this->energy_monitor_level_ == 1 ? "Compressor Monitor" : "Energy Monitor");
   }
   
   // Detect VS Drive via ABC Program (register 88, 4 registers = 8 chars ASCII)
@@ -328,16 +387,23 @@ void WaterFurnaceAurora::dump_config() {
   if (!this->serial_number_.empty()) {
     ESP_LOGCONFIG(TAG, "  Serial: %s", this->serial_number_.c_str());
   }
-  ESP_LOGCONFIG(TAG, "  AXB Present: %s%s", this->has_axb_ ? "yes" : "no",
-                this->axb_override_ ? " (override)" : "");
+  ESP_LOGCONFIG(TAG, "  AXB: %s%s (v%.2f, AWL: %s)", this->has_axb_ ? "yes" : "no",
+                this->axb_override_ ? " (override)" : "",
+                this->axb_version_, this->awl_axb() ? "yes" : "no");
   ESP_LOGCONFIG(TAG, "  VS Drive: %s%s", this->has_vs_drive_ ? "yes" : "no",
                 this->vs_drive_override_ ? " (override)" : "");
-  ESP_LOGCONFIG(TAG, "  IZ2 Present: %s%s", this->has_iz2_ ? "yes" : "no",
-                this->iz2_override_ ? " (override)" : "");
+  ESP_LOGCONFIG(TAG, "  IZ2: %s%s (v%.2f, AWL: %s)", this->has_iz2_ ? "yes" : "no",
+                this->iz2_override_ ? " (override)" : "",
+                this->iz2_version_, this->awl_iz2() ? "yes" : "no");
   if (this->has_iz2_) {
     ESP_LOGCONFIG(TAG, "  IZ2 Zones: %d%s", this->num_iz2_zones_,
                   this->iz2_zones_override_ ? " (override)" : "");
   }
+  ESP_LOGCONFIG(TAG, "  Blower: %s", this->blower_type_ == BLOWER_PSC ? "PSC" :
+                this->blower_type_ == BLOWER_FIVE_SPEED ? "5-Speed" : "ECM");
+  ESP_LOGCONFIG(TAG, "  Energy Monitor: %s",
+                this->energy_monitor_level_ == 0 ? "None" :
+                this->energy_monitor_level_ == 1 ? "Compressor Monitor" : "Energy Monitor");
 }
 
 const IZ2ZoneData& WaterFurnaceAurora::get_zone_data(uint8_t zone_number) const {
@@ -369,18 +435,22 @@ void WaterFurnaceAurora::refresh_all_data() {
   // Thermostat data
   this->addresses_to_read_.push_back(registers::AMBIENT_TEMP);                  // 502
   
-  // Temperature registers
-  if (this->has_axb_) {
+  // Temperature registers — use AWL version checks per Ruby gem
+  if (this->awl_axb()) {
     this->addresses_to_read_.push_back(registers::ENTERING_AIR_AWL);            // 740
+    this->addresses_to_read_.push_back(registers::LEAVING_AIR);                 // 900
+  } else {
+    this->addresses_to_read_.push_back(registers::ENTERING_AIR);                // 567
+  }
+  if (this->awl_communicating()) {
     this->addresses_to_read_.push_back(registers::RELATIVE_HUMIDITY);           // 741
     this->addresses_to_read_.push_back(registers::OUTDOOR_TEMP);                // 742
-    this->addresses_to_read_.push_back(registers::LEAVING_AIR);                 // 900
+  }
+  if (this->has_axb_) {
     this->addresses_to_read_.push_back(registers::AXB_INPUTS);                  // 1103
     this->addresses_to_read_.push_back(registers::AXB_OUTPUTS);                 // 1104
     this->addresses_to_read_.push_back(registers::LEAVING_WATER);               // 1110
     this->addresses_to_read_.push_back(registers::ENTERING_WATER);              // 1111
-  } else {
-    this->addresses_to_read_.push_back(registers::ENTERING_AIR);                // 567
   }
   
   // Setpoints
@@ -394,6 +464,10 @@ void WaterFurnaceAurora::refresh_all_data() {
     this->addresses_to_read_.push_back(registers::DHW_TEMP);                    // 1114
     this->addresses_to_read_.push_back(registers::WATERFLOW);                   // 1117
     this->addresses_to_read_.push_back(registers::LOOP_PRESSURE);               // 1119
+  }
+
+  // Refrigeration monitoring (energy_monitor >= 1, from Ruby gem compressor.rb)
+  if (this->refrigeration_monitoring()) {
     this->addresses_to_read_.push_back(registers::HEATING_LIQUID_LINE_TEMP);    // 1109
     this->addresses_to_read_.push_back(registers::SATURATED_CONDENSER_TEMP);    // 1134
     this->addresses_to_read_.push_back(registers::SUBCOOL_HEATING);             // 1135
@@ -402,30 +476,43 @@ void WaterFurnaceAurora::refresh_all_data() {
     this->addresses_to_read_.push_back(registers::HEAT_OF_EXTRACTION + 1);      // 1155
     this->addresses_to_read_.push_back(registers::HEAT_OF_REJECTION);           // 1156
     this->addresses_to_read_.push_back(registers::HEAT_OF_REJECTION + 1);       // 1157
+  }
+
+  // VS Pump registers (from Ruby gem pump.rb)
+  if (this->has_axb_) {
     this->addresses_to_read_.push_back(registers::VS_PUMP_MIN);                 // 321
     this->addresses_to_read_.push_back(registers::VS_PUMP_MAX);                 // 322
-    this->addresses_to_read_.push_back(registers::VS_PUMP_SPEED);               // 325
+    if (this->awl_axb()) {
+      this->addresses_to_read_.push_back(registers::VS_PUMP_SPEED);             // 325
+    }
   }
   
-  // Blower/ECM registers
-  this->addresses_to_read_.push_back(registers::BLOWER_ONLY_SPEED);             // 340
-  this->addresses_to_read_.push_back(registers::LO_COMPRESSOR_ECM_SPEED);       // 341
-  this->addresses_to_read_.push_back(registers::HI_COMPRESSOR_ECM_SPEED);       // 342
-  this->addresses_to_read_.push_back(registers::ECM_SPEED);                     // 344
-  this->addresses_to_read_.push_back(registers::AUX_HEAT_ECM_SPEED);            // 347
+  // Blower/ECM registers — conditional on blower type (from Ruby gem blower.rb)
+  if (this->is_ecm_blower()) {
+    this->addresses_to_read_.push_back(registers::BLOWER_ONLY_SPEED);           // 340
+    this->addresses_to_read_.push_back(registers::LO_COMPRESSOR_ECM_SPEED);     // 341
+    this->addresses_to_read_.push_back(registers::HI_COMPRESSOR_ECM_SPEED);     // 342
+    this->addresses_to_read_.push_back(registers::ECM_SPEED);                   // 344
+    this->addresses_to_read_.push_back(registers::AUX_HEAT_ECM_SPEED);          // 347
+  } else if (this->blower_type_ == BLOWER_FIVE_SPEED) {
+    this->addresses_to_read_.push_back(registers::ECM_SPEED);                   // 344
+  }
+  // PSC blowers: no speed registers to read
   
-  // Energy monitoring
-  this->addresses_to_read_.push_back(registers::LINE_VOLTAGE);                  // 16
-  this->addresses_to_read_.push_back(registers::COMPRESSOR_WATTS);              // 1146
-  this->addresses_to_read_.push_back(registers::COMPRESSOR_WATTS + 1);          // 1147
-  this->addresses_to_read_.push_back(registers::BLOWER_WATTS);                  // 1148
-  this->addresses_to_read_.push_back(registers::BLOWER_WATTS + 1);              // 1149
-  this->addresses_to_read_.push_back(registers::AUX_WATTS);                     // 1150
-  this->addresses_to_read_.push_back(registers::AUX_WATTS + 1);                 // 1151
-  this->addresses_to_read_.push_back(registers::TOTAL_WATTS);                   // 1152
-  this->addresses_to_read_.push_back(registers::TOTAL_WATTS + 1);               // 1153
-  this->addresses_to_read_.push_back(registers::PUMP_WATTS);                    // 1164
-  this->addresses_to_read_.push_back(registers::PUMP_WATTS + 1);                // 1165
+  // Energy monitoring — conditional on energy level (from Ruby gem abc_client.rb)
+  if (this->energy_monitoring()) {
+    this->addresses_to_read_.push_back(registers::LINE_VOLTAGE);                // 16
+    this->addresses_to_read_.push_back(registers::COMPRESSOR_WATTS);            // 1146
+    this->addresses_to_read_.push_back(registers::COMPRESSOR_WATTS + 1);        // 1147
+    this->addresses_to_read_.push_back(registers::BLOWER_WATTS);                // 1148
+    this->addresses_to_read_.push_back(registers::BLOWER_WATTS + 1);            // 1149
+    this->addresses_to_read_.push_back(registers::AUX_WATTS);                   // 1150
+    this->addresses_to_read_.push_back(registers::AUX_WATTS + 1);              // 1151
+    this->addresses_to_read_.push_back(registers::TOTAL_WATTS);                 // 1152
+    this->addresses_to_read_.push_back(registers::TOTAL_WATTS + 1);             // 1153
+    this->addresses_to_read_.push_back(registers::PUMP_WATTS);                  // 1164
+    this->addresses_to_read_.push_back(registers::PUMP_WATTS + 1);              // 1165
+  }
   
   // Mode configuration
   this->addresses_to_read_.push_back(registers::FAN_CONFIG);                    // 12005
@@ -1651,6 +1738,7 @@ std::string WaterFurnaceAurora::get_vs_derate_string(uint16_t value) {
   if (value == 0) return "None";
   
   std::string result;
+  result.reserve(64);
   if (value & VS_DERATE_DRIVE_OVER_TEMP) {
     if (!result.empty()) result += ", ";
     result += "Drive Over Temp";
@@ -1679,6 +1767,7 @@ std::string WaterFurnaceAurora::get_vs_safe_mode_string(uint16_t value) {
   if (value == 0) return "None";
   
   std::string result;
+  result.reserve(64);
   if (value & VS_SAFE_EEV_INDOOR_FAILED) {
     if (!result.empty()) result += ", ";
     result += "EEV Indoor Failed";
@@ -1699,6 +1788,7 @@ std::string WaterFurnaceAurora::get_vs_alarm_string(uint16_t alarm1, uint16_t al
   if (alarm1 == 0 && alarm2 == 0) return "None";
   
   std::string result;
+  result.reserve(128);
   
   // Alarm1 flags
   if (alarm1 & 0x8000) {
@@ -1769,6 +1859,7 @@ std::string WaterFurnaceAurora::get_vs_alarm_string(uint16_t alarm1, uint16_t al
 
 std::string WaterFurnaceAurora::get_axb_inputs_string(uint16_t value) {
   std::string result;
+  result.reserve(64);
   
   if (value & 0x001) {
     if (!result.empty()) result += ", ";
