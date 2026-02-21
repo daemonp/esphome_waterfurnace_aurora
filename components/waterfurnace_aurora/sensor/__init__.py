@@ -76,9 +76,25 @@ CONF_SUBCOOL_TEMPERATURE = "subcool_temperature"
 CONF_HEAT_OF_EXTRACTION = "heat_of_extraction"
 CONF_HEAT_OF_REJECTION = "heat_of_rejection"
 
+# Additional VS Drive sensors (Phase 5 parity)
+CONF_VS_FAN_SPEED = "vs_fan_speed"
+CONF_VS_AMBIENT_TEMPERATURE = "vs_ambient_temperature"
+CONF_VS_COMPRESSOR_WATTS = "vs_compressor_watts"
+CONF_SAT_EVAP_DISCHARGE_TEMPERATURE = "saturated_evaporator_discharge_temperature"
+CONF_AUX_HEAT_STAGE = "aux_heat_stage"
+
 # Humidifier sensors
 CONF_HUMIDIFICATION_TARGET = "humidification_target"
 CONF_DEHUMIDIFICATION_TARGET = "dehumidification_target"
+
+# IZ2 desired speed sensors (from compressor.rb / blower.rb)
+CONF_IZ2_COMPRESSOR_SPEED = "iz2_compressor_speed"
+CONF_IZ2_BLOWER_SPEED = "iz2_blower_speed"
+
+# Derived sensors (computed on-device, beyond Ruby gem)
+CONF_COP = "cop"
+CONF_WATER_DELTA_T = "water_delta_t"
+CONF_APPROACH_TEMPERATURE = "approach_temperature"
 
 # Unit definitions
 UNIT_FAHRENHEIT = "°F"
@@ -245,6 +261,19 @@ CONFIG_SCHEMA = cv.Schema(
             accuracy_decimals=0,
             state_class=STATE_CLASS_MEASUREMENT,
         ),
+        # Additional VS Drive sensors (Phase 5 parity)
+        cv.Optional(CONF_VS_FAN_SPEED): sensor.sensor_schema(
+            unit_of_measurement=UNIT_PERCENT,
+            accuracy_decimals=0,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        cv.Optional(CONF_VS_AMBIENT_TEMPERATURE): TEMPERATURE_SENSOR_SCHEMA,
+        cv.Optional(CONF_VS_COMPRESSOR_WATTS): POWER_SENSOR_SCHEMA,
+        cv.Optional(CONF_SAT_EVAP_DISCHARGE_TEMPERATURE): TEMPERATURE_SENSOR_SCHEMA,
+        cv.Optional(CONF_AUX_HEAT_STAGE): sensor.sensor_schema(
+            accuracy_decimals=0,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
         # Humidifier sensors
         cv.Optional(CONF_HUMIDIFICATION_TARGET): sensor.sensor_schema(
             unit_of_measurement=UNIT_PERCENT,
@@ -258,6 +287,23 @@ CONFIG_SCHEMA = cv.Schema(
             device_class=DEVICE_CLASS_HUMIDITY,
             state_class=STATE_CLASS_MEASUREMENT,
         ),
+        # IZ2 desired speed sensors
+        cv.Optional(CONF_IZ2_COMPRESSOR_SPEED): sensor.sensor_schema(
+            accuracy_decimals=0,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        cv.Optional(CONF_IZ2_BLOWER_SPEED): sensor.sensor_schema(
+            unit_of_measurement=UNIT_PERCENT,
+            accuracy_decimals=0,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        # Derived sensors (computed on-device)
+        cv.Optional(CONF_COP): sensor.sensor_schema(
+            accuracy_decimals=2,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        cv.Optional(CONF_WATER_DELTA_T): TEMPERATURE_SENSOR_SCHEMA,
+        cv.Optional(CONF_APPROACH_TEMPERATURE): TEMPERATURE_SENSOR_SCHEMA,
     }
 )
 
@@ -469,6 +515,27 @@ async def to_code(config):
         sens = await sensor.new_sensor(config[CONF_HEAT_OF_REJECTION])
         cg.add(parent.set_heat_of_rejection_sensor(sens))
 
+    # Additional VS Drive sensors (Phase 5 parity)
+    if CONF_VS_FAN_SPEED in config:
+        sens = await sensor.new_sensor(config[CONF_VS_FAN_SPEED])
+        cg.add(parent.set_vs_fan_speed_sensor(sens))
+
+    if CONF_VS_AMBIENT_TEMPERATURE in config:
+        sens = await sensor.new_sensor(config[CONF_VS_AMBIENT_TEMPERATURE])
+        cg.add(parent.set_vs_ambient_temp_sensor(sens))
+
+    if CONF_VS_COMPRESSOR_WATTS in config:
+        sens = await sensor.new_sensor(config[CONF_VS_COMPRESSOR_WATTS])
+        cg.add(parent.set_vs_compressor_watts_sensor(sens))
+
+    if CONF_SAT_EVAP_DISCHARGE_TEMPERATURE in config:
+        sens = await sensor.new_sensor(config[CONF_SAT_EVAP_DISCHARGE_TEMPERATURE])
+        cg.add(parent.set_sat_evap_discharge_temp_sensor(sens))
+
+    if CONF_AUX_HEAT_STAGE in config:
+        sens = await sensor.new_sensor(config[CONF_AUX_HEAT_STAGE])
+        cg.add(parent.set_aux_heat_stage_sensor(sens))
+
     # Humidifier sensors
     if CONF_HUMIDIFICATION_TARGET in config:
         sens = await sensor.new_sensor(config[CONF_HUMIDIFICATION_TARGET])
@@ -477,3 +544,25 @@ async def to_code(config):
     if CONF_DEHUMIDIFICATION_TARGET in config:
         sens = await sensor.new_sensor(config[CONF_DEHUMIDIFICATION_TARGET])
         cg.add(parent.set_dehumidification_target_sensor(sens))
+
+    # IZ2 desired speed sensors
+    if CONF_IZ2_COMPRESSOR_SPEED in config:
+        sens = await sensor.new_sensor(config[CONF_IZ2_COMPRESSOR_SPEED])
+        cg.add(parent.set_iz2_compressor_speed_sensor(sens))
+
+    if CONF_IZ2_BLOWER_SPEED in config:
+        sens = await sensor.new_sensor(config[CONF_IZ2_BLOWER_SPEED])
+        cg.add(parent.set_iz2_blower_speed_sensor(sens))
+
+    # Derived sensors (computed on-device)
+    if CONF_COP in config:
+        sens = await sensor.new_sensor(config[CONF_COP])
+        cg.add(parent.set_cop_sensor(sens))
+
+    if CONF_WATER_DELTA_T in config:
+        sens = await sensor.new_sensor(config[CONF_WATER_DELTA_T])
+        cg.add(parent.set_water_delta_t_sensor(sens))
+
+    if CONF_APPROACH_TEMPERATURE in config:
+        sens = await sensor.new_sensor(config[CONF_APPROACH_TEMPERATURE])
+        cg.add(parent.set_approach_temp_sensor(sens))

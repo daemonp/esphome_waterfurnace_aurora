@@ -19,6 +19,9 @@ CONF_VS_DERATE = "vs_derate"
 CONF_VS_SAFE_MODE = "vs_safe_mode"
 CONF_VS_ALARM = "vs_alarm"
 CONF_AXB_INPUTS = "axb_inputs"
+CONF_HUMIDIFIER_MODE = "humidifier_mode"
+CONF_DEHUMIDIFIER_MODE = "dehumidifier_mode"
+CONF_PUMP_TYPE = "pump_type"
 
 CONFIG_SCHEMA = cv.Schema(
     {
@@ -34,6 +37,9 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_VS_SAFE_MODE): text_sensor.text_sensor_schema(),
         cv.Optional(CONF_VS_ALARM): text_sensor.text_sensor_schema(),
         cv.Optional(CONF_AXB_INPUTS): text_sensor.text_sensor_schema(),
+        cv.Optional(CONF_HUMIDIFIER_MODE): text_sensor.text_sensor_schema(),
+        cv.Optional(CONF_DEHUMIDIFIER_MODE): text_sensor.text_sensor_schema(),
+        cv.Optional(CONF_PUMP_TYPE): text_sensor.text_sensor_schema(),
     }
 )
 
@@ -84,3 +90,15 @@ async def to_code(config):
     if CONF_AXB_INPUTS in config:
         sens = await text_sensor.new_text_sensor(config[CONF_AXB_INPUTS])
         cg.add(parent.set_axb_inputs_sensor(sens))
+
+    if CONF_HUMIDIFIER_MODE in config:
+        sens = await text_sensor.new_text_sensor(config[CONF_HUMIDIFIER_MODE])
+        cg.add(parent.set_humidifier_mode_sensor(sens))
+
+    if CONF_DEHUMIDIFIER_MODE in config:
+        sens = await text_sensor.new_text_sensor(config[CONF_DEHUMIDIFIER_MODE])
+        cg.add(parent.set_dehumidifier_mode_sensor(sens))
+
+    if CONF_PUMP_TYPE in config:
+        sens = await text_sensor.new_text_sensor(config[CONF_PUMP_TYPE])
+        cg.add(parent.set_pump_type_sensor(sens))

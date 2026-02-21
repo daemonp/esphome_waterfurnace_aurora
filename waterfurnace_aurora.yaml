@@ -236,6 +236,20 @@ sensor:
       name: "VS Drive Temperature"
     vs_inverter_temperature:
       name: "VS Inverter Temperature"
+    vs_ambient_temperature:
+      name: "VS Compressor Ambient Temperature"
+    saturated_evaporator_discharge_temperature:
+      name: "Saturated Evaporator Discharge Temperature"
+    
+    # VS Drive additional
+    vs_fan_speed:
+      name: "VS Fan Speed"
+    vs_compressor_watts:
+      name: "VS Compressor Power"
+    
+    # Aux heat
+    aux_heat_stage:
+      name: "Aux Heat Stage"
     
     # Energy / Power
     line_voltage:
@@ -292,6 +306,20 @@ sensor:
       name: "Anti-Short-Cycle Countdown"
     fault_code:
       name: "Fault Code"
+    
+    # IZ2 desired speed sensors (uncomment if you have IntelliZone 2)
+    # iz2_compressor_speed:
+    #   name: "IZ2 Desired Compressor Speed"
+    # iz2_blower_speed:
+    #   name: "IZ2 Desired Blower Speed"
+    
+    # Derived sensors (computed on-device)
+    cop:
+      name: "Coefficient of Performance"
+    water_delta_t:
+      name: "Water Delta-T"
+    approach_temperature:
+      name: "Approach Temperature"
 
 # =============================================================================
 # BINARY SENSORS
@@ -372,6 +400,10 @@ text_sensor:
     # AXB status
     axb_inputs:
       name: "AXB Inputs"
+    
+    # Hardware info
+    pump_type:
+      name: "Pump Type"
 
 # =============================================================================
 # BUTTONS

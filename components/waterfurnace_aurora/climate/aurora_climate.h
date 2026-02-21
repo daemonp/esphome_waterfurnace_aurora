@@ -10,10 +10,9 @@ namespace waterfurnace_aurora {
 class AuroraClimate : public climate::Climate, public Component {
  public:
   void setup() override;
-  void loop() override;
   void dump_config() override;
   
-  float get_setup_priority() const override { return setup_priority::DATA; }
+  float get_setup_priority() const override { return setup_priority::PROCESSOR; }
 
   void set_parent(WaterFurnaceAurora *parent) { this->parent_ = parent; }
 
@@ -27,7 +26,6 @@ class AuroraClimate : public climate::Climate, public Component {
   void update_state_();
 
   WaterFurnaceAurora *parent_{nullptr};
-  uint32_t last_update_{0};
 };
 
 }  // namespace waterfurnace_aurora

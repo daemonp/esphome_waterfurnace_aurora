@@ -1,5 +1,7 @@
 #include "aurora_climate.h"
+#include "aurora_climate_utils.h"
 #include "esphome/core/log.h"
+#include "esphome/core/helpers.h"  // for fahrenheit_to_celsius / celsius_to_fahrenheit
 
 namespace esphome {
 namespace waterfurnace_aurora {
@@ -7,20 +9,17 @@ namespace waterfurnace_aurora {
 static const char *const TAG = "aurora.climate";
 
 void AuroraClimate::setup() {
-  // Nothing specific to set up
-}
-
-void AuroraClimate::loop() {
-  // Update state periodically
-  uint32_t now = millis();
-  if (now - this->last_update_ >= 5000) {  // Every 5 seconds
-    this->update_state_();
-    this->last_update_ = now;
+  // Register with parent to receive data update notifications.
+  // Replaces the 5-second polling loop — update_state_() is called
+  // immediately when fresh register data arrives from the heat pump.
+  if (this->parent_ != nullptr) {
+    this->parent_->register_listener([this]() { this->update_state_(); });
   }
 }
 
 void AuroraClimate::dump_config() {
   ESP_LOGCONFIG(TAG, "Aurora Climate:");
+  ESP_LOGCONFIG(TAG, "  Parent: %s", this->parent_ != nullptr ? "configured" : "NOT SET");
 }
 
 climate::ClimateTraits AuroraClimate::traits() {
@@ -45,9 +44,10 @@ climate::ClimateTraits AuroraClimate::traits() {
   traits.add_supported_preset(climate::CLIMATE_PRESET_NONE);
   traits.add_supported_preset(climate::CLIMATE_PRESET_BOOST);  // Emergency Heat
   
-  // Temperature ranges from thermostat.rb
-  traits.set_visual_min_temperature(40);  // Heating min
-  traits.set_visual_max_temperature(99);  // Cooling max
+  // Temperature ranges from thermostat.rb (converted to Celsius for ESPHome)
+  // Heating min: 40°F = 4.4°C, Cooling max: 99°F = 37.2°C
+  traits.set_visual_min_temperature(fahrenheit_to_celsius(40));
+  traits.set_visual_max_temperature(fahrenheit_to_celsius(99));
   traits.set_visual_temperature_step(0.5);
   
   return traits;
@@ -61,65 +61,39 @@ void AuroraClimate::control(const climate::ClimateCall &call) {
 
   // Handle mode change
   if (call.get_mode().has_value()) {
-    climate::ClimateMode mode = *call.get_mode();
     HeatingMode aurora_mode;
-    
-    switch (mode) {
-      case climate::CLIMATE_MODE_OFF:
-        aurora_mode = HEATING_MODE_OFF;
-        break;
-      case climate::CLIMATE_MODE_HEAT_COOL:
-        aurora_mode = HEATING_MODE_AUTO;
-        break;
-      case climate::CLIMATE_MODE_COOL:
-        aurora_mode = HEATING_MODE_COOL;
-        break;
-      case climate::CLIMATE_MODE_HEAT:
-        aurora_mode = HEATING_MODE_HEAT;
-        break;
-      default:
-        ESP_LOGW(TAG, "Unsupported mode");
-        return;
+    if (!esphome_to_aurora_mode(*call.get_mode(), aurora_mode)) {
+      ESP_LOGW(TAG, "Unsupported mode");
+      return;
     }
-    
     if (this->parent_->set_hvac_mode(aurora_mode)) {
-      this->mode = mode;
+      this->mode = *call.get_mode();
     }
   }
 
   // Handle target temperature changes (dual setpoint)
+  // HA sends Celsius; hardware expects Fahrenheit
   if (call.get_target_temperature_low().has_value()) {
-    float temp = *call.get_target_temperature_low();
-    if (this->parent_->set_heating_setpoint(temp)) {
-      this->target_temperature_low = temp;
+    float temp_c = *call.get_target_temperature_low();
+    float temp_f = celsius_to_fahrenheit(temp_c);
+    if (this->parent_->set_heating_setpoint(temp_f)) {
+      this->target_temperature_low = temp_c;
     }
   }
   
   if (call.get_target_temperature_high().has_value()) {
-    float temp = *call.get_target_temperature_high();
-    if (this->parent_->set_cooling_setpoint(temp)) {
-      this->target_temperature_high = temp;
+    float temp_c = *call.get_target_temperature_high();
+    float temp_f = celsius_to_fahrenheit(temp_c);
+    if (this->parent_->set_cooling_setpoint(temp_f)) {
+      this->target_temperature_high = temp_c;
     }
   }
 
   // Handle fan mode
   if (call.get_fan_mode().has_value()) {
-    climate::ClimateFanMode fan_mode = *call.get_fan_mode();
-    FanMode aurora_fan;
-    
-    switch (fan_mode) {
-      case climate::CLIMATE_FAN_AUTO:
-        aurora_fan = FAN_MODE_AUTO;
-        break;
-      case climate::CLIMATE_FAN_ON:
-        aurora_fan = FAN_MODE_CONTINUOUS;
-        break;
-      default:
-        aurora_fan = FAN_MODE_AUTO;
-    }
-    
+    FanMode aurora_fan = esphome_to_aurora_fan(*call.get_fan_mode());
     if (this->parent_->set_fan_mode(aurora_fan)) {
-      this->fan_mode = fan_mode;
+      this->fan_mode = *call.get_fan_mode();
     }
   }
 
@@ -129,14 +103,14 @@ void AuroraClimate::control(const climate::ClimateCall &call) {
     
     if (preset == climate::CLIMATE_PRESET_BOOST) {
       // BOOST preset = Emergency Heat mode
-      if (this->parent_->set_hvac_mode(HEATING_MODE_EHEAT)) {
+      if (this->parent_->set_hvac_mode(HeatingMode::EHEAT)) {
         this->preset = preset;
         this->mode = climate::CLIMATE_MODE_HEAT;
       }
     } else if (preset == climate::CLIMATE_PRESET_NONE) {
       // Clear preset - if we were in E-Heat, switch back to regular heat
-      if (this->parent_->get_hvac_mode() == HEATING_MODE_EHEAT) {
-        this->parent_->set_hvac_mode(HEATING_MODE_HEAT);
+      if (this->parent_->get_hvac_mode() == HeatingMode::EHEAT) {
+        this->parent_->set_hvac_mode(HeatingMode::HEAT);
       }
       this->preset = preset;
     }
@@ -163,46 +137,29 @@ void AuroraClimate::update_state_() {
     }
   }
 
-  // Update current temperature
+  // Update current temperature (hardware reports °F, climate entity uses °C)
   float ambient = this->parent_->get_ambient_temperature();
   if (!std::isnan(ambient)) {
-    this->current_temperature = ambient;
+    this->current_temperature = fahrenheit_to_celsius(ambient);
   }
 
-  // Update setpoints
+  // Update setpoints (hardware reports °F, climate entity uses °C)
   float heating_sp = this->parent_->get_heating_setpoint();
   float cooling_sp = this->parent_->get_cooling_setpoint();
   
   if (!std::isnan(heating_sp)) {
-    this->target_temperature_low = heating_sp;
+    this->target_temperature_low = fahrenheit_to_celsius(heating_sp);
   }
   if (!std::isnan(cooling_sp)) {
-    this->target_temperature_high = cooling_sp;
+    this->target_temperature_high = fahrenheit_to_celsius(cooling_sp);
   }
 
   // Update mode and preset
-  HeatingMode aurora_mode = this->parent_->get_hvac_mode();
-  switch (aurora_mode) {
-    case HEATING_MODE_OFF:
-      this->mode = climate::CLIMATE_MODE_OFF;
-      this->preset = climate::CLIMATE_PRESET_NONE;
-      break;
-    case HEATING_MODE_AUTO:
-      this->mode = climate::CLIMATE_MODE_HEAT_COOL;
-      this->preset = climate::CLIMATE_PRESET_NONE;
-      break;
-    case HEATING_MODE_COOL:
-      this->mode = climate::CLIMATE_MODE_COOL;
-      this->preset = climate::CLIMATE_PRESET_NONE;
-      break;
-    case HEATING_MODE_HEAT:
-      this->mode = climate::CLIMATE_MODE_HEAT;
-      this->preset = climate::CLIMATE_PRESET_NONE;
-      break;
-    case HEATING_MODE_EHEAT:
-      this->mode = climate::CLIMATE_MODE_HEAT;
-      this->preset = climate::CLIMATE_PRESET_BOOST;  // E-Heat shown as BOOST preset
-      break;
+  climate::ClimateMode new_mode;
+  climate::ClimatePreset new_preset;
+  if (aurora_to_esphome_mode(this->parent_->get_hvac_mode(), new_mode, new_preset)) {
+    this->mode = new_mode;
+    this->preset = new_preset;
   }
 
   // Update action based on system outputs
@@ -225,16 +182,7 @@ void AuroraClimate::update_state_() {
   }
 
   // Update fan mode
-  FanMode aurora_fan = this->parent_->get_fan_mode();
-  switch (aurora_fan) {
-    case FAN_MODE_AUTO:
-      this->fan_mode = climate::CLIMATE_FAN_AUTO;
-      break;
-    case FAN_MODE_CONTINUOUS:
-    case FAN_MODE_INTERMITTENT:
-      this->fan_mode = climate::CLIMATE_FAN_ON;
-      break;
-  }
+  this->fan_mode = aurora_to_esphome_fan(this->parent_->get_fan_mode());
 
   this->publish_state();
 }
