@@ -803,6 +803,14 @@ void WaterFurnaceAurora::build_poll_addresses_() {
   if (this->has_axb_ && this->awl_axb()) {
     this->addresses_to_read_.push_back(registers::VS_PUMP_SPEED);
   }
+
+  // DHW writable registers on fast tier — ensures the 7s write cooldown window
+  // always contains at least one fresh read-back (same reason climate setpoints
+  // were moved to fast tier).  DHW_TEMP stays on medium tier since it's read-only.
+  if (this->has_axb_) {
+    this->addresses_to_read_.push_back(registers::DHW_ENABLED);
+    this->addresses_to_read_.push_back(registers::DHW_SETPOINT);
+  }
   
   if (this->has_iz2_ && this->num_iz2_zones_ > 0) {
     this->addresses_to_read_.push_back(registers::IZ2_OUTDOOR_TEMP);
@@ -829,8 +837,8 @@ void WaterFurnaceAurora::build_poll_addresses_() {
     this->addresses_to_read_.push_back(registers::LINE_VOLTAGE_SETTING);
     
     if (this->has_axb_) {
-      this->addresses_to_read_.push_back(registers::DHW_ENABLED);
-      this->addresses_to_read_.push_back(registers::DHW_SETPOINT);
+      // Note: DHW_ENABLED and DHW_SETPOINT moved to fast tier (writable registers
+      // need fresh read-back within the 7s cooldown window).
       this->addresses_to_read_.push_back(registers::DHW_TEMP);
       this->addresses_to_read_.push_back(registers::LOOP_PRESSURE);
       this->addresses_to_read_.push_back(registers::AXB_INPUTS);
@@ -1119,12 +1127,11 @@ void WaterFurnaceAurora::publish_all_sensors_() {
     }
   }
   
-  // DHW
-  {
+  // DHW (respect write cooldown — same pattern as climate setpoints)
+  if (!this->dhw_cooldown_active()) {
     const uint16_t *val_dhw = reg_find(regs, registers::DHW_ENABLED);
     if (val_dhw) this->dhw_enabled_ = (*val_dhw != 0);
-  }
-  {
+
     const uint16_t *val_dhwsp = reg_find(regs, registers::DHW_SETPOINT);
     if (val_dhwsp) {
       this->dhw_setpoint_ = to_tenths(*val_dhwsp);

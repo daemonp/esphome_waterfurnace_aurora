@@ -1,7 +1,6 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import water_heater
-from esphome.const import CONF_ID
 
 from .. import waterfurnace_aurora_ns, WaterFurnaceAurora, CONF_AURORA_ID
 
