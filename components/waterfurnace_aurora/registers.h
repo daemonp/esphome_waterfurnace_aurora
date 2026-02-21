@@ -34,6 +34,8 @@ namespace waterfurnace_aurora {
 /// Data type of a register value. Used for converting raw uint16_t to float.
 /// rw-wf stores this as std::string ("signed_tenths") and does runtime strcmp.
 /// We use an enum — zero overhead at runtime.
+/// NOTE: Currently used by convert_register() for table-driven sensor registration
+/// (planned future refactor to replace the per-sensor publish_sensor_*() calls).
 enum class RegisterType : uint8_t {
   UNSIGNED,        // Raw uint16
   SIGNED,          // int16
@@ -48,6 +50,8 @@ enum class RegisterType : uint8_t {
 /// Hardware capability required to poll a register.
 /// rw-wf passes this as a string from Python and converts at setup.
 /// We use an enum directly — Python codegen emits the enum value.
+/// NOTE: Infrastructure for a planned table-driven polling model where
+/// build_poll_addresses_() would be auto-generated from a register table.
 enum class RegisterCapability : uint8_t {
   NONE,               // Always pollable
   AWL_THERMOSTAT,     // Thermostat v3.0+

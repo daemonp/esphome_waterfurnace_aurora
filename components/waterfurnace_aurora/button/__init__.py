@@ -9,7 +9,7 @@ from esphome.const import (
 from .. import waterfurnace_aurora_ns, WaterFurnaceAurora, CONF_AURORA_ID
 
 DEPENDENCIES = ["waterfurnace_aurora"]
-CODEOWNERS = ["@damonmaria"]
+CODEOWNERS = ["@daemonp"]
 
 CONF_CLEAR_FAULT_HISTORY = "clear_fault_history"
 

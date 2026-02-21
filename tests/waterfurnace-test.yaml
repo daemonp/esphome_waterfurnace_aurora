@@ -26,7 +26,7 @@ wifi:
 
 api:
   encryption:
-    key: "dGVzdGtleXRlc3RrZXl0ZXN0a2V5dGVzdGtleTE="
+    key: "1Mxas/2HUGgdfNx8it2J8fw2JvHmrvHz4YE7LLOpdJE="
   custom_services: true
 
 ota:
@@ -76,34 +76,34 @@ number:
     dhw_setpoint:
       name: "Test DHW Setpoint"
     blower_only_speed:
-      name: "Test Blower Only Speed"
+      name: "Test Indoor Blower Only Speed"
     lo_compressor_speed:
       name: "Test Lo Compressor Speed"
     hi_compressor_speed:
       name: "Test Hi Compressor Speed"
     aux_heat_speed:
-      name: "Test Aux Heat Speed"
+      name: "Test Aux Electric Heat Speed"
     pump_min_speed:
-      name: "Test Pump Min Speed"
+      name: "Test Loop Pump Min Speed"
     pump_max_speed:
-      name: "Test Pump Max Speed"
+      name: "Test Loop Pump Max Speed"
     fan_intermittent_on:
       name: "Test Fan On Time"
     fan_intermittent_off:
       name: "Test Fan Off Time"
     humidification_target:
-      name: "Test Humidification Target"
+      name: "Test Humidification Setpoint"
     dehumidification_target:
-      name: "Test Dehumidification Target"
+      name: "Test Dehumidification Setpoint"
 
 # --- ALL Sensors (complete coverage) ---
 sensor:
   - platform: waterfurnace_aurora
     aurora_id: aurora
     entering_air_temperature:
-      name: "Test Entering Air Temp"
+      name: "Test Return Air Temp"
     leaving_air_temperature:
-      name: "Test Leaving Air Temp"
+      name: "Test Supply Air Temp"
     ambient_temperature:
       name: "Test Ambient Temp"
     outdoor_temperature:
@@ -137,15 +137,15 @@ sensor:
     line_voltage:
       name: "Test Line Voltage"
     total_watts:
-      name: "Test Total Power"
+      name: "Test Total Unit Power"
     compressor_watts:
       name: "Test Compressor Power"
     blower_watts:
-      name: "Test Blower Power"
+      name: "Test Indoor Blower Power"
     aux_heat_watts:
-      name: "Test Aux Heat Power"
+      name: "Test Aux Electric Heat Power"
     pump_watts:
-      name: "Test Pump Power"
+      name: "Test Loop Pump Power"
     waterflow:
       name: "Test Water Flow"
     fault_code:
@@ -171,21 +171,21 @@ sensor:
     vs_inverter_temperature:
       name: "Test VS Inverter Temp"
     blower_speed:
-      name: "Test Blower Speed"
+      name: "Test Indoor Blower Speed"
     blower_only_speed:
-      name: "Test Blower Only Speed Sensor"
+      name: "Test Indoor Blower Only Speed Sensor"
     lo_compressor_speed:
       name: "Test Lo Compressor Speed Sensor"
     hi_compressor_speed:
       name: "Test Hi Compressor Speed Sensor"
     aux_heat_speed:
-      name: "Test Aux Heat Speed Sensor"
+      name: "Test Aux Electric Heat Speed Sensor"
     pump_speed:
-      name: "Test Pump Speed"
+      name: "Test Loop Pump Speed"
     pump_min_speed:
-      name: "Test Pump Min Speed Sensor"
+      name: "Test Loop Pump Min Speed Sensor"
     pump_max_speed:
-      name: "Test Pump Max Speed Sensor"
+      name: "Test Loop Pump Max Speed Sensor"
     heating_liquid_line_temperature:
       name: "Test Heating Liquid Line Temp"
     saturated_condenser_temperature:
@@ -205,11 +205,11 @@ sensor:
     saturated_evaporator_discharge_temperature:
       name: "Test Sat Evap Discharge Temp"
     aux_heat_stage:
-      name: "Test Aux Heat Stage"
+      name: "Test Aux Electric Heat Stage"
     humidification_target:
-      name: "Test Humidification Target Sensor"
+      name: "Test Humidification Setpoint"
     dehumidification_target:
-      name: "Test Dehumidification Target Sensor"
+      name: "Test Dehumidification Setpoint"
     iz2_compressor_speed:
       name: "Test IZ2 Compressor Speed"
     iz2_blower_speed:
@@ -228,9 +228,9 @@ binary_sensor:
     compressor_running:
       name: "Test Compressor Running"
     blower_running:
-      name: "Test Blower Running"
+      name: "Test Indoor Blower Running"
     aux_heat_running:
-      name: "Test Aux Heat Running"
+      name: "Test Aux Electric Heat Running"
     dhw_running:
       name: "Test DHW Running"
     loop_pump_running:

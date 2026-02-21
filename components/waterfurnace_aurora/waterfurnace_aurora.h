@@ -276,6 +276,10 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   
   // Observer pattern: sub-entities register a callback to be notified when data updates.
   void register_listener(std::function<void()> callback) {
+    if (this->listeners_.size() >= MAX_LISTENERS) {
+      // Bounded by YAML config; if we hit this, the YAML has more sub-entities than expected.
+      return;
+    }
     this->listeners_.push_back(std::move(callback));
   }
 
@@ -298,9 +302,13 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   // --- State machine operations ---
   void transition_(State new_state);
   /// Send a Modbus request frame and transition to WAITING_RESPONSE.
-  /// expected_addrs is moved into the member to avoid heap allocation.
+  /// expected_addrs is copied into the member; use the move overload when possible.
   void send_request_(const std::vector<uint8_t> &frame, PendingRequest type,
-                     std::vector<uint16_t> expected_addrs = {});
+                     const std::vector<uint16_t> &expected_addrs);
+  void send_request_(const std::vector<uint8_t> &frame, PendingRequest type,
+                     std::vector<uint16_t> &&expected_addrs);
+  /// Overload with no expected addresses (for writes).
+  void send_request_(const std::vector<uint8_t> &frame, PendingRequest type);
   bool read_frame_(std::vector<uint8_t> &frame);
   void process_response_(const std::vector<uint8_t> &frame);
   void handle_timeout_();
@@ -462,6 +470,7 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   PendingRequest pending_request_{PendingRequest::NONE};
   bool setup_complete_{false};
   uint8_t setup_retry_count_{0};
+  uint8_t poll_retry_count_{0};     // Retry counter for normal poll-cycle timeouts
   static constexpr uint8_t MAX_SETUP_RETRIES = 5;
   
   // RX buffer — persists across loop() calls for incremental frame reading
@@ -647,20 +656,29 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   // configured in YAML; no runtime growth path exists.
   std::vector<std::function<void()>> listeners_;
   
-  // Cached text sensor values for publish-on-change
+  // Cached text sensor values for publish-on-change.
+  // Bitmask-derived strings also cache the raw register value to avoid
+  // calling bitmask_to_string() (which heap-allocates) when unchanged.
   std::string cached_mode_string_;
   std::string cached_fault_description_;
   std::string cached_hvac_mode_;
   std::string cached_fan_mode_;
   std::string cached_vs_derate_;
+  uint16_t cached_vs_derate_raw_{0xFFFF};
   std::string cached_vs_safe_mode_;
+  uint16_t cached_vs_safe_mode_raw_{0xFFFF};
   std::string cached_vs_alarm_;
+  uint16_t cached_vs_alarm1_raw_{0xFFFF};
+  uint16_t cached_vs_alarm2_raw_{0xFFFF};
   std::string cached_axb_inputs_;
+  uint16_t cached_axb_inputs_raw_{0xFFFF};
   std::string cached_humidifier_mode_;
   std::string cached_dehumidifier_mode_;
   std::string cached_lockout_fault_description_;
   std::string cached_outputs_at_lockout_;
+  uint16_t cached_outputs_at_lockout_raw_{0xFFFF};
   std::string cached_inputs_at_lockout_;
+  uint16_t cached_inputs_at_lockout_raw_{0xFFFF};
   
   // Adaptive polling tier counter — intentionally uint8_t.
   // Wraps at 255; the modulo checks (% 6, % 60) produce correct results at all values.
@@ -669,6 +687,10 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   // Cached device info
   std::string model_number_;
   std::string serial_number_;
+  
+  // Cached fault history string — reused across slow-tier poll cycles
+  // to avoid heap allocation in loop(). Only rebuilt when content changes.
+  std::string cached_fault_history_;
 };
 
 }  // namespace waterfurnace_aurora

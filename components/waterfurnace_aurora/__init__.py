@@ -1,7 +1,8 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome import pins
-from esphome.components import binary_sensor, uart
+from esphome.components import uart
+import esphome.components.binary_sensor as esphome_binary_sensor
 from esphome.const import (
     CONF_ID,
     CONF_ADDRESS,
@@ -40,7 +41,7 @@ CONFIG_SCHEMA = (
             cv.Optional(CONF_FLOW_CONTROL_PIN): pins.gpio_output_pin_schema,
             cv.Optional(CONF_READ_RETRIES, default=2): cv.int_range(min=0, max=10),
             # Connected binary sensor — monitors RS-485 communication health
-            cv.Optional(CONF_CONNECTED): binary_sensor.binary_sensor_schema(
+            cv.Optional(CONF_CONNECTED): esphome_binary_sensor.binary_sensor_schema(
                 device_class=DEVICE_CLASS_CONNECTIVITY,
                 entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
             ),
@@ -74,7 +75,7 @@ async def to_code(config):
 
     # Connected binary sensor
     if CONF_CONNECTED in config:
-        sens = await binary_sensor.new_binary_sensor(config[CONF_CONNECTED])
+        sens = await esphome_binary_sensor.new_binary_sensor(config[CONF_CONNECTED])
         cg.add(var.set_connected_sensor(sens))
     cg.add(var.set_connected_timeout(config[CONF_CONNECTED_TIMEOUT]))
 

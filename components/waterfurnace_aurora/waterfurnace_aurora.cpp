@@ -51,8 +51,9 @@ void WaterFurnaceAurora::transition_(State new_state) {
   }
 }
 
+/// Common send logic — factored out to avoid duplication across overloads.
 void WaterFurnaceAurora::send_request_(const std::vector<uint8_t> &frame, PendingRequest type,
-                                        std::vector<uint16_t> expected_addrs) {
+                                        const std::vector<uint16_t> &expected_addrs) {
   // Clear any stale data on the bus (bounded to prevent spin if junk is streaming)
   for (int i = 0; i < 512 && this->available(); i++) {
     this->read();
@@ -73,10 +74,36 @@ void WaterFurnaceAurora::send_request_(const std::vector<uint8_t> &frame, Pendin
   this->write_array(frame.data(), frame.size());
   
   this->pending_request_ = type;
+  this->expected_addresses_ = expected_addrs;
+  this->last_request_time_ = millis();
+  this->tx_complete_time_ = millis() + this->tx_time_ms_(frame.size());
+  this->transition_(State::TX_PENDING);
+}
+
+void WaterFurnaceAurora::send_request_(const std::vector<uint8_t> &frame, PendingRequest type,
+                                        std::vector<uint16_t> &&expected_addrs) {
+  // Clear any stale data on the bus (bounded to prevent spin if junk is streaming)
+  for (int i = 0; i < 512 && this->available(); i++) {
+    this->read();
+  }
+  this->rx_buffer_.clear();
+  
+  if (this->flow_control_pin_ != nullptr) {
+    this->flow_control_pin_->digital_write(true);
+  }
+  
+  this->write_array(frame.data(), frame.size());
+  
+  this->pending_request_ = type;
   this->expected_addresses_ = std::move(expected_addrs);
   this->last_request_time_ = millis();
   this->tx_complete_time_ = millis() + this->tx_time_ms_(frame.size());
   this->transition_(State::TX_PENDING);
+}
+
+void WaterFurnaceAurora::send_request_(const std::vector<uint8_t> &frame, PendingRequest type) {
+  static const std::vector<uint16_t> empty;
+  this->send_request_(frame, type, empty);
 }
 
 bool WaterFurnaceAurora::read_frame_(std::vector<uint8_t> &frame) {
@@ -186,9 +213,19 @@ void WaterFurnaceAurora::handle_timeout_() {
     ESP_LOGD(TAG, "VS Drive probe timed out — no VS drive");
     this->finish_setup_();
   } else {
-    // Normal polling timeout
-    this->status_set_warning(LOG_STR("Communication error - retrying"));
-    this->transition_(State::IDLE);
+    // Normal polling timeout — retry up to read_retries_ before giving up on this cycle.
+    this->poll_retry_count_++;
+    if (this->poll_retry_count_ <= this->read_retries_) {
+      ESP_LOGW(TAG, "Poll timeout (retry %d/%d)", this->poll_retry_count_, this->read_retries_);
+      this->status_set_warning(LOG_STR("Communication timeout - retrying"));
+      // Re-send the same poll request by going back to IDLE (update() will re-trigger)
+      this->transition_(State::IDLE);
+    } else {
+      ESP_LOGW(TAG, "Poll timeout (exhausted %d retries)", this->read_retries_);
+      this->status_set_warning(LOG_STR("Communication error - retries exhausted"));
+      this->poll_retry_count_ = 0;
+      this->transition_(State::IDLE);
+    }
   }
   
   this->pending_request_ = PendingRequest::NONE;
@@ -221,6 +258,9 @@ void WaterFurnaceAurora::setup() {
   
   this->rx_buffer_.reserve(protocol::MAX_FRAME_SIZE);
   this->response_frame_.reserve(protocol::MAX_FRAME_SIZE);
+  this->listeners_.reserve(MAX_LISTENERS);
+  this->pending_writes_.reserve(MAX_PENDING_WRITES);
+  this->cached_fault_history_.reserve(256);
   this->last_successful_response_ = millis();
   this->update_connected_(false);
   
@@ -847,6 +887,9 @@ void WaterFurnaceAurora::start_poll_cycle_() {
 }
 
 void WaterFurnaceAurora::process_poll_response_(const protocol::ParsedResponse &resp) {
+  // Successful poll — reset retry counter.
+  this->poll_retry_count_ = 0;
+  
   // Merge response directly into cache — no intermediate allocation.
   // reg_insert() handles insert-or-update in the sorted vector.
   for (const auto &rv : resp.registers) {
@@ -871,6 +914,7 @@ void WaterFurnaceAurora::start_fault_history_read_() {
   
   // Build fault history address list once (static local, persists across calls).
   // Thread-safe: ESPHome main loop is single-threaded; no concurrent access.
+  // send_request_ takes const ref, so no heap copy is needed.
   static std::vector<uint16_t> fault_history_addrs;
   if (fault_history_addrs.empty()) {
     fault_history_addrs.reserve(99);
@@ -879,9 +923,7 @@ void WaterFurnaceAurora::start_fault_history_read_() {
     }
   }
   
-  // Copy the static vector (send_request_ takes by value for move semantics)
-  this->send_request_(frame, PendingRequest::POLL_FAULT_HISTORY,
-                      std::vector<uint16_t>(fault_history_addrs));
+  this->send_request_(frame, PendingRequest::POLL_FAULT_HISTORY, fault_history_addrs);
 }
 
 void WaterFurnaceAurora::process_fault_history_response_(const protocol::ParsedResponse &resp) {
@@ -890,8 +932,9 @@ void WaterFurnaceAurora::process_fault_history_response_(const protocol::ParsedR
     return;
   }
   
-  std::string history;
-  history.reserve(256);
+  // Reuse cached string to avoid heap allocation on every slow-tier cycle (~5min).
+  // clear() preserves the existing buffer capacity (reserved to 256 in setup()).
+  this->cached_fault_history_.clear();
   int fault_count = 0;
   const int max_faults = 10;
   
@@ -902,26 +945,26 @@ void WaterFurnaceAurora::process_fault_history_response_(const protocol::ParsedR
     uint8_t fault_code = rv.value % 100;
     if (fault_code == 0) continue;
     
-    if (!history.empty()) history += "; ";
-    history += "E";
-    history += std::to_string(fault_code);
+    if (!this->cached_fault_history_.empty()) this->cached_fault_history_ += "; ";
+    this->cached_fault_history_ += "E";
+    this->cached_fault_history_ += std::to_string(fault_code);
     
     const char *desc = get_fault_description(fault_code);
     if (desc && strcmp(desc, "Unknown Fault") != 0) {
-      history += " (";
-      history += desc;
-      history += ")";
+      this->cached_fault_history_ += " (";
+      this->cached_fault_history_ += desc;
+      this->cached_fault_history_ += ")";
     }
     fault_count++;
   }
   
-  if (history.empty()) {
-    history = "No faults";
+  if (this->cached_fault_history_.empty()) {
+    this->cached_fault_history_ = "No faults";
   } else if (fault_count >= max_faults) {
-    history += "...";
+    this->cached_fault_history_ += "...";
   }
   
-  this->fault_history_sensor_->publish_state(history);
+  this->fault_history_sensor_->publish_state(this->cached_fault_history_);
   this->transition_(State::IDLE);
 }
 
@@ -960,17 +1003,21 @@ void WaterFurnaceAurora::publish_all_sensors_() {
   }
   {
     const uint16_t *val = reg_find(regs, registers::OUTPUTS_AT_LOCKOUT);
-    if (val)
+    if (val && *val != this->cached_outputs_at_lockout_raw_) {
+      this->cached_outputs_at_lockout_raw_ = *val;
       this->publish_text_if_changed(this->outputs_at_lockout_sensor_,
-                                     this->cached_outputs_at_lockout_,
-                                     get_outputs_string(*val));
+                                      this->cached_outputs_at_lockout_,
+                                      get_outputs_string(*val));
+    }
   }
   {
     const uint16_t *val = reg_find(regs, registers::INPUTS_AT_LOCKOUT);
-    if (val)
+    if (val && *val != this->cached_inputs_at_lockout_raw_) {
+      this->cached_inputs_at_lockout_raw_ = *val;
       this->publish_text_if_changed(this->inputs_at_lockout_sensor_,
-                                     this->cached_inputs_at_lockout_,
-                                     get_inputs_string(*val));
+                                      this->cached_inputs_at_lockout_,
+                                      get_inputs_string(*val));
+    }
   }
   
   // System outputs
@@ -1009,9 +1056,11 @@ void WaterFurnaceAurora::publish_all_sensors_() {
   // AXB
   {
     const uint16_t *val = reg_find(regs, registers::AXB_INPUTS);
-    if (val)
+    if (val && *val != this->cached_axb_inputs_raw_) {
+      this->cached_axb_inputs_raw_ = *val;
       this->publish_text_if_changed(this->axb_inputs_sensor_, this->cached_axb_inputs_,
-                                     get_axb_inputs_string(*val));
+                                      get_axb_inputs_string(*val));
+    }
   }
   {
     const uint16_t *val = reg_find(regs, registers::AXB_OUTPUTS);
@@ -1156,22 +1205,34 @@ void WaterFurnaceAurora::publish_all_sensors_() {
   this->publish_sensor_uint32(regs, registers::VS_COMPRESSOR_WATTS, this->vs_compressor_watts_sensor_);
   this->publish_sensor_signed_tenths(regs, registers::VS_SAT_EVAP_DISCHARGE_TEMP, this->sat_evap_discharge_temp_sensor_);
   
-  // VS Drive status strings
+  // VS Drive status strings — guard with raw register comparison to avoid
+  // bitmask_to_string() heap allocation when the underlying register is unchanged.
   {
     const uint16_t *val = reg_find(regs, registers::VS_DERATE);
-    if (val) this->publish_text_if_changed(this->vs_derate_sensor_, this->cached_vs_derate_,
-                                            get_vs_derate_string(*val));
+    if (val && *val != this->cached_vs_derate_raw_) {
+      this->cached_vs_derate_raw_ = *val;
+      this->publish_text_if_changed(this->vs_derate_sensor_, this->cached_vs_derate_,
+                                      get_vs_derate_string(*val));
+    }
   }
   {
     const uint16_t *val = reg_find(regs, registers::VS_SAFE_MODE);
-    if (val) this->publish_text_if_changed(this->vs_safe_mode_sensor_, this->cached_vs_safe_mode_,
-                                            get_vs_safe_mode_string(*val));
+    if (val && *val != this->cached_vs_safe_mode_raw_) {
+      this->cached_vs_safe_mode_raw_ = *val;
+      this->publish_text_if_changed(this->vs_safe_mode_sensor_, this->cached_vs_safe_mode_,
+                                      get_vs_safe_mode_string(*val));
+    }
   }
   {
     const uint16_t *val_a1 = reg_find(regs, registers::VS_ALARM1);
     const uint16_t *val_a2 = reg_find(regs, registers::VS_ALARM2);
-    if (val_a1 && val_a2) this->publish_text_if_changed(this->vs_alarm_sensor_, this->cached_vs_alarm_,
-                                                          get_vs_alarm_string(*val_a1, *val_a2));
+    if (val_a1 && val_a2 &&
+        (*val_a1 != this->cached_vs_alarm1_raw_ || *val_a2 != this->cached_vs_alarm2_raw_)) {
+      this->cached_vs_alarm1_raw_ = *val_a1;
+      this->cached_vs_alarm2_raw_ = *val_a2;
+      this->publish_text_if_changed(this->vs_alarm_sensor_, this->cached_vs_alarm_,
+                                      get_vs_alarm_string(*val_a1, *val_a2));
+    }
   }
   
   // FP1/FP2
@@ -1327,6 +1388,8 @@ void WaterFurnaceAurora::process_pending_writes_() {
   // Pop the first pending write and send it; remaining writes will be
   // dispatched in subsequent loop() iterations.
   auto w = this->pending_writes_.front();
+  // O(n) shift, but n <= MAX_PENDING_WRITES (16) — at most 15 x 4-byte moves,
+  // cheaper than the overhead of std::deque's chunked allocation on embedded.
   this->pending_writes_.erase(this->pending_writes_.begin());
   ESP_LOGD(TAG, "Writing register %d = %d (%d remaining)", w.first, w.second,
            this->pending_writes_.size());
@@ -1377,6 +1440,9 @@ bool WaterFurnaceAurora::set_fan_mode(FanMode mode) {
 }
 
 bool WaterFurnaceAurora::set_dhw_enabled(bool enabled) {
+  // DHW registers use the same address for read and write (confirmed in Ruby gem dhw.rb).
+  // Unlike thermostat setpoints which have split read/write addresses (e.g., 745/12619),
+  // DHW enabled (400) and DHW setpoint (401) are read-write at the same address.
   this->write_register(registers::DHW_ENABLED, enabled ? 1 : 0);
   this->dhw_enabled_ = enabled;  // Optimistic update
   return true;
@@ -1387,6 +1453,7 @@ bool WaterFurnaceAurora::set_dhw_setpoint(float temp) {
     ESP_LOGW(TAG, "DHW setpoint %.1f out of range (100-140)", temp);
     return false;
   }
+  // Same-address read/write — see set_dhw_enabled() comment.
   this->write_register(registers::DHW_SETPOINT, static_cast<uint16_t>(temp * 10));
   this->dhw_setpoint_ = temp;  // Optimistic update
   return true;

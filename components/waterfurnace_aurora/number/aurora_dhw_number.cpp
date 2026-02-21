@@ -2,6 +2,8 @@
 #include "../registers.h"
 #include "esphome/core/log.h"
 
+#include <cmath>
+
 namespace esphome {
 namespace waterfurnace_aurora {
 

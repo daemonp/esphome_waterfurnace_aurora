@@ -9,7 +9,7 @@ from esphome.const import (
 from .. import waterfurnace_aurora_ns, WaterFurnaceAurora, CONF_AURORA_ID
 
 DEPENDENCIES = ["waterfurnace_aurora"]
-CODEOWNERS = ["@damonmaria"]
+CODEOWNERS = ["@daemonp"]
 
 # Binary sensor configuration keys
 CONF_COMPRESSOR_RUNNING = "compressor_running"
