@@ -150,7 +150,6 @@ void WaterFurnaceAurora::process_response_(const std::vector<uint8_t> &frame) {
       this->process_fault_history_response_(resp);
       break;
     case PendingRequest::WRITE_SINGLE:
-    case PendingRequest::WRITE_MULTI:
       ESP_LOGD(TAG, "Write acknowledged");
       this->transition_(State::IDLE);
       break;

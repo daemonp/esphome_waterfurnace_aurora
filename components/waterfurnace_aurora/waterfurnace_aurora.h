@@ -46,7 +46,9 @@ enum class PendingRequest : uint8_t {
   POLL_REGISTERS,    // func 0x42 read for normal polling
   POLL_FAULT_HISTORY,// func 0x03 read for fault history
   WRITE_SINGLE,      // func 0x06 write
-  WRITE_MULTI,       // func 0x43 batch write
+  // Note: func 0x43 (batch write) is supported by the protocol layer but NOT used
+  // by the hub. The Aurora firmware rejects 0x43 with error 0x02. All writes use
+  // individual 0x06 calls, matching the ccutrer/waterfurnace_aurora Ruby gem behavior.
 };
 
 // ============================================================================

@@ -50,7 +50,7 @@ This builds and runs three test binaries:
 
 ### Three-Layer Design
 
-1. **Protocol layer** (`protocol.h/cpp`) — Pure Modbus RTU framing. No ESPHome dependencies. Handles CRC16, frame building for func 0x03/0x06/0x41/0x42/0x43, response parsing with address correlation, and breakpoint-aware request splitting.
+1. **Protocol layer** (`protocol.h/cpp`) — Pure Modbus RTU framing. No ESPHome dependencies. Handles CRC16, frame building for func 0x03/0x06/0x41/0x42 (and 0x43 for protocol completeness, though the Aurora firmware rejects batch writes), response parsing with address correlation, and breakpoint-aware request splitting. All writes use individual func 0x06 calls.
 
 2. **Register layer** (`registers.h/cpp`) — WaterFurnace domain knowledge. No ESPHome dependencies. Contains register addresses, enums, bitmask tables, fault codes, IZ2 zone extraction, and sentinel-aware conversions.
 
