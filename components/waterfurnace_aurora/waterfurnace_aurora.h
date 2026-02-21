@@ -9,6 +9,7 @@
 
 #include <vector>
 #include <map>
+#include <cmath>
 
 namespace esphome {
 namespace waterfurnace_aurora {
@@ -183,6 +184,15 @@ namespace registers {
   constexpr uint16_t HEATING_SETPOINT_WRITE = 12619;
   constexpr uint16_t COOLING_SETPOINT_WRITE = 12620;
   constexpr uint16_t FAN_MODE_WRITE = 12621;
+  constexpr uint16_t FAN_INTERMITTENT_ON_WRITE = 12622;
+  constexpr uint16_t FAN_INTERMITTENT_OFF_WRITE = 12623;
+  
+  // System commands
+  constexpr uint16_t CLEAR_FAULT_HISTORY = 47;
+  constexpr uint16_t CLEAR_FAULT_MAGIC = 0x5555;
+  
+  // VS Drive / active dehumidification
+  constexpr uint16_t ACTIVE_DEHUMIDIFY = 362;
   
   // IZ2 Zone registers (base addresses, add (zone-1)*offset for each zone)
   constexpr uint16_t IZ2_MODE_WRITE_BASE = 21202;      // +9 per zone
@@ -232,9 +242,9 @@ enum ZoneSize : uint8_t {
 
 // Structure to hold IZ2 zone data
 struct IZ2ZoneData {
-  float ambient_temperature{0.0f};
-  float heating_setpoint{0.0f};
-  float cooling_setpoint{0.0f};
+  float ambient_temperature{NAN};
+  float heating_setpoint{NAN};
+  float cooling_setpoint{NAN};
   HeatingMode target_mode{HEATING_MODE_OFF};
   FanMode target_fan_mode{FAN_MODE_AUTO};
   ZoneCall current_call{ZONE_CALL_STANDBY};
@@ -409,7 +419,7 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   // IZ2 Zone getters
   bool has_iz2() const { return has_iz2_; }
   uint8_t get_num_iz2_zones() const { return num_iz2_zones_; }
-  const IZ2ZoneData& get_zone_data(uint8_t zone_number) const { return iz2_zones_[zone_number - 1]; }
+  const IZ2ZoneData& get_zone_data(uint8_t zone_number) const;
 
  protected:
   // WaterFurnace custom Modbus protocol implementation
@@ -486,12 +496,12 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   // Pre-allocated vector for register addresses to reduce stack usage
   std::vector<uint16_t> addresses_to_read_;
   
-  // State
-  float ambient_temp_{0.0f};
-  float heating_setpoint_{0.0f};
-  float cooling_setpoint_{0.0f};
-  float dhw_temp_{0.0f};
-  float dhw_setpoint_{0.0f};
+  // State — NAN until first successful poll (matches Ruby gem's nil default)
+  float ambient_temp_{NAN};
+  float heating_setpoint_{NAN};
+  float cooling_setpoint_{NAN};
+  float dhw_temp_{NAN};
+  float dhw_setpoint_{NAN};
   bool dhw_enabled_{false};
   HeatingMode hvac_mode_{HEATING_MODE_OFF};
   FanMode fan_mode_{FAN_MODE_AUTO};

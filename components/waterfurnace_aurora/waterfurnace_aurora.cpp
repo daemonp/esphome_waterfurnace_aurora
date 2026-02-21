@@ -129,14 +129,17 @@ void WaterFurnaceAurora::setup() {
     ESP_LOGD(TAG, "RS485 flow control pin configured");
   }
   
-  // Brief delay to let the UART settle before we start communicating
-  delay(100);
-  
   // Auto-detect hardware (AXB, VS Drive, IZ2) unless overridden via YAML
   this->detect_hardware();
   
   // Read model and serial number
   this->read_device_info();
+  
+  // Set error status if no hardware detected and no overrides provided
+  if (!this->has_axb_ && !this->has_vs_drive_ && !this->has_iz2_ &&
+      !this->axb_override_ && !this->vs_drive_override_ && !this->iz2_override_) {
+    this->status_set_error(LOG_STR("No response from heat pump - check RS-485 wiring"));
+  }
   
   ESP_LOGI(TAG, "WaterFurnace Aurora setup complete");
   ESP_LOGI(TAG, "  AXB: %s%s", this->has_axb_ ? "detected" : "not detected",
@@ -337,6 +340,14 @@ void WaterFurnaceAurora::dump_config() {
   }
 }
 
+const IZ2ZoneData& WaterFurnaceAurora::get_zone_data(uint8_t zone_number) const {
+  if (zone_number < 1 || zone_number > MAX_IZ2_ZONES) {
+    ESP_LOGW(TAG, "Invalid zone_number %d in get_zone_data (expected 1-%d)", zone_number, MAX_IZ2_ZONES);
+    return iz2_zones_[0];  // Safe fallback
+  }
+  return iz2_zones_[zone_number - 1];
+}
+
 // REAL refresh_all_data - using class member to avoid stack overflow
 void WaterFurnaceAurora::refresh_all_data() {
   // Use class member instead of local variable to avoid stack overflow
@@ -426,7 +437,7 @@ void WaterFurnaceAurora::refresh_all_data() {
   
   // VS Drive data
   if (this->has_vs_drive_) {
-    this->addresses_to_read_.push_back(362);                                    // Active dehumidify
+    this->addresses_to_read_.push_back(registers::ACTIVE_DEHUMIDIFY);            // 362
     this->addresses_to_read_.push_back(registers::VS_DERATE);                   // 214
     this->addresses_to_read_.push_back(registers::VS_SAFE_MODE);                // 216
     this->addresses_to_read_.push_back(registers::VS_ALARM1);                   // 217
@@ -460,8 +471,13 @@ void WaterFurnaceAurora::refresh_all_data() {
   std::map<uint16_t, uint16_t> result;
   if (!this->read_specific_registers(this->addresses_to_read_, result)) {
     ESP_LOGW(TAG, "Failed to read registers from Aurora");
+    this->status_set_warning(LOG_STR("Communication error - retrying"));
     return;
   }
+  
+  // Clear any previous error/warning on successful communication
+  this->status_clear_warning();
+  this->status_clear_error();
   
   // Store in cache
   this->register_cache_ = result;
@@ -538,7 +554,7 @@ void WaterFurnaceAurora::refresh_all_data() {
   }
   
   // Active dehumidify (register 362)
-  it = result.find(362);
+  it = result.find(registers::ACTIVE_DEHUMIDIFY);
   if (it != result.end()) {
     this->active_dehumidify_ = (it->second != 0);
   }
@@ -1075,7 +1091,7 @@ bool WaterFurnaceAurora::set_fan_intermittent_on(uint8_t minutes) {
     ESP_LOGW(TAG, "Fan intermittent on time %d invalid (0, 5, 10, 15, 20, 25)", minutes);
     return false;
   }
-  return this->write_holding_register(12622, minutes);
+  return this->write_holding_register(registers::FAN_INTERMITTENT_ON_WRITE, minutes);
 }
 
 bool WaterFurnaceAurora::set_fan_intermittent_off(uint8_t minutes) {
@@ -1083,7 +1099,7 @@ bool WaterFurnaceAurora::set_fan_intermittent_off(uint8_t minutes) {
     ESP_LOGW(TAG, "Fan intermittent off time %d invalid (5, 10, 15, 20, 25, 30, 35, 40)", minutes);
     return false;
   }
-  return this->write_holding_register(12623, minutes);
+  return this->write_holding_register(registers::FAN_INTERMITTENT_OFF_WRITE, minutes);
 }
 
 bool WaterFurnaceAurora::set_humidification_target(uint8_t percent) {
@@ -1118,7 +1134,7 @@ bool WaterFurnaceAurora::set_dehumidification_target(uint8_t percent) {
 
 bool WaterFurnaceAurora::clear_fault_history() {
   ESP_LOGI(TAG, "Clearing fault history");
-  return this->write_holding_register(47, 0x5555);
+  return this->write_holding_register(registers::CLEAR_FAULT_HISTORY, registers::CLEAR_FAULT_MAGIC);
 }
 
 // REAL IZ2 Zone controls
@@ -1431,8 +1447,19 @@ bool WaterFurnaceAurora::read_holding_registers(uint16_t start_addr, uint16_t co
       continue;
     }
     
-    // Parse response
+    // Parse response — validate address and function code (matches read_specific_registers)
     if (response.size() < 5) {
+      ESP_LOGW(TAG, "Response too short for 0x03 read: %d bytes", response.size());
+      continue;
+    }
+    
+    if (response[0] != this->address_) {
+      ESP_LOGW(TAG, "Wrong address in 0x03 response: 0x%02X (expected 0x%02X)", response[0], this->address_);
+      continue;
+    }
+    
+    if (response[1] != FUNC_READ_HOLDING) {
+      ESP_LOGW(TAG, "Wrong function in 0x03 response: 0x%02X", response[1]);
       continue;
     }
     
@@ -1469,6 +1496,8 @@ bool WaterFurnaceAurora::write_holding_register(uint16_t addr, uint16_t value) {
     this->read();
   }
   
+  ESP_LOGD(TAG, "Writing register %d = %d", addr, value);
+  
   // Enable TX mode for RS485
   if (this->flow_control_pin_ != nullptr) {
     this->flow_control_pin_->digital_write(true);
@@ -1484,8 +1513,6 @@ bool WaterFurnaceAurora::write_holding_register(uint16_t addr, uint16_t value) {
   if (this->flow_control_pin_ != nullptr) {
     this->flow_control_pin_->digital_write(false);
   }
-  
-  ESP_LOGD(TAG, "Writing register %d = %d", addr, value);
   
   // Wait for response (echo of request)
   std::vector<uint8_t> response;
@@ -1521,8 +1548,12 @@ bool WaterFurnaceAurora::wait_for_response(std::vector<uint8_t> &response, uint3
       yield();
     }
     
-    while (this->available()) {
+    while (this->available() && response.size() < 512) {
       response.push_back(this->read());
+    }
+    if (response.size() >= 512) {
+      ESP_LOGW(TAG, "Response buffer overflow (>=512 bytes) - bus noise?");
+      return false;
     }
     
     // Check if we have a complete response
@@ -1786,12 +1817,14 @@ void WaterFurnaceAurora::read_fault_history() {
   }
   
   std::vector<uint16_t> result;
+  result.reserve(99);
   if (!this->read_holding_registers(registers::FAULT_HISTORY_START, 99, result)) {
     ESP_LOGW(TAG, "Failed to read fault history");
     return;
   }
   
   std::string history;
+  history.reserve(256);
   int fault_count = 0;
   const int max_faults = 10;
   

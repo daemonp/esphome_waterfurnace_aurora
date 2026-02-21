@@ -47,7 +47,6 @@ logger:
 
 # Enable Home Assistant API
 api:
-  encryption:
 
 # Enable OTA updates  
 ota:
