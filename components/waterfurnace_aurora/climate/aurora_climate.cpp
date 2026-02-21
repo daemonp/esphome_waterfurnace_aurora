@@ -61,13 +61,6 @@ void AuroraClimate::control(const climate::ClimateCall &call) {
     return;
   }
 
-  ESP_LOGD(TAG, "control() called: has_mode=%d has_temp_low=%d has_temp_high=%d has_fan=%d has_preset=%d",
-           call.get_mode().has_value(),
-           call.get_target_temperature_low().has_value(),
-           call.get_target_temperature_high().has_value(),
-           call.get_fan_mode().has_value(),
-           call.get_preset().has_value());
-
   // Handle mode change
   if (call.get_mode().has_value()) {
     HeatingMode aurora_mode;
@@ -83,24 +76,16 @@ void AuroraClimate::control(const climate::ClimateCall &call) {
   // Handle target temperature changes (dual setpoint)
   // HA sends Celsius; hardware expects Fahrenheit
   if (call.get_target_temperature_low().has_value()) {
-    float temp_c = *call.get_target_temperature_low();
-    float temp_f = celsius_to_fahrenheit(temp_c);
-    ESP_LOGD(TAG, "Heating setpoint: HA sent %.2f°C = %.1f°F, current cached=%.1f°F",
-             temp_c, temp_f, this->parent_->get_heating_setpoint());
+    float temp_f = celsius_to_fahrenheit(*call.get_target_temperature_low());
     if (this->parent_->set_heating_setpoint(temp_f)) {
-      this->target_temperature_low = temp_c;
-      ESP_LOGD(TAG, "Heating setpoint accepted: hub cached now=%.1f°F", this->parent_->get_heating_setpoint());
+      this->target_temperature_low = *call.get_target_temperature_low();
     }
   }
   
   if (call.get_target_temperature_high().has_value()) {
-    float temp_c = *call.get_target_temperature_high();
-    float temp_f = celsius_to_fahrenheit(temp_c);
-    ESP_LOGD(TAG, "Cooling setpoint: HA sent %.2f°C = %.1f°F, current cached=%.1f°F",
-             temp_c, temp_f, this->parent_->get_cooling_setpoint());
+    float temp_f = celsius_to_fahrenheit(*call.get_target_temperature_high());
     if (this->parent_->set_cooling_setpoint(temp_f)) {
-      this->target_temperature_high = temp_c;
-      ESP_LOGD(TAG, "Cooling setpoint accepted: hub cached now=%.1f°F", this->parent_->get_cooling_setpoint());
+      this->target_temperature_high = *call.get_target_temperature_high();
     }
   }
 
@@ -159,31 +144,17 @@ void AuroraClimate::update_state_() {
   }
 
   // Update setpoints (hardware reports °F, climate entity uses °C)
-  // Skip setpoint updates during write cooldown — prevents the stale device
-  // read-back from overwriting the optimistic value set by control().
+  // Skip during write cooldown — prevents stale device read-back from
+  // overwriting the optimistic value set by control().
   if (!this->parent_->setpoint_cooldown_active()) {
     float heating_sp = this->parent_->get_heating_setpoint();
-    float cooling_sp = this->parent_->get_cooling_setpoint();
-    
     if (!std::isnan(heating_sp)) {
-      float new_low = fahrenheit_to_celsius(heating_sp);
-      if (this->target_temperature_low != new_low) {
-        ESP_LOGD(TAG, "update_state_: heating SP changing %.2f°C -> %.2f°C (hub=%.1f°F)",
-                 this->target_temperature_low, new_low, heating_sp);
-      }
-      this->target_temperature_low = new_low;
+      this->target_temperature_low = fahrenheit_to_celsius(heating_sp);
     }
+    float cooling_sp = this->parent_->get_cooling_setpoint();
     if (!std::isnan(cooling_sp)) {
-      float new_high = fahrenheit_to_celsius(cooling_sp);
-      if (this->target_temperature_high != new_high) {
-        ESP_LOGD(TAG, "update_state_: cooling SP changing %.2f°C -> %.2f°C (hub=%.1f°F)",
-                 this->target_temperature_high, new_high, cooling_sp);
-      }
-      this->target_temperature_high = new_high;
+      this->target_temperature_high = fahrenheit_to_celsius(cooling_sp);
     }
-  } else {
-    ESP_LOGD(TAG, "update_state_: setpoint cooldown active, skipping setpoint update (local heat=%.2f°C cool=%.2f°C)",
-             this->target_temperature_low, this->target_temperature_high);
   }
 
   // Update mode and preset (skip during mode cooldown)

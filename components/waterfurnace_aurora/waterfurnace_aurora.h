@@ -65,7 +65,7 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   static constexpr uint32_t RESPONSE_TIMEOUT_MS = 2000;
   static constexpr uint32_t ERROR_BACKOFF_MS = 5000;
   static constexpr uint32_t DEFAULT_CONNECTED_TIMEOUT_MS = 30000;
-  static constexpr uint32_t WRITE_COOLDOWN_MS = 10000;
+  static constexpr uint32_t WRITE_COOLDOWN_MS = 7000;
 
   WaterFurnaceAurora() = default;
 

@@ -687,6 +687,14 @@ void WaterFurnaceAurora::build_poll_addresses_() {
   this->addresses_to_read_.push_back(registers::FP2_TEMP);
   this->addresses_to_read_.push_back(registers::AMBIENT_TEMP);
   
+  // Setpoints, mode, and fan config on fast tier — these are writable from HA
+  // and must be polled frequently so the write cooldown window (7s) always
+  // contains at least one fresh read-back.  Only 4 extra registers per cycle.
+  this->addresses_to_read_.push_back(registers::HEATING_SETPOINT);
+  this->addresses_to_read_.push_back(registers::COOLING_SETPOINT);
+  this->addresses_to_read_.push_back(registers::HEATING_MODE_READ);
+  this->addresses_to_read_.push_back(registers::FAN_CONFIG);
+  
   if (this->awl_axb()) {
     this->addresses_to_read_.push_back(registers::ENTERING_AIR_AWL);
     this->addresses_to_read_.push_back(registers::LEAVING_AIR);
@@ -771,15 +779,14 @@ void WaterFurnaceAurora::build_poll_addresses_() {
   }
   
   // === TIER 1: Medium registers — every 6th cycle (~30s) ===
+  // Note: HEATING_SETPOINT, COOLING_SETPOINT, HEATING_MODE_READ, and FAN_CONFIG
+  // were moved to fast tier to ensure the write cooldown window always contains
+  // at least one fresh read-back from the device.
   if (medium_poll) {
     this->addresses_to_read_.push_back(registers::LAST_LOCKOUT_FAULT);
     this->addresses_to_read_.push_back(registers::OUTPUTS_AT_LOCKOUT);
     this->addresses_to_read_.push_back(registers::INPUTS_AT_LOCKOUT);
     this->addresses_to_read_.push_back(registers::LINE_VOLTAGE_SETTING);
-    this->addresses_to_read_.push_back(registers::HEATING_SETPOINT);
-    this->addresses_to_read_.push_back(registers::COOLING_SETPOINT);
-    this->addresses_to_read_.push_back(registers::FAN_CONFIG);
-    this->addresses_to_read_.push_back(registers::HEATING_MODE_READ);
     
     if (this->has_axb_) {
       this->addresses_to_read_.push_back(registers::DHW_ENABLED);
@@ -1048,33 +1055,18 @@ void WaterFurnaceAurora::publish_all_sensors_() {
   this->publish_sensor(regs, registers::RELATIVE_HUMIDITY, this->humidity_sensor_);
   
   // Setpoints (respect write cooldown)
-  {
-    uint32_t elapsed = millis() - this->last_setpoint_write_;
-    bool cooldown_active = elapsed <= WRITE_COOLDOWN_MS;
-    if (cooldown_active) {
-      ESP_LOGD(TAG, "Setpoint cooldown active (%ums elapsed, cached heat=%.1f cool=%.1f)",
-               elapsed, this->heating_setpoint_, this->cooling_setpoint_);
-    } else {
-      const uint16_t *val_hsp = reg_find(regs, registers::HEATING_SETPOINT);
-      if (val_hsp) {
-        float new_val = to_tenths(*val_hsp);
-        if (new_val != this->heating_setpoint_) {
-          ESP_LOGD(TAG, "Heating SP from device: %.1f -> %.1f", this->heating_setpoint_, new_val);
-        }
-        this->heating_setpoint_ = new_val;
-        if (sensor_value_changed_(this->heating_setpoint_sensor_, this->heating_setpoint_))
-          this->heating_setpoint_sensor_->publish_state(this->heating_setpoint_);
-      }
-      const uint16_t *val_csp = reg_find(regs, registers::COOLING_SETPOINT);
-      if (val_csp) {
-        float new_val = to_tenths(*val_csp);
-        if (new_val != this->cooling_setpoint_) {
-          ESP_LOGD(TAG, "Cooling SP from device: %.1f -> %.1f", this->cooling_setpoint_, new_val);
-        }
-        this->cooling_setpoint_ = new_val;
-        if (sensor_value_changed_(this->cooling_setpoint_sensor_, this->cooling_setpoint_))
-          this->cooling_setpoint_sensor_->publish_state(this->cooling_setpoint_);
-      }
+  if ((millis() - this->last_setpoint_write_) > WRITE_COOLDOWN_MS) {
+    const uint16_t *val_hsp = reg_find(regs, registers::HEATING_SETPOINT);
+    if (val_hsp) {
+      this->heating_setpoint_ = to_tenths(*val_hsp);
+      if (sensor_value_changed_(this->heating_setpoint_sensor_, this->heating_setpoint_))
+        this->heating_setpoint_sensor_->publish_state(this->heating_setpoint_);
+    }
+    const uint16_t *val_csp = reg_find(regs, registers::COOLING_SETPOINT);
+    if (val_csp) {
+      this->cooling_setpoint_ = to_tenths(*val_csp);
+      if (sensor_value_changed_(this->cooling_setpoint_sensor_, this->cooling_setpoint_))
+        this->cooling_setpoint_sensor_->publish_state(this->cooling_setpoint_);
     }
   }
   

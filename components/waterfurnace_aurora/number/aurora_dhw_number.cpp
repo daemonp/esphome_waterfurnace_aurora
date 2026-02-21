@@ -77,16 +77,21 @@ void AuroraNumber::update_state_() {
       // Write-only registers — no read-back available
       return;
     case AuroraNumberType::HUMIDIFICATION_TARGET:
-      // Read from humidistat targets register (high byte)
+      // Read from humidistat targets register (high byte).
+      // IZ2 systems use a different read register than non-IZ2.
       {
-        float raw = this->parent_->get_cached_register(registers::HUMIDISTAT_TARGETS);
+        uint16_t reg = (this->parent_->has_iz2()) ? registers::IZ2_HUMIDISTAT_TARGETS
+                                                   : registers::HUMIDISTAT_TARGETS;
+        float raw = this->parent_->get_cached_register(reg);
         if (!std::isnan(raw)) value = static_cast<float>((static_cast<uint16_t>(raw) >> 8) & 0xFF);
       }
       break;
     case AuroraNumberType::DEHUMIDIFICATION_TARGET:
       // Read from humidistat targets register (low byte)
       {
-        float raw = this->parent_->get_cached_register(registers::HUMIDISTAT_TARGETS);
+        uint16_t reg = (this->parent_->has_iz2()) ? registers::IZ2_HUMIDISTAT_TARGETS
+                                                   : registers::HUMIDISTAT_TARGETS;
+        float raw = this->parent_->get_cached_register(reg);
         if (!std::isnan(raw)) value = static_cast<float>(static_cast<uint16_t>(raw) & 0xFF);
       }
       break;
@@ -127,7 +132,11 @@ void AuroraNumber::control(float value) {
   }
   
   bool success = false;
-  uint8_t int_value = static_cast<uint8_t>(value);
+  // Clamp to uint8_t range before truncation — the individual set_* methods
+  // perform their own range validation, but this prevents undefined behavior
+  // from negative or >255 values reaching the cast.
+  float clamped = (value < 0.0f) ? 0.0f : (value > 255.0f) ? 255.0f : value;
+  uint8_t int_value = static_cast<uint8_t>(clamped);
   
   switch (this->type_) {
     case AuroraNumberType::BLOWER_ONLY_SPEED:
