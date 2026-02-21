@@ -7,12 +7,10 @@ namespace waterfurnace_aurora {
 
 static const char *const TAG = "aurora.iz2_climate";
 
-void AuroraIZ2Climate::loop() {
-  // Update state periodically
-  uint32_t now = millis();
-  if (now - this->last_update_ >= 5000) {  // Every 5 seconds
-    this->update_state_();
-    this->last_update_ = now;
+void AuroraIZ2Climate::setup() {
+  // Register with parent to receive data update notifications.
+  if (this->parent_ != nullptr) {
+    this->parent_->register_listener([this]() { this->update_state_(); });
   }
 }
 
@@ -109,15 +107,15 @@ void AuroraIZ2Climate::control(const climate::ClimateCall &call) {
     
     if (preset == climate::CLIMATE_PRESET_BOOST) {
       // BOOST preset = Emergency Heat mode
-      if (this->parent_->set_zone_hvac_mode(this->zone_number_, HEATING_MODE_EHEAT)) {
+      if (this->parent_->set_zone_hvac_mode(this->zone_number_, HeatingMode::EHEAT)) {
         this->preset = preset;
         this->mode = climate::CLIMATE_MODE_HEAT;
       }
     } else if (preset == climate::CLIMATE_PRESET_NONE) {
       // Clear preset - switch back to regular heat if we were in E-Heat
       const IZ2ZoneData& zone = this->parent_->get_zone_data(this->zone_number_);
-      if (zone.target_mode == HEATING_MODE_EHEAT) {
-        this->parent_->set_zone_hvac_mode(this->zone_number_, HEATING_MODE_HEAT);
+      if (zone.target_mode == HeatingMode::EHEAT) {
+        this->parent_->set_zone_hvac_mode(this->zone_number_, HeatingMode::HEAT);
       }
       this->preset = preset;
     }
@@ -162,30 +160,25 @@ void AuroraIZ2Climate::update_state_() {
     this->preset = new_preset;
   }
 
-  // Update action based on zone current call and damper state
-  // Zone call indicates what the zone is requesting
-  if (!zone.damper_open) {
-    // Damper closed - idle
-    this->action = climate::CLIMATE_ACTION_IDLE;
-  } else {
-    // Damper open - determine action from current call
-    switch (zone.current_call) {
-      case ZONE_CALL_STANDBY:
-        this->action = climate::CLIMATE_ACTION_IDLE;
-        break;
-      case ZONE_CALL_H1:
-      case ZONE_CALL_H2:
-      case ZONE_CALL_H3:
-        this->action = climate::CLIMATE_ACTION_HEATING;
-        break;
-      case ZONE_CALL_C1:
-      case ZONE_CALL_C2:
-        this->action = climate::CLIMATE_ACTION_COOLING;
-        break;
-      default:
-        this->action = climate::CLIMATE_ACTION_IDLE;
+   // Update action based on zone current call and damper state
+    if (!zone.damper_open) {
+      this->action = climate::CLIMATE_ACTION_IDLE;
+    } else {
+      switch (zone.current_call) {
+        case ZoneCall::H1:
+        case ZoneCall::H2:
+        case ZoneCall::H3:
+          this->action = climate::CLIMATE_ACTION_HEATING;
+          break;
+        case ZoneCall::C1:
+        case ZoneCall::C2:
+          this->action = climate::CLIMATE_ACTION_COOLING;
+          break;
+        default:
+          // STANDBY, UNKNOWN1, UNKNOWN7 → idle
+          this->action = climate::CLIMATE_ACTION_IDLE;
+      }
     }
-  }
 
   // Update fan mode
   this->fan_mode = aurora_to_esphome_fan(zone.target_fan_mode);

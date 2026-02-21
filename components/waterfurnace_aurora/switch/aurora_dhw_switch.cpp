@@ -6,19 +6,20 @@ namespace waterfurnace_aurora {
 
 static const char *const TAG = "aurora.dhw_switch";
 
-void AuroraDHWSwitch::loop() {
-  // Update state periodically
-  uint32_t now = millis();
-  if (now - this->last_update_ >= 5000) {  // Every 5 seconds
-    if (this->parent_ != nullptr) {
-      bool enabled = this->parent_->is_dhw_enabled();
-      if (!this->has_published_ || enabled != this->last_state_) {
-        this->publish_state(enabled);
-        this->last_state_ = enabled;
-        this->has_published_ = true;
-      }
-    }
-    this->last_update_ = now;
+void AuroraDHWSwitch::setup() {
+  // Register with parent to receive data update notifications.
+  if (this->parent_ != nullptr) {
+    this->parent_->register_listener([this]() { this->update_state_(); });
+  }
+}
+
+void AuroraDHWSwitch::update_state_() {
+  if (this->parent_ == nullptr) return;
+  bool enabled = this->parent_->is_dhw_enabled();
+  if (!this->has_published_ || enabled != this->last_state_) {
+    this->publish_state(enabled);
+    this->last_state_ = enabled;
+    this->has_published_ = true;
   }
 }
 

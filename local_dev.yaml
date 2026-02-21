@@ -250,6 +250,20 @@ sensor:
       name: "VS Drive Temperature"
     vs_inverter_temperature:
       name: "VS Inverter Temperature"
+    vs_ambient_temperature:
+      name: "VS Compressor Ambient Temperature"
+    saturated_evaporator_discharge_temperature:
+      name: "Saturated Evaporator Discharge Temperature"
+    
+    # VS Drive additional
+    vs_fan_speed:
+      name: "VS Fan Speed"
+    vs_compressor_watts:
+      name: "VS Compressor Power"
+    
+    # Aux heat
+    aux_heat_stage:
+      name: "Aux Heat Stage"
     
     # Energy / Power
     line_voltage:
@@ -306,6 +320,14 @@ sensor:
       name: "Anti-Short-Cycle Countdown"
     fault_code:
       name: "Fault Code"
+    
+    # Derived sensors (computed on-device)
+    cop:
+      name: "Coefficient of Performance"
+    water_delta_t:
+      name: "Water Delta-T"
+    approach_temperature:
+      name: "Approach Temperature"
 
   # WiFi signal strength
   - platform: wifi_signal

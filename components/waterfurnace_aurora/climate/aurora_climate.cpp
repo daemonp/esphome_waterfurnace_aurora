@@ -7,12 +7,12 @@ namespace waterfurnace_aurora {
 
 static const char *const TAG = "aurora.climate";
 
-void AuroraClimate::loop() {
-  // Update state periodically
-  uint32_t now = millis();
-  if (now - this->last_update_ >= 5000) {  // Every 5 seconds
-    this->update_state_();
-    this->last_update_ = now;
+void AuroraClimate::setup() {
+  // Register with parent to receive data update notifications.
+  // Replaces the 5-second polling loop — update_state_() is called
+  // immediately when fresh register data arrives from the heat pump.
+  if (this->parent_ != nullptr) {
+    this->parent_->register_listener([this]() { this->update_state_(); });
   }
 }
 
@@ -98,14 +98,14 @@ void AuroraClimate::control(const climate::ClimateCall &call) {
     
     if (preset == climate::CLIMATE_PRESET_BOOST) {
       // BOOST preset = Emergency Heat mode
-      if (this->parent_->set_hvac_mode(HEATING_MODE_EHEAT)) {
+      if (this->parent_->set_hvac_mode(HeatingMode::EHEAT)) {
         this->preset = preset;
         this->mode = climate::CLIMATE_MODE_HEAT;
       }
     } else if (preset == climate::CLIMATE_PRESET_NONE) {
       // Clear preset - if we were in E-Heat, switch back to regular heat
-      if (this->parent_->get_hvac_mode() == HEATING_MODE_EHEAT) {
-        this->parent_->set_hvac_mode(HEATING_MODE_HEAT);
+      if (this->parent_->get_hvac_mode() == HeatingMode::EHEAT) {
+        this->parent_->set_hvac_mode(HeatingMode::HEAT);
       }
       this->preset = preset;
     }

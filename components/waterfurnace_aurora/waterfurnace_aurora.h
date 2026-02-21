@@ -8,7 +8,8 @@
 #include "esphome/components/text_sensor/text_sensor.h"
 
 #include <vector>
-#include <map>
+#include <algorithm>
+#include <functional>
 #include <cmath>
 
 namespace esphome {
@@ -21,19 +22,19 @@ namespace waterfurnace_aurora {
 // Function Code 0x06 - Standard write single register
 
 // Heating modes (from registers.rb HEATING_MODE)
-enum HeatingMode : uint8_t {
-  HEATING_MODE_OFF = 0,
-  HEATING_MODE_AUTO = 1,
-  HEATING_MODE_COOL = 2,
-  HEATING_MODE_HEAT = 3,
-  HEATING_MODE_EHEAT = 4
+enum class HeatingMode : uint8_t {
+  OFF = 0,
+  AUTO = 1,
+  COOL = 2,
+  HEAT = 3,
+  EHEAT = 4
 };
 
 // Fan modes (from registers.rb FAN_MODE)
-enum FanMode : uint8_t {
-  FAN_MODE_AUTO = 0,
-  FAN_MODE_CONTINUOUS = 1,
-  FAN_MODE_INTERMITTENT = 2
+enum class FanMode : uint8_t {
+  AUTO = 0,
+  CONTINUOUS = 1,
+  INTERMITTENT = 2
 };
 
 // System outputs bitmask (register 30, from registers.rb SYSTEM_OUTPUTS)
@@ -166,9 +167,12 @@ namespace registers {
   constexpr uint16_t VS_DISCHARGE_TEMP = 3325;
   constexpr uint16_t VS_AMBIENT_TEMP = 3326;
   constexpr uint16_t VS_DRIVE_TEMP = 3327;
+  constexpr uint16_t VS_COMPRESSOR_WATTS = 3422;   // + 3423 low word (uint32, Watts)
   constexpr uint16_t VS_INVERTER_TEMP = 3522;
+  constexpr uint16_t VS_FAN_SPEED = 3524;           // Fan speed percentage (0-100%)
   constexpr uint16_t VS_EEV_OPEN = 3808;
   constexpr uint16_t VS_SUCTION_TEMP = 3903;
+  constexpr uint16_t VS_SAT_EVAP_DISCHARGE_TEMP = 3905;  // Saturated evaporator discharge temp
   constexpr uint16_t VS_SUPERHEAT_TEMP = 3906;
   
   // Thermostat config (read)
@@ -223,39 +227,68 @@ namespace registers {
   constexpr uint16_t IZ2_DEMAND = 31005;
 }
 
+// Flat sorted vector as register map — eliminates per-element heap overhead of std::map.
+// With ~90 registers, this saves ~4KB of fragmented heap vs std::map's tree nodes.
+// Lookup is O(log n) via std::lower_bound on a contiguous array (cache-friendly).
+using RegisterMap = std::vector<std::pair<uint16_t, uint16_t>>;
+
+// Find a register value in a sorted RegisterMap. Returns pointer to value or nullptr.
+inline const uint16_t *reg_find(const RegisterMap &map, uint16_t addr) {
+  auto it = std::lower_bound(map.begin(), map.end(), addr,
+      [](const std::pair<uint16_t, uint16_t> &p, uint16_t a) { return p.first < a; });
+  if (it != map.end() && it->first == addr)
+    return &it->second;
+  return nullptr;
+}
+
+// Insert or update a register value in a sorted RegisterMap.
+inline void reg_insert(RegisterMap &map, uint16_t addr, uint16_t value) {
+  auto it = std::lower_bound(map.begin(), map.end(), addr,
+      [](const std::pair<uint16_t, uint16_t> &p, uint16_t a) { return p.first < a; });
+  if (it != map.end() && it->first == addr) {
+    it->second = value;
+  } else {
+    map.insert(it, {addr, value});
+  }
+}
+
 // Blower type (register 404, from registers.rb BLOWER_TYPE)
-enum BlowerType : uint8_t {
-  BLOWER_PSC = 0,
-  BLOWER_ECM_208 = 1,
-  BLOWER_ECM_265 = 2,
-  BLOWER_FIVE_SPEED = 3
+enum class BlowerType : uint8_t {
+  PSC = 0,
+  ECM_208 = 1,
+  ECM_265 = 2,
+  FIVE_SPEED = 3
 };
 
 // Maximum number of IZ2 zones
 constexpr uint8_t MAX_IZ2_ZONES = 6;
 
-// IZ2 Zone current mode/call (from registers.rb CALLS)
-enum ZoneCall : uint8_t {
-  ZONE_CALL_STANDBY = 0,
-  ZONE_CALL_H1 = 1,
-  ZONE_CALL_H2 = 2,
-  ZONE_CALL_H3 = 3,
-  ZONE_CALL_C1 = 4,
-  ZONE_CALL_C2 = 5
+// IZ2 Zone current mode/call (from registers.rb CALLS hash)
+// Values must match the Ruby gem's CALLS mapping exactly:
+//   0=standby, 1=unknown1, 2=h1, 3=h2, 4=h3, 5=c1, 6=c2, 7=unknown7
+enum class ZoneCall : uint8_t {
+  STANDBY = 0,
+  UNKNOWN1 = 1,
+  H1 = 2,
+  H2 = 3,
+  H3 = 4,
+  C1 = 5,
+  C2 = 6,
+  UNKNOWN7 = 7
 };
 
 // Zone priority
-enum ZonePriority : uint8_t {
-  ZONE_PRIORITY_COMFORT = 0,
-  ZONE_PRIORITY_ECONOMY = 1
+enum class ZonePriority : uint8_t {
+  COMFORT = 0,
+  ECONOMY = 1
 };
 
 // Zone size
-enum ZoneSize : uint8_t {
-  ZONE_SIZE_QUARTER = 0,
-  ZONE_SIZE_HALF = 1,
-  ZONE_SIZE_THREE_QUARTER = 2,
-  ZONE_SIZE_FULL = 3
+enum class ZoneSize : uint8_t {
+  QUARTER = 0,
+  HALF = 1,
+  THREE_QUARTER = 2,
+  FULL = 3
 };
 
 // Structure to hold IZ2 zone data
@@ -263,14 +296,14 @@ struct IZ2ZoneData {
   float ambient_temperature{NAN};
   float heating_setpoint{NAN};
   float cooling_setpoint{NAN};
-  HeatingMode target_mode{HEATING_MODE_OFF};
-  FanMode target_fan_mode{FAN_MODE_AUTO};
-  ZoneCall current_call{ZONE_CALL_STANDBY};
+  HeatingMode target_mode{HeatingMode::OFF};
+  FanMode target_fan_mode{FanMode::AUTO};
+  ZoneCall current_call{ZoneCall::STANDBY};
   bool damper_open{false};
   uint8_t fan_on_time{0};
   uint8_t fan_off_time{0};
-  ZonePriority priority{ZONE_PRIORITY_COMFORT};
-  ZoneSize size{ZONE_SIZE_FULL};
+  ZonePriority priority{ZonePriority::COMFORT};
+  ZoneSize size{ZoneSize::FULL};
   uint8_t normalized_size{0};
 };
 
@@ -333,6 +366,19 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   void set_vs_drive_temp_sensor(sensor::Sensor *sensor) { vs_drive_temp_sensor_ = sensor; }
   void set_vs_inverter_temp_sensor(sensor::Sensor *sensor) { vs_inverter_temp_sensor_ = sensor; }
   
+  // Additional VS Drive sensors (Phase 5 parity)
+  void set_vs_fan_speed_sensor(sensor::Sensor *sensor) { vs_fan_speed_sensor_ = sensor; }
+  void set_vs_ambient_temp_sensor(sensor::Sensor *sensor) { vs_ambient_temp_sensor_ = sensor; }
+  void set_vs_compressor_watts_sensor(sensor::Sensor *sensor) { vs_compressor_watts_sensor_ = sensor; }
+  void set_sat_evap_discharge_temp_sensor(sensor::Sensor *sensor) { sat_evap_discharge_temp_sensor_ = sensor; }
+  void set_aux_heat_stage_sensor(sensor::Sensor *sensor) { aux_heat_stage_sensor_ = sensor; }
+
+  // Derived sensors — computed on-device from raw register values.
+  // These go beyond the Ruby gem which only publishes raw values.
+  void set_cop_sensor(sensor::Sensor *sensor) { cop_sensor_ = sensor; }
+  void set_water_delta_t_sensor(sensor::Sensor *sensor) { water_delta_t_sensor_ = sensor; }
+  void set_approach_temp_sensor(sensor::Sensor *sensor) { approach_temp_sensor_ = sensor; }
+
   // Blower/ECM sensors
   void set_blower_speed_sensor(sensor::Sensor *sensor) { blower_speed_sensor_ = sensor; }
   void set_blower_only_speed_sensor(sensor::Sensor *sensor) { blower_only_speed_sensor_ = sensor; }
@@ -436,6 +482,14 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   uint16_t get_axb_outputs() const { return axb_outputs_; }
   bool is_locked_out() const { return locked_out_; }
   
+  // Observer pattern: sub-entities register a callback to be notified when data updates.
+  // Callbacks are invoked at the end of refresh_all_data(), replacing the 5-second
+  // polling loop in each sub-entity. Matches the Ruby gem's "parent polls, pushes
+  // to children" pattern (ABCClient#refresh → zone.refresh, component.refresh).
+  void register_listener(std::function<void()> callback) {
+    this->listeners_.push_back(std::move(callback));
+  }
+
   // IZ2 Zone getters
   bool has_iz2() const { return has_iz2_; }
   uint8_t get_num_iz2_zones() const { return num_iz2_zones_; }
@@ -449,13 +503,13 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   // Request: [addr][0x41][start1_hi][start1_lo][count1_hi][count1_lo]...[CRC]
   // Response: [addr][0x41][byte_count][data...][CRC]
   bool read_register_ranges(const std::vector<std::pair<uint16_t, uint16_t>> &ranges,
-                            std::map<uint16_t, uint16_t> &result);
+                            RegisterMap &result);
   
   // Function code 0x42 ('B') - Read specific registers (non-contiguous)
   // Request: [addr][0x42][addr1_hi][addr1_lo][addr2_hi][addr2_lo]...[CRC]
   // Response: [addr][0x42][byte_count][data...][CRC]
   bool read_specific_registers(const std::vector<uint16_t> &addresses,
-                               std::map<uint16_t, uint16_t> &result);
+                               RegisterMap &result);
   
   // Standard Modbus function code 0x03 - Read holding registers
   bool read_holding_registers(uint16_t start_addr, uint16_t count, std::vector<uint16_t> &result);
@@ -508,7 +562,7 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   bool awl_thermostat() const { return thermostat_version_ >= 3.0f; }
   bool awl_iz2() const { return has_iz2_ && iz2_version_ >= 2.0f; }
   bool awl_communicating() const { return awl_thermostat() || awl_iz2(); }
-  bool is_ecm_blower() const { return blower_type_ == BLOWER_ECM_208 || blower_type_ == BLOWER_ECM_265; }
+  bool is_ecm_blower() const { return blower_type_ == BlowerType::ECM_208 || blower_type_ == BlowerType::ECM_265; }
   bool refrigeration_monitoring() const { return energy_monitor_level_ >= 1; }
   bool energy_monitoring() const { return energy_monitor_level_ >= 2; }
 
@@ -518,52 +572,71 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   // Returns true if the register was found (regardless of whether a sensor was configured).
   
   // Publish raw uint16_t value
-  bool publish_sensor(const std::map<uint16_t, uint16_t> &result, uint16_t reg,
+  bool publish_sensor(const RegisterMap &result, uint16_t reg,
                       sensor::Sensor *sensor) {
-    auto it = result.find(reg);
-    if (it == result.end()) return false;
-    if (sensor != nullptr) sensor->publish_state(it->second);
+    const uint16_t *val = reg_find(result, reg);
+    if (!val) return false;
+    if (sensor != nullptr) sensor->publish_state(*val);
     return true;
   }
   
   // Publish with to_tenths() conversion (unsigned value / 10.0)
-  bool publish_sensor_tenths(const std::map<uint16_t, uint16_t> &result, uint16_t reg,
+  bool publish_sensor_tenths(const RegisterMap &result, uint16_t reg,
                              sensor::Sensor *sensor) {
-    auto it = result.find(reg);
-    if (it == result.end()) return false;
-    if (sensor != nullptr) sensor->publish_state(to_tenths(it->second));
+    const uint16_t *val = reg_find(result, reg);
+    if (!val) return false;
+    if (sensor != nullptr) sensor->publish_state(to_tenths(*val));
     return true;
   }
   
   // Publish with to_signed_tenths() conversion (signed value / 10.0)
-  bool publish_sensor_signed_tenths(const std::map<uint16_t, uint16_t> &result, uint16_t reg,
+  bool publish_sensor_signed_tenths(const RegisterMap &result, uint16_t reg,
                                      sensor::Sensor *sensor) {
-    auto it = result.find(reg);
-    if (it == result.end()) return false;
-    if (sensor != nullptr) sensor->publish_state(to_signed_tenths(it->second));
+    const uint16_t *val = reg_find(result, reg);
+    if (!val) return false;
+    if (sensor != nullptr) sensor->publish_state(to_signed_tenths(*val));
     return true;
   }
   
   // Publish 32-bit unsigned value from two consecutive registers (high, low)
-  bool publish_sensor_uint32(const std::map<uint16_t, uint16_t> &result, uint16_t reg_high,
+  bool publish_sensor_uint32(const RegisterMap &result, uint16_t reg_high,
                               sensor::Sensor *sensor) {
-    auto it_h = result.find(reg_high);
-    auto it_l = result.find(reg_high + 1);
-    if (it_h == result.end() || it_l == result.end()) return false;
-    if (sensor != nullptr) sensor->publish_state(to_uint32(it_h->second, it_l->second));
+    const uint16_t *val_h = reg_find(result, reg_high);
+    const uint16_t *val_l = reg_find(result, reg_high + 1);
+    if (!val_h || !val_l) return false;
+    if (sensor != nullptr) sensor->publish_state(to_uint32(*val_h, *val_l));
     return true;
   }
   
   // Publish 32-bit signed value from two consecutive registers (high, low)
-  bool publish_sensor_int32(const std::map<uint16_t, uint16_t> &result, uint16_t reg_high,
+  bool publish_sensor_int32(const RegisterMap &result, uint16_t reg_high,
                              sensor::Sensor *sensor) {
-    auto it_h = result.find(reg_high);
-    auto it_l = result.find(reg_high + 1);
-    if (it_h == result.end() || it_l == result.end()) return false;
-    if (sensor != nullptr) sensor->publish_state(to_int32(it_h->second, it_l->second));
+    const uint16_t *val_h = reg_find(result, reg_high);
+    const uint16_t *val_l = reg_find(result, reg_high + 1);
+    if (!val_h || !val_l) return false;
+    if (sensor != nullptr) sensor->publish_state(to_int32(*val_h, *val_l));
     return true;
   }
 
+  // Publish text sensor only when value has changed (avoid redundant API traffic)
+  void publish_text_if_changed(text_sensor::TextSensor *sensor, std::string &cached,
+                                const std::string &value) {
+    if (sensor != nullptr && value != cached) {
+      sensor->publish_state(value);
+      cached = value;
+    }
+  }
+  void publish_text_if_changed(text_sensor::TextSensor *sensor, std::string &cached,
+                                const char *value) {
+    if (sensor != nullptr && cached != value) {
+      sensor->publish_state(value);
+      cached = value;
+    }
+  }
+  
+  // Compute and publish derived sensors (COP, delta-T, approach)
+  void publish_derived_sensors(const RegisterMap &regs);
+  
   // Read fault history (registers 601-699)
   void read_fault_history();
 
@@ -579,8 +652,8 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   bool iz2_override_{false};
   bool iz2_zones_override_{false};
   
-  // Cached register values
-  std::map<uint16_t, uint16_t> register_cache_;
+  // Cached register values — flat sorted vector, no per-element heap overhead
+  RegisterMap register_cache_;
   
   // Pre-allocated vector for register addresses to reduce stack usage
   std::vector<uint16_t> addresses_to_read_;
@@ -592,8 +665,8 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   float dhw_temp_{NAN};
   float dhw_setpoint_{NAN};
   bool dhw_enabled_{false};
-  HeatingMode hvac_mode_{HEATING_MODE_OFF};
-  FanMode fan_mode_{FAN_MODE_AUTO};
+  HeatingMode hvac_mode_{HeatingMode::OFF};
+  FanMode fan_mode_{FanMode::AUTO};
   uint16_t system_outputs_{0};
   uint16_t axb_outputs_{0};
   uint16_t current_fault_{0};
@@ -610,9 +683,8 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   float iz2_version_{0.0f};
 
   // Hardware type detection (from Ruby gem abc_client.rb)
-  BlowerType blower_type_{BLOWER_PSC};
+  BlowerType blower_type_{BlowerType::PSC};
   uint8_t energy_monitor_level_{0};  // 0=None, 1=Compressor Monitor, 2=Energy Monitor
-  uint8_t fault_history_counter_{0};  // Counter to read fault history periodically
   
   // IZ2 Zone data
   IZ2ZoneData iz2_zones_[MAX_IZ2_ZONES];
@@ -654,6 +726,18 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   sensor::Sensor *suction_temp_sensor_{nullptr};
   sensor::Sensor *vs_drive_temp_sensor_{nullptr};
   sensor::Sensor *vs_inverter_temp_sensor_{nullptr};
+  
+  // Additional VS Drive sensors (Phase 5 parity)
+  sensor::Sensor *vs_fan_speed_sensor_{nullptr};
+  sensor::Sensor *vs_ambient_temp_sensor_{nullptr};
+  sensor::Sensor *vs_compressor_watts_sensor_{nullptr};
+  sensor::Sensor *sat_evap_discharge_temp_sensor_{nullptr};
+  sensor::Sensor *aux_heat_stage_sensor_{nullptr};
+  
+  // Derived sensors (computed on-device, not in Ruby gem)
+  sensor::Sensor *cop_sensor_{nullptr};
+  sensor::Sensor *water_delta_t_sensor_{nullptr};
+  sensor::Sensor *approach_temp_sensor_{nullptr};
   
   // Blower/ECM sensors
   sensor::Sensor *blower_speed_sensor_{nullptr};
@@ -706,6 +790,24 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   text_sensor::TextSensor *axb_inputs_sensor_{nullptr};
   text_sensor::TextSensor *humidifier_mode_sensor_{nullptr};
   text_sensor::TextSensor *dehumidifier_mode_sensor_{nullptr};
+  
+  // Observer callbacks — sub-entities register to be notified on data update
+  std::vector<std::function<void()>> listeners_;
+  
+  // Cached text sensor values for publish-on-change (avoid republishing identical strings)
+  std::string cached_mode_string_;
+  std::string cached_fault_description_;
+  std::string cached_hvac_mode_;
+  std::string cached_fan_mode_;
+  std::string cached_vs_derate_;
+  std::string cached_vs_safe_mode_;
+  std::string cached_vs_alarm_;
+  std::string cached_axb_inputs_;
+  std::string cached_humidifier_mode_;
+  std::string cached_dehumidifier_mode_;
+  
+  // Adaptive polling tier counter — medium/slow registers update less frequently
+  uint8_t poll_tier_counter_{0};
   
   // Cached device info
   std::string model_number_;

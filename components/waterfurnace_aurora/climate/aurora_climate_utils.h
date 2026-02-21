@@ -19,19 +19,19 @@ inline bool aurora_to_esphome_mode(HeatingMode aurora_mode,
                                     climate::ClimatePreset &preset) {
   preset = climate::CLIMATE_PRESET_NONE;
   switch (aurora_mode) {
-    case HEATING_MODE_OFF:
+    case HeatingMode::OFF:
       mode = climate::CLIMATE_MODE_OFF;
       return true;
-    case HEATING_MODE_AUTO:
+    case HeatingMode::AUTO:
       mode = climate::CLIMATE_MODE_HEAT_COOL;
       return true;
-    case HEATING_MODE_COOL:
+    case HeatingMode::COOL:
       mode = climate::CLIMATE_MODE_COOL;
       return true;
-    case HEATING_MODE_HEAT:
+    case HeatingMode::HEAT:
       mode = climate::CLIMATE_MODE_HEAT;
       return true;
-    case HEATING_MODE_EHEAT:
+    case HeatingMode::EHEAT:
       mode = climate::CLIMATE_MODE_HEAT;
       preset = climate::CLIMATE_PRESET_BOOST;  // E-Heat shown as BOOST preset
       return true;
@@ -45,16 +45,16 @@ inline bool aurora_to_esphome_mode(HeatingMode aurora_mode,
 inline bool esphome_to_aurora_mode(climate::ClimateMode mode, HeatingMode &aurora_mode) {
   switch (mode) {
     case climate::CLIMATE_MODE_OFF:
-      aurora_mode = HEATING_MODE_OFF;
+      aurora_mode = HeatingMode::OFF;
       return true;
     case climate::CLIMATE_MODE_HEAT_COOL:
-      aurora_mode = HEATING_MODE_AUTO;
+      aurora_mode = HeatingMode::AUTO;
       return true;
     case climate::CLIMATE_MODE_COOL:
-      aurora_mode = HEATING_MODE_COOL;
+      aurora_mode = HeatingMode::COOL;
       return true;
     case climate::CLIMATE_MODE_HEAT:
-      aurora_mode = HEATING_MODE_HEAT;
+      aurora_mode = HeatingMode::HEAT;
       return true;
     default:
       return false;
@@ -64,10 +64,10 @@ inline bool esphome_to_aurora_mode(climate::ClimateMode mode, HeatingMode &auror
 // Convert Aurora FanMode to ESPHome ClimateFanMode
 inline climate::ClimateFanMode aurora_to_esphome_fan(FanMode aurora_fan) {
   switch (aurora_fan) {
-    case FAN_MODE_AUTO:
+    case FanMode::AUTO:
       return climate::CLIMATE_FAN_AUTO;
-    case FAN_MODE_CONTINUOUS:
-    case FAN_MODE_INTERMITTENT:
+    case FanMode::CONTINUOUS:
+    case FanMode::INTERMITTENT:
       return climate::CLIMATE_FAN_ON;
     default:
       return climate::CLIMATE_FAN_AUTO;
@@ -78,11 +78,11 @@ inline climate::ClimateFanMode aurora_to_esphome_fan(FanMode aurora_fan) {
 inline FanMode esphome_to_aurora_fan(climate::ClimateFanMode fan_mode) {
   switch (fan_mode) {
     case climate::CLIMATE_FAN_AUTO:
-      return FAN_MODE_AUTO;
+      return FanMode::AUTO;
     case climate::CLIMATE_FAN_ON:
-      return FAN_MODE_CONTINUOUS;
+      return FanMode::CONTINUOUS;
     default:
-      return FAN_MODE_AUTO;
+      return FanMode::AUTO;
   }
 }
 
