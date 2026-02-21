@@ -24,6 +24,7 @@ CONFIG_SCHEMA = (
 
 async def to_code(config):
     var = await water_heater.new_water_heater(config)
+    await cg.register_component(var, config)
 
     parent = await cg.get_variable(config[CONF_AURORA_ID])
     cg.add(var.set_parent(parent))
