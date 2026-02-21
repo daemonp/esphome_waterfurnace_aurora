@@ -21,21 +21,21 @@ The AID Tool port on the front of your heat pump uses an RJ45 jack. The 8 pins c
 When building your cable, you need to know how pin numbers map to wire positions. Hold the RJ45 plug with the **clip on top** and the gold contacts facing you. **Pin 1 is on the left**:
 
 ```
-                   RJ45 Plug
+                 RJ45 Plug
   (clip on top, contacts facing you)
 
-             +-----------+
-             |   clip    |
-  +----------+-----------+----------+
-  |                                 |
+                 +-----------+
+                 |   clip    |
+  +--------------+-----------+---------------+
+  |                                          |
   |  +----+----+----+----+----+----+----+----+
   |  | 1  | 2  | 3  | 4  | 5  | 6  | 7  | 8  |
   |  |W/Or| Or |W/Gn| Bl |W/Bl| Gn |W/Br| Br |
   |  +----+----+----+----+----+----+----+----+
-  |                                 |
-  +---------------------------------+
-                   |
-                to cable
+  |                                          |
+  +------------------------------------------+
+                       |
+                    to cable
 
   T568B wire order (left to right):
   1: White/Orange  2: Orange      3: White/Green  4: Blue
@@ -49,15 +49,15 @@ Looking at the RJ45 **jack** on the heat pump (the port you plug into), the pin 
 ```
   Heat Pump AID Tool Port (looking at the jack)
 
-  +---------------------------------+
-  |                                 |
+  +------------------------------------------+
+  |                                          |
   |  +----+----+----+----+----+----+----+----+
   |  | 8  | 7  | 6  | 5  | 4  | 3  | 2  | 1  |
   |  +----+----+----+----+----+----+----+----+
-  |                                 |
-  |          +=============+        |
-  |          |  AID Tool   |        |
-  +----------+=============+--------+
+  |                                          |
+  |             +=============+              |
+  |             |  AID Tool   |              |
+  +-------------+=============+--------------+
 ```
 
 When you plug in, pin 1 on the plug mates with pin 1 on the jack — the mirroring is handled by the connector geometry. Just make sure you have the right wires on the right pins of the plug.
