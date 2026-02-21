@@ -14,10 +14,11 @@
 #include "registers.h"
 #include "protocol.h"
 
-#include <vector>
-#include <functional>
 #include <cmath>
+#include <cstring>
+#include <functional>
 #include <utility>
+#include <vector>
 
 namespace esphome {
 namespace waterfurnace_aurora {
@@ -31,6 +32,7 @@ enum class State : uint8_t {
   SETUP_DETECT_COMPONENTS,  // Detect AXB, VS Drive, IZ2, blower, pump, energy
   SETUP_DETECT_VS,          // VS Drive probe (optional second detect step)
   IDLE,                     // Ready for next operation
+  TX_PENDING,               // Frame written to UART TX FIFO, waiting for transmit to complete
   WAITING_RESPONSE,         // Request sent, collecting bytes
   ERROR_BACKOFF,            // Communication error, waiting before retry
 };
@@ -48,15 +50,6 @@ enum class PendingRequest : uint8_t {
 };
 
 // ============================================================================
-// Timing Constants
-// ============================================================================
-
-static constexpr uint32_t RESPONSE_TIMEOUT_MS = 2000;
-static constexpr uint32_t ERROR_BACKOFF_MS = 5000;
-static constexpr uint32_t CONNECTED_TIMEOUT_MS = 30000;
-static constexpr uint32_t WRITE_COOLDOWN_MS = 10000;
-
-// ============================================================================
 // Hub Class
 // ============================================================================
 
@@ -66,12 +59,19 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
 #endif
 {
  public:
+  // --- Timing constants ---
+  static constexpr uint32_t RESPONSE_TIMEOUT_MS = 2000;
+  static constexpr uint32_t ERROR_BACKOFF_MS = 5000;
+  static constexpr uint32_t DEFAULT_CONNECTED_TIMEOUT_MS = 30000;
+  static constexpr uint32_t WRITE_COOLDOWN_MS = 10000;
+
   WaterFurnaceAurora() = default;
 
   void setup() override;
   void loop() override;
   void update() override;
   void dump_config() override;
+  void on_shutdown() override;
   
   float get_setup_priority() const override { return setup_priority::DATA; }
 
@@ -277,8 +277,10 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
  protected:
   // --- State machine operations ---
   void transition_(State new_state);
+  /// Send a Modbus request frame and transition to WAITING_RESPONSE.
+  /// expected_addrs is moved into the member to avoid heap allocation.
   void send_request_(const std::vector<uint8_t> &frame, PendingRequest type,
-                     const std::vector<uint16_t> &expected_addrs = {});
+                     std::vector<uint16_t> expected_addrs = {});
   bool read_frame_(std::vector<uint8_t> &frame);
   void process_response_(const std::vector<uint8_t> &frame);
   void handle_timeout_();
@@ -305,8 +307,9 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   // --- Connectivity ---
   void update_connected_(bool connected);
   
-  // Current mode string (computed from system outputs and state)
-  std::string get_current_mode_string();
+  // Current mode string (computed from system outputs and state).
+  // Returns a string literal (const char*) to avoid heap allocation in loop().
+  const char *get_current_mode_string();
   
   // Zone number validation helper
   bool validate_zone_number(uint8_t zone_number) const;
@@ -316,6 +319,12 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   void on_write_register_service_(int32_t address, int32_t value);
 #endif
   
+  /// Estimate TX time in milliseconds for a given frame size at 19200 baud.
+  /// 19200 baud with 8E1 = 11 bits/byte → ~0.573ms/byte. We add 1ms margin.
+  uint32_t tx_time_ms_(size_t frame_bytes) const {
+    return static_cast<uint32_t>((frame_bytes * 11 * 1000) / 19200) + 2;
+  }
+
   // AWL version helpers
   bool awl_axb() const { return has_axb_ && axb_version_ >= 2.0f; }
   bool awl_thermostat() const { return thermostat_version_ >= 3.0f; }
@@ -372,18 +381,22 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
     return true;
   }
 
+  /// Publish a text sensor value only if it has changed from the cached value.
+  /// Uses std::string comparison to avoid redundant publishes.
   void publish_text_if_changed(text_sensor::TextSensor *sensor, std::string &cached,
-                                const std::string &value) {
+                                 const std::string &value) {
     if (sensor != nullptr && value != cached) {
       sensor->publish_state(value);
       cached = value;
     }
   }
+  /// Overload for const char* — uses strcmp to avoid implicit std::string construction.
   void publish_text_if_changed(text_sensor::TextSensor *sensor, std::string &cached,
-                                const char *value) {
-    if (sensor != nullptr && cached != value) {
-      sensor->publish_state(value);
+                                 const char *value) {
+    if (sensor == nullptr || value == nullptr) return;
+    if (cached.empty() || strcmp(cached.c_str(), value) != 0) {
       cached = value;
+      sensor->publish_state(cached);
     }
   }
   
@@ -411,6 +424,9 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   // RX buffer — persists across loop() calls for incremental frame reading
   std::vector<uint8_t> rx_buffer_;
   
+  // Response frame buffer — reused across loop() calls to avoid heap allocation
+  std::vector<uint8_t> response_frame_;
+  
   // Expected addresses for the current in-flight request
   std::vector<uint16_t> expected_addresses_;
   
@@ -418,13 +434,16 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   uint32_t last_request_time_{0};
   uint32_t error_backoff_until_{0};
   uint32_t last_successful_response_{0};
+  uint32_t tx_complete_time_{0};  // millis() when TX FIFO is expected to drain
   
   // Connectivity
   binary_sensor::BinarySensor *connected_sensor_{nullptr};
-  uint32_t connected_timeout_{CONNECTED_TIMEOUT_MS};
+  uint32_t connected_timeout_{DEFAULT_CONNECTED_TIMEOUT_MS};
   bool connected_{false};
   
-  // Write queue — writes are queued and dispatched non-blockingly from IDLE
+  // Write queue — writes are queued and dispatched non-blockingly from IDLE.
+  // Capped at MAX_PENDING_WRITES to prevent unbounded heap growth.
+  static constexpr size_t MAX_PENDING_WRITES = 16;
   std::vector<std::pair<uint16_t, uint16_t>> pending_writes_;
   
   // Write cooldowns — prevent stale read-backs from reverting optimistic UI updates
@@ -578,7 +597,8 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   text_sensor::TextSensor *outputs_at_lockout_sensor_{nullptr};
   text_sensor::TextSensor *inputs_at_lockout_sensor_{nullptr};
   
-  // Observer callbacks
+  // Observer callbacks — bounded at init time by the number of sub-entities
+  // configured in YAML; no runtime growth path exists.
   std::vector<std::function<void()>> listeners_;
   
   // Cached text sensor values for publish-on-change
@@ -596,7 +616,8 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   std::string cached_outputs_at_lockout_;
   std::string cached_inputs_at_lockout_;
   
-  // Adaptive polling tier counter
+  // Adaptive polling tier counter — intentionally uint8_t.
+  // Wraps at 255; the modulo checks (% 6, % 60) produce correct results at all values.
   uint8_t poll_tier_counter_{0};
   
   // Cached device info

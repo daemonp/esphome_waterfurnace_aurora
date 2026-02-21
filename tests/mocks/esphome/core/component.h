@@ -9,8 +9,15 @@
 namespace esphome {
 
 namespace setup_priority {
-  static constexpr float DATA = 400.0f;
-  static constexpr float PROCESSOR = 300.0f;
+  static constexpr float BUS = 1000.0f;
+  static constexpr float IO = 900.0f;
+  static constexpr float HARDWARE = 800.0f;
+  static constexpr float DATA = 600.0f;
+  static constexpr float PROCESSOR = 400.0f;
+  static constexpr float BLUETOOTH = 350.0f;
+  static constexpr float WIFI = 250.0f;
+  static constexpr float AFTER_CONNECTION = 100.0f;
+  static constexpr float LATE = -100.0f;
 }
 
 class Component {
@@ -19,6 +26,7 @@ class Component {
   virtual void setup() {}
   virtual void loop() {}
   virtual void dump_config() {}
+  virtual void on_shutdown() {}
   virtual float get_setup_priority() const { return 0.0f; }
   
   void status_set_error(const char * /*msg*/ = nullptr) { status_error_ = true; }
@@ -37,6 +45,10 @@ class Component {
 class PollingComponent : public Component {
  public:
   virtual void update() {}
+  uint32_t get_update_interval() const { return update_interval_; }
+  void set_update_interval(uint32_t interval) { update_interval_ = interval; }
+ protected:
+  uint32_t update_interval_{5000};
 };
 
 // Stub millis() — test code can override via set_millis()

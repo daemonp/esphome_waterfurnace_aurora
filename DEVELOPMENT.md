@@ -17,16 +17,16 @@ components/waterfurnace_aurora/
 ├── number/                        # 11 number controls (DHW, blower, pump, etc.)
 ├── switch/                        # DHW enable switch
 ├── button/                        # Clear fault history button
-├── sensor/__init__.py             # ~55 sensor entities
+├── sensor/__init__.py             # 60 sensor entities
 ├── binary_sensor/__init__.py      # 12 binary sensor entities
-└── text_sensor/__init__.py        # 14 text sensor entities
+└── text_sensor/__init__.py        # 17 text sensor entities
 
 tests/
 ├── Makefile                       # Build + run all tests
 ├── catch_amalgamated.hpp / .cpp   # Catch2 v3.7.1 (vendored)
-├── test_protocol.cpp              # Protocol tests (118 assertions)
-├── test_registers.cpp             # Register tests (109 assertions)
-├── test_hub.cpp                   # Hub state machine tests (89 assertions)
+├── test_protocol.cpp              # Protocol tests (13 test cases)
+├── test_registers.cpp             # Register tests (27 test cases)
+├── test_hub.cpp                   # Hub state machine tests (7 test cases)
 ├── mock_impl.cpp                  # Mock millis() storage
 ├── mocks/esphome/                 # Mock ESPHome headers for hub tests
 └── waterfurnace-test.yaml         # CI compilation test config

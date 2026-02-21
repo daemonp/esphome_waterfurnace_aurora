@@ -4,6 +4,49 @@ namespace esphome {
 namespace waterfurnace_aurora {
 
 // ============================================================================
+// Bit Label Tables (one copy in this TU, declared extern in registers.h)
+// ============================================================================
+
+const BitLabel OUTPUT_BITS[] = {
+  {OUTPUT_CC, "CC"},
+  {OUTPUT_CC2, "CC2"},
+  {OUTPUT_RV, "RV"},
+  {OUTPUT_BLOWER, "Blower"},
+  {OUTPUT_EH1, "EH1"},
+  {OUTPUT_EH2, "EH2"},
+  {OUTPUT_ACCESSORY, "Accessory"},
+  {OUTPUT_LOCKOUT, "Lockout"},
+  {OUTPUT_ALARM, "Alarm"},
+};
+
+const BitLabel INPUT_BITS[] = {
+  {STATUS_Y1, "Y1"},
+  {STATUS_Y2, "Y2"},
+  {STATUS_W, "W"},
+  {STATUS_O, "O"},
+  {STATUS_G, "G"},
+  {STATUS_DH_RH, "DH/RH"},
+  {STATUS_EMERGENCY_SHUTDOWN, "Emergency Shutdown"},
+  {STATUS_LPS, "LPS"},
+  {STATUS_HPS, "HPS"},
+  {STATUS_LOAD_SHED, "Load Shed"},
+};
+
+const BitLabel VS_DERATE_BITS[] = {
+  {VS_DERATE_DRIVE_OVER_TEMP, "Drive Over Temp"},
+  {VS_DERATE_LOW_SUCTION_PRESSURE, "Low Suction Pressure"},
+  {VS_DERATE_LOW_DISCHARGE_PRESSURE, "Low Discharge Pressure"},
+  {VS_DERATE_HIGH_DISCHARGE_PRESSURE, "High Discharge Pressure"},
+  {VS_DERATE_OUTPUT_POWER_LIMIT, "Output Power Limit"},
+};
+
+const BitLabel VS_SAFE_MODE_BITS[] = {
+  {VS_SAFE_EEV_INDOOR_FAILED, "EEV Indoor Failed"},
+  {VS_SAFE_EEV_OUTDOOR_FAILED, "EEV Outdoor Failed"},
+  {VS_SAFE_INVALID_AMBIENT_TEMP, "Invalid Ambient Temp"},
+};
+
+// ============================================================================
 // Bitmask-to-String
 // ============================================================================
 
@@ -25,13 +68,13 @@ std::string bitmask_to_string(uint16_t value, const BitLabel *bits, size_t count
 // registers_to_string
 // ============================================================================
 
-std::string registers_to_string(const std::vector<uint16_t> &regs) {
+std::string registers_to_string(const uint16_t *regs, size_t count) {
   std::string result;
-  result.reserve(regs.size() * 2);
+  result.reserve(count * 2);
 
-  for (uint16_t reg : regs) {
-    char high_char = static_cast<char>(reg >> 8);
-    char low_char = static_cast<char>(reg & 0xFF);
+  for (size_t i = 0; i < count; i++) {
+    char high_char = static_cast<char>(regs[i] >> 8);
+    char low_char = static_cast<char>(regs[i] & 0xFF);
 
     if (high_char == '\0') break;
     result += high_char;
@@ -48,11 +91,15 @@ std::string registers_to_string(const std::vector<uint16_t> &regs) {
   return result;
 }
 
+std::string registers_to_string(const std::vector<uint16_t> &regs) {
+  return registers_to_string(regs.data(), regs.size());
+}
+
 // ============================================================================
 // Fault Description Lookup
 // ============================================================================
 
-const char *get_fault_description(uint8_t code) {
+const char *get_fault_description(uint16_t code) {
   switch (code) {
     case 0: return "No Fault";
     case 1: return "Input Error";

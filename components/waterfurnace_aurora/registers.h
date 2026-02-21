@@ -124,6 +124,11 @@ enum class ZoneSize : uint8_t {
 // Maximum number of IZ2 zones
 static constexpr uint8_t MAX_IZ2_ZONES = 6;
 
+// Component detection sentinel values — registers return these when the component is not installed.
+// The ABC board uses 3 for "removed/not installed" and 0xFFFF for "not present/unsupported".
+static constexpr uint16_t COMPONENT_NOT_INSTALLED = 3;
+static constexpr uint16_t COMPONENT_UNSUPPORTED = 0xFFFF;
+
 // ============================================================================
 // Register Addresses (from registers.rb)
 // ============================================================================
@@ -141,8 +146,9 @@ namespace registers {
   static constexpr uint16_t INPUTS_AT_LOCKOUT = 28;      // Bitmask: system status/inputs when lockout occurred
   static constexpr uint16_t SYSTEM_OUTPUTS = 30;
   static constexpr uint16_t SYSTEM_STATUS = 31;
-  static constexpr uint16_t MODEL_NUMBER = 92;       // 12 registers (92-103)
-  static constexpr uint16_t SERIAL_NUMBER = 105;     // 5 registers (105-109)
+  static constexpr uint16_t ABC_PROGRAM = 88;         // 4 registers (88-91) — program version string
+  static constexpr uint16_t MODEL_NUMBER = 92;        // 12 registers (92-103)
+  static constexpr uint16_t SERIAL_NUMBER = 105;      // 5 registers (105-109)
   static constexpr uint16_t LINE_VOLTAGE_SETTING = 112;
 
   // VS Drive details
@@ -333,50 +339,18 @@ struct BitLabel {
 /// Returns "None" if no flags are set.
 std::string bitmask_to_string(uint16_t value, const BitLabel *bits, size_t count);
 
-// Predefined bit label tables
+// Predefined bit label tables — defined in registers.cpp to avoid per-TU copies.
+extern const BitLabel OUTPUT_BITS[];
+inline constexpr size_t OUTPUT_BITS_COUNT = 9;
 
-static constexpr BitLabel OUTPUT_BITS[] = {
-  {OUTPUT_CC, "CC"},
-  {OUTPUT_CC2, "CC2"},
-  {OUTPUT_RV, "RV"},
-  {OUTPUT_BLOWER, "Blower"},
-  {OUTPUT_EH1, "EH1"},
-  {OUTPUT_EH2, "EH2"},
-  {OUTPUT_ACCESSORY, "Accessory"},
-  {OUTPUT_LOCKOUT, "Lockout"},
-  {OUTPUT_ALARM, "Alarm"},
-};
-static constexpr size_t OUTPUT_BITS_COUNT = sizeof(OUTPUT_BITS) / sizeof(OUTPUT_BITS[0]);
+extern const BitLabel INPUT_BITS[];
+inline constexpr size_t INPUT_BITS_COUNT = 10;
 
-static constexpr BitLabel INPUT_BITS[] = {
-  {STATUS_Y1, "Y1"},
-  {STATUS_Y2, "Y2"},
-  {STATUS_W, "W"},
-  {STATUS_O, "O"},
-  {STATUS_G, "G"},
-  {STATUS_DH_RH, "DH/RH"},
-  {STATUS_EMERGENCY_SHUTDOWN, "Emergency Shutdown"},
-  {STATUS_LPS, "LPS"},
-  {STATUS_HPS, "HPS"},
-  {STATUS_LOAD_SHED, "Load Shed"},
-};
-static constexpr size_t INPUT_BITS_COUNT = sizeof(INPUT_BITS) / sizeof(INPUT_BITS[0]);
+extern const BitLabel VS_DERATE_BITS[];
+inline constexpr size_t VS_DERATE_BITS_COUNT = 5;
 
-static constexpr BitLabel VS_DERATE_BITS[] = {
-  {VS_DERATE_DRIVE_OVER_TEMP, "Drive Over Temp"},
-  {VS_DERATE_LOW_SUCTION_PRESSURE, "Low Suction Pressure"},
-  {VS_DERATE_LOW_DISCHARGE_PRESSURE, "Low Discharge Pressure"},
-  {VS_DERATE_HIGH_DISCHARGE_PRESSURE, "High Discharge Pressure"},
-  {VS_DERATE_OUTPUT_POWER_LIMIT, "Output Power Limit"},
-};
-static constexpr size_t VS_DERATE_BITS_COUNT = sizeof(VS_DERATE_BITS) / sizeof(VS_DERATE_BITS[0]);
-
-static constexpr BitLabel VS_SAFE_MODE_BITS[] = {
-  {VS_SAFE_EEV_INDOOR_FAILED, "EEV Indoor Failed"},
-  {VS_SAFE_EEV_OUTDOOR_FAILED, "EEV Outdoor Failed"},
-  {VS_SAFE_INVALID_AMBIENT_TEMP, "Invalid Ambient Temp"},
-};
-static constexpr size_t VS_SAFE_MODE_BITS_COUNT = sizeof(VS_SAFE_MODE_BITS) / sizeof(VS_SAFE_MODE_BITS[0]);
+extern const BitLabel VS_SAFE_MODE_BITS[];
+inline constexpr size_t VS_SAFE_MODE_BITS_COUNT = 3;
 
 // ============================================================================
 // Data Conversion Functions
@@ -416,12 +390,16 @@ inline float convert_register(uint16_t raw, RegisterType type) {
 }
 
 /// Convert raw signed tenths (int16 / 10.0). Standalone convenience function.
+/// Sentinel values (-999.9 = 0xD8F1, 999.9 = 0x270F) map to NAN.
 inline float to_signed_tenths(uint16_t value) {
+  if (value == 0xD8F1 || value == 0x270F) return NAN;
   return static_cast<int16_t>(value) / 10.0f;
 }
 
 /// Convert raw unsigned tenths (uint16 / 10.0). Standalone convenience function.
+/// Sentinel value (999.9 = 0x270F) maps to NAN.
 inline float to_tenths(uint16_t value) {
+  if (value == 0x270F) return NAN;
   return value / 10.0f;
 }
 
@@ -435,16 +413,20 @@ inline int32_t to_int32(uint16_t high, uint16_t low) {
   return static_cast<int32_t>(to_uint32(high, low));
 }
 
-/// Convert register pair (2 x uint16) to ASCII string. Each register holds
+/// Convert register values to ASCII string. Each register holds
 /// two characters (high byte, low byte). Strips trailing spaces/nulls.
 std::string registers_to_string(const std::vector<uint16_t> &regs);
+
+/// Overload accepting a raw pointer + count (avoids heap allocation from vector construction).
+std::string registers_to_string(const uint16_t *regs, size_t count);
 
 // ============================================================================
 // String Lookup Functions
 // ============================================================================
 
 /// Get fault description from fault code (67 known codes from registers.rb FAULTS).
-const char *get_fault_description(uint8_t code);
+/// Accepts uint16_t to avoid implicit narrowing from register values.
+const char *get_fault_description(uint16_t code);
 
 /// Get HVAC mode string.
 const char *get_hvac_mode_string(HeatingMode mode);

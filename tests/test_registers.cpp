@@ -69,11 +69,23 @@ TEST_CASE("to_signed_tenths", "[registers][conversion]") {
 
   uint16_t neg = static_cast<uint16_t>(static_cast<int16_t>(-200));
   REQUIRE(to_signed_tenths(neg) == Catch::Approx(-20.0f));
+
+  SECTION("sentinel -999.9 -> NAN") {
+    REQUIRE(std::isnan(to_signed_tenths(0xD8F1)));
+  }
+
+  SECTION("sentinel 999.9 -> NAN") {
+    REQUIRE(std::isnan(to_signed_tenths(0x270F)));
+  }
 }
 
 TEST_CASE("to_tenths", "[registers][conversion]") {
   REQUIRE(to_tenths(700) == Catch::Approx(70.0f));
   REQUIRE(to_tenths(0) == 0.0f);
+
+  SECTION("sentinel 999.9 -> NAN") {
+    REQUIRE(std::isnan(to_tenths(0x270F)));
+  }
 }
 
 TEST_CASE("32-bit assembly", "[registers][conversion]") {
@@ -116,6 +128,16 @@ TEST_CASE("registers_to_string", "[registers]") {
 
   SECTION("empty input") {
     REQUIRE(registers_to_string({}).empty());
+  }
+
+  SECTION("pointer overload matches vector overload") {
+    uint16_t regs[] = {0x4142, 0x4344};
+    REQUIRE(registers_to_string(regs, 2) == "ABCD");
+  }
+
+  SECTION("pointer overload strips trailing spaces") {
+    uint16_t regs[] = {0x4142, 0x2020};
+    REQUIRE(registers_to_string(regs, 2) == "AB");
   }
 }
 

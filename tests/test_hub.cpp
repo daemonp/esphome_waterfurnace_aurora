@@ -4,6 +4,15 @@
 using namespace esphome;
 using namespace esphome::waterfurnace_aurora;
 
+// Helper: advance millis and loop to transition past TX_PENDING → WAITING_RESPONSE.
+// After send_request_, the hub is in TX_PENDING; we need to advance time past the
+// calculated TX completion time.  A large frame (e.g. 30+ bytes) at 19200 baud 8E1
+// takes ~20ms, so 25ms margin handles the worst case with room to spare.
+static void complete_tx(WaterFurnaceAurora &hub, uint32_t current_ms) {
+  set_millis(current_ms + 25);  // 25ms covers the largest frames at 19200 baud
+  hub.loop();                   // transitions TX_PENDING → WAITING_RESPONSE
+}
+
 // Helper: build a valid func 0x42 response frame from address-value pairs
 static std::vector<uint8_t> make_response_42(const std::vector<std::pair<uint16_t, uint16_t>> &regs) {
   std::vector<uint8_t> frame;
@@ -249,14 +258,16 @@ TEST_CASE("Connected sensor", "[hub][connectivity]") {
 
     // Simulate the hub marking connected after a successful response
     // by driving a minimal setup flow.
-    hub.loop();  // sends setup ID request
+    hub.loop();  // sends setup ID request → TX_PENDING
     auto tx = hub.mock_get_transmitted();
     REQUIRE(tx.size() > 0);
+
+    complete_tx(hub, 0);  // advance past TX → WAITING_RESPONSE
 
     // Feed a valid ID response (18 regs of spaces)
     std::vector<uint16_t> id_vals(18, 0x2020);
     hub.mock_receive(make_response_03(id_vals));
-    set_millis(10);
+    set_millis(30);
     hub.loop();  // process response → update_connected_(true)
 
     REQUIRE(connected.has_state_);
@@ -284,30 +295,32 @@ TEST_CASE("Full setup flow with mock UART", "[hub][state][integration]") {
 
   hub.setup();
 
-  // First loop() should send the setup ID request
+  // First loop() sends the setup ID request → TX_PENDING
   hub.loop();
   auto tx = hub.mock_get_transmitted();
   REQUIRE(tx.size() > 0);
   REQUIRE(tx[1] == 0x03);  // func 0x03 holding read for model/serial
 
-  // Feed a valid response for model/serial (18 regs of zeros = empty strings)
+  complete_tx(hub, 0);  // TX_PENDING → WAITING_RESPONSE
+
+  // Feed a valid response for model/serial (18 regs of spaces)
   std::vector<uint16_t> id_values(18, 0x2020);  // spaces
   auto id_resp = make_response_03(id_values);
   hub.mock_receive(id_resp);
 
-  set_millis(10);
+  set_millis(50);
   hub.loop();  // Process response, transition to SETUP_DETECT_COMPONENTS
 
-  // Next loop() should send detect request
+  // Next loop() sends detect request → TX_PENDING
   hub.loop();
   tx = hub.mock_get_transmitted();
   REQUIRE(tx.size() > 0);
   REQUIRE(tx[1] == 0x42);  // func 0x42 for detect
 
+  complete_tx(hub, 50);  // TX_PENDING → WAITING_RESPONSE
+
   // Feed a response: AXB=3 (absent), IZ2=3 (absent), thermostat=300 (v3.00),
   // blower=0 (PSC), energy=0, pump=0, ABC program = 0
-  // We need to figure out the expected addresses from the request
-  // For simplicity, feed a response with all zero values
   size_t num_detect_regs = (tx.size() - 4) / 2;  // (frame - slave - func - crc) / 2 bytes per addr
   std::vector<std::pair<uint16_t, uint16_t>> detect_vals;
   for (size_t i = 0; i < num_detect_regs; i++) {
@@ -323,21 +336,26 @@ TEST_CASE("Full setup flow with mock UART", "[hub][state][integration]") {
   auto detect_resp = make_response_42(detect_vals);
   hub.mock_receive(detect_resp);
 
-  set_millis(20);
+  set_millis(100);
   hub.loop();  // Process detect response
 
   // Since no VS drive detected from program, it should probe VS registers
-  // next (SETUP_DETECT_VS)
-  hub.loop();
+  // next (SETUP_DETECT_VS).  After processing the detect response the hub
+  // transitions to SETUP_DETECT_VS, but that state is entered on the NEXT
+  // loop() call.  We also need complete_tx() to advance past TX_PENDING.
+  hub.loop();  // Process detect response → transitions to SETUP_DETECT_VS
+  hub.loop();  // Enter SETUP_DETECT_VS → send VS probe → TX_PENDING
   tx = hub.mock_get_transmitted();
   REQUIRE(tx.size() > 0);
   REQUIRE(tx[1] == 0x42);  // VS probe is also func 0x42
+
+  complete_tx(hub, 100);  // TX_PENDING → WAITING_RESPONSE
 
   // Feed VS probe response with all zeros (no VS drive)
   auto vs_resp = make_response_42({{3001, 0}, {3322, 0}, {3325, 0}});
   hub.mock_receive(vs_resp);
 
-  set_millis(30);
+  set_millis(150);
   hub.loop();  // Process VS probe → finish setup
 
   // Setup should now be complete

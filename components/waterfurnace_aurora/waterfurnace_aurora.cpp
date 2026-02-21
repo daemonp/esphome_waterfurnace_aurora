@@ -14,14 +14,17 @@ static const char *const TAG = "waterfurnace_aurora";
 // Helper: current mode string
 // ============================================================================
 
-std::string WaterFurnaceAurora::get_current_mode_string() {
+/// Derive the human-readable operating mode from system outputs and cache state.
+/// Uses register_cache_ to check anti-short-cycle countdown (determines "Waiting"
+/// vs "Standby"). Returns a string literal — no heap allocation.
+const char *WaterFurnaceAurora::get_current_mode_string() {
   if (this->system_outputs_ & OUTPUT_LOCKOUT) return "Lockout";
   if (this->active_dehumidify_) return "Dehumidify";
   
-  bool compressor = this->system_outputs_ & (OUTPUT_CC | OUTPUT_CC2);
-  bool cooling = this->system_outputs_ & OUTPUT_RV;
-  bool aux_heat = this->system_outputs_ & (OUTPUT_EH1 | OUTPUT_EH2);
-  bool blower = this->system_outputs_ & OUTPUT_BLOWER;
+  bool compressor = (this->system_outputs_ & (OUTPUT_CC | OUTPUT_CC2)) != 0;
+  bool cooling = (this->system_outputs_ & OUTPUT_RV) != 0;
+  bool aux_heat = (this->system_outputs_ & (OUTPUT_EH1 | OUTPUT_EH2)) != 0;
+  bool blower = (this->system_outputs_ & OUTPUT_BLOWER) != 0;
   
   if (compressor) {
     if (cooling) return "Cooling";
@@ -49,9 +52,9 @@ void WaterFurnaceAurora::transition_(State new_state) {
 }
 
 void WaterFurnaceAurora::send_request_(const std::vector<uint8_t> &frame, PendingRequest type,
-                                        const std::vector<uint16_t> &expected_addrs) {
-  // Clear any stale data on the bus
-  while (this->available()) {
+                                        std::vector<uint16_t> expected_addrs) {
+  // Clear any stale data on the bus (bounded to prevent spin if junk is streaming)
+  for (int i = 0; i < 512 && this->available(); i++) {
     this->read();
   }
   this->rx_buffer_.clear();
@@ -61,21 +64,19 @@ void WaterFurnaceAurora::send_request_(const std::vector<uint8_t> &frame, Pendin
     this->flow_control_pin_->digital_write(true);
   }
   
-  // Send frame
+  // Send frame — write_array buffers into the UART TX FIFO.
+  // We intentionally do NOT call flush() here. The hardware UART transmits
+  // asynchronously from its FIFO. flush() would block for up to ~106ms on a
+  // 200-byte frame at 19200 baud, exceeding the 50ms WARN_IF_BLOCKING threshold.
+  // Instead, the RS-485 flow control pin is switched back to RX by a deferred
+  // timeout, allowing the main loop to remain non-blocking.
   this->write_array(frame.data(), frame.size());
-  this->flush();
-  
-  delayMicroseconds(500);
-  
-  // Switch to RX mode
-  if (this->flow_control_pin_ != nullptr) {
-    this->flow_control_pin_->digital_write(false);
-  }
   
   this->pending_request_ = type;
-  this->expected_addresses_ = expected_addrs;
+  this->expected_addresses_ = std::move(expected_addrs);
   this->last_request_time_ = millis();
-  this->transition_(State::WAITING_RESPONSE);
+  this->tx_complete_time_ = millis() + this->tx_time_ms_(frame.size());
+  this->transition_(State::TX_PENDING);
 }
 
 bool WaterFurnaceAurora::read_frame_(std::vector<uint8_t> &frame) {
@@ -98,6 +99,7 @@ bool WaterFurnaceAurora::read_frame_(std::vector<uint8_t> &frame) {
   // Validate CRC
   if (!protocol::validate_frame_crc(frame.data(), frame.size())) {
     ESP_LOGW(TAG, "CRC mismatch in response (%d bytes)", frame.size());
+    this->status_set_warning(LOG_STR("CRC mismatch in Modbus response"));
     return false;
   }
   
@@ -171,6 +173,9 @@ void WaterFurnaceAurora::handle_timeout_() {
     this->setup_retry_count_++;
     if (this->setup_retry_count_ >= MAX_SETUP_RETRIES) {
       ESP_LOGW(TAG, "Setup failed after %d retries — will continue with defaults", MAX_SETUP_RETRIES);
+      // Deliberately NOT calling mark_failed() here: the heat pump may come online
+      // later, so we degrade gracefully with default config rather than permanently
+      // disabling the component.  status_set_error() surfaces the issue in the UI.
       this->status_set_error(LOG_STR("No response from heat pump - check RS-485 wiring"));
       this->finish_setup_();
       return;
@@ -215,7 +220,8 @@ void WaterFurnaceAurora::setup() {
     this->flow_control_pin_->digital_write(false);  // Start in RX mode
   }
   
-  this->rx_buffer_.reserve(256);
+  this->rx_buffer_.reserve(protocol::MAX_FRAME_SIZE);
+  this->response_frame_.reserve(protocol::MAX_FRAME_SIZE);
   this->last_successful_response_ = millis();
   this->update_connected_(false);
   
@@ -229,6 +235,16 @@ void WaterFurnaceAurora::setup() {
 #endif
 
   ESP_LOGD(TAG, "Setup initialized — state machine will handle hardware detection");
+}
+
+// ============================================================================
+// on_shutdown() — Ensure RS-485 transceiver is in RX mode on shutdown
+// ============================================================================
+
+void WaterFurnaceAurora::on_shutdown() {
+  if (this->flow_control_pin_ != nullptr) {
+    this->flow_control_pin_->digital_write(false);
+  }
 }
 
 // ============================================================================
@@ -265,17 +281,31 @@ void WaterFurnaceAurora::loop() {
       // Otherwise just wait for update() to kick off a poll cycle
       return;
       
+    case State::TX_PENDING:
+      // Wait for UART TX FIFO to drain before switching RS-485 to RX mode.
+      // This avoids calling flush() which would block for up to ~110ms on
+      // large frames at 19200 baud, exceeding the 50ms loop() warning threshold.
+      if (now >= this->tx_complete_time_) {
+        // RS-485 turnaround: switch to RX mode now that TX is complete.
+        // 500µs margin is conservative for MAX485 transceivers.
+        if (this->flow_control_pin_ != nullptr) {
+          this->flow_control_pin_->digital_write(false);
+        }
+        this->transition_(State::WAITING_RESPONSE);
+      }
+      return;
+      
     case State::WAITING_RESPONSE: {
-      // Check timeout
-      if ((now - this->last_request_time_) > RESPONSE_TIMEOUT_MS) {
+      // Check timeout (measured from when TX completed, not when we started transmitting)
+      if ((now - this->tx_complete_time_) > RESPONSE_TIMEOUT_MS) {
         this->handle_timeout_();
         return;
       }
       
-      // Try to read a complete frame
-      std::vector<uint8_t> frame;
-      if (this->read_frame_(frame)) {
-        this->process_response_(frame);
+      // Try to read a complete frame (reuses pre-allocated member buffer)
+      this->response_frame_.clear();
+      if (this->read_frame_(this->response_frame_)) {
+        this->process_response_(this->response_frame_);
       }
       return;
     }
@@ -323,7 +353,9 @@ void WaterFurnaceAurora::dump_config() {
   ESP_LOGCONFIG(TAG, "  Address: 0x%02X", this->address_);
   ESP_LOGCONFIG(TAG, "  Flow Control Pin: %s", this->flow_control_pin_ != nullptr ? "configured" : "not configured");
   ESP_LOGCONFIG(TAG, "  Read Retries: %d", this->read_retries_);
-  ESP_LOGCONFIG(TAG, "  Async State Machine: enabled");
+  ESP_LOGCONFIG(TAG, "  Update Interval: %dms", this->get_update_interval());
+  ESP_LOGCONFIG(TAG, "  Connected Timeout: %dms", this->connected_timeout_);
+  ESP_LOGCONFIG(TAG, "  Connected Sensor: %s", this->connected_sensor_ != nullptr ? "configured" : "not configured");
   if (!this->model_number_.empty()) {
     ESP_LOGCONFIG(TAG, "  Model: %s", this->model_number_.c_str());
   }
@@ -393,15 +425,16 @@ void WaterFurnaceAurora::start_setup_read_id_() {
 
 void WaterFurnaceAurora::process_setup_id_response_(const protocol::ParsedResponse &resp) {
   // Extract model number (registers 92-103, 12 regs = 24 chars)
-  std::vector<uint16_t> model_regs;
-  model_regs.reserve(12);
+  // Stack-allocated array — no heap allocation needed.
+  uint16_t model_buf[12];
+  size_t model_count = 0;
   for (const auto &rv : resp.registers) {
     if (rv.address >= registers::MODEL_NUMBER && rv.address < registers::MODEL_NUMBER + 12) {
-      model_regs.push_back(rv.value);
+      if (model_count < 12) model_buf[model_count++] = rv.value;
     }
   }
-  if (!model_regs.empty()) {
-    this->model_number_ = registers_to_string(model_regs);
+  if (model_count > 0) {
+    this->model_number_ = registers_to_string(model_buf, model_count);
     if (this->model_number_sensor_ != nullptr && !this->model_number_.empty()) {
       this->model_number_sensor_->publish_state(this->model_number_);
     }
@@ -409,15 +442,15 @@ void WaterFurnaceAurora::process_setup_id_response_(const protocol::ParsedRespon
   }
   
   // Extract serial number (registers 105-109, 5 regs = 10 chars)
-  std::vector<uint16_t> serial_regs;
-  serial_regs.reserve(5);
+  uint16_t serial_buf[5];
+  size_t serial_count = 0;
   for (const auto &rv : resp.registers) {
     if (rv.address >= registers::SERIAL_NUMBER && rv.address < registers::SERIAL_NUMBER + 5) {
-      serial_regs.push_back(rv.value);
+      if (serial_count < 5) serial_buf[serial_count++] = rv.value;
     }
   }
-  if (!serial_regs.empty()) {
-    this->serial_number_ = registers_to_string(serial_regs);
+  if (serial_count > 0) {
+    this->serial_number_ = registers_to_string(serial_buf, serial_count);
     if (this->serial_number_sensor_ != nullptr && !this->serial_number_.empty()) {
       this->serial_number_sensor_->publish_state(this->serial_number_);
     }
@@ -447,10 +480,10 @@ void WaterFurnaceAurora::start_setup_detect_() {
   addrs.push_back(registers::PUMP_TYPE);
   
   if (!this->vs_drive_override_) {
-    addrs.push_back(88);  // ABC program (4 regs)
-    addrs.push_back(89);
-    addrs.push_back(90);
-    addrs.push_back(91);
+    addrs.push_back(registers::ABC_PROGRAM);      // ABC program version (4 regs)
+    addrs.push_back(registers::ABC_PROGRAM + 1);
+    addrs.push_back(registers::ABC_PROGRAM + 2);
+    addrs.push_back(registers::ABC_PROGRAM + 3);
   }
   
   auto frame = protocol::build_read_registers_request(this->address_, addrs);
@@ -479,8 +512,9 @@ void WaterFurnaceAurora::process_setup_detect_response_(const protocol::ParsedRe
   if (!this->axb_override_) {
     const uint16_t *val = reg_find(result, registers::AXB_INSTALLED);
     if (val) {
-      this->has_axb_ = (*val != 3 && *val != 0xFFFF);
-      ESP_LOGD(TAG, "AXB reg 806 = %d -> %s", *val, this->has_axb_ ? "present" : "absent");
+      this->has_axb_ = (*val != COMPONENT_NOT_INSTALLED && *val != COMPONENT_UNSUPPORTED);
+      ESP_LOGD(TAG, "AXB reg %d = %d -> %s", registers::AXB_INSTALLED, *val,
+               this->has_axb_ ? "present" : "absent");
     }
   }
   
@@ -488,8 +522,9 @@ void WaterFurnaceAurora::process_setup_detect_response_(const protocol::ParsedRe
   if (!this->iz2_override_) {
     const uint16_t *val = reg_find(result, registers::IZ2_INSTALLED);
     if (val) {
-      this->has_iz2_ = (*val != 3 && *val != 0xFFFF);
-      ESP_LOGD(TAG, "IZ2 reg 812 = %d -> %s", *val, this->has_iz2_ ? "present" : "absent");
+      this->has_iz2_ = (*val != COMPONENT_NOT_INSTALLED && *val != COMPONENT_UNSUPPORTED);
+      ESP_LOGD(TAG, "IZ2 reg %d = %d -> %s", registers::IZ2_INSTALLED, *val,
+               this->has_iz2_ ? "present" : "absent");
     }
   }
   
@@ -542,7 +577,7 @@ void WaterFurnaceAurora::process_setup_detect_response_(const protocol::ParsedRe
   bool vs_detected_from_program = false;
   if (!this->vs_drive_override_) {
     std::vector<uint16_t> prog_regs;
-    for (uint16_t r = 88; r <= 91; r++) {
+    for (uint16_t r = registers::ABC_PROGRAM; r <= registers::ABC_PROGRAM + 3; r++) {
       const uint16_t *val = reg_find(result, r);
       if (val) prog_regs.push_back(*val);
     }
@@ -798,26 +833,15 @@ void WaterFurnaceAurora::start_poll_cycle_() {
     return;
   }
   
-  // Store addresses for fault history follow-up
-  // (we'll check slow_poll after the main poll response)
-  this->send_request_(frame, PendingRequest::POLL_REGISTERS, this->addresses_to_read_);
+  // Move addresses into expected_addresses_ to avoid copy (poll addresses rebuilt each cycle)
+  this->send_request_(frame, PendingRequest::POLL_REGISTERS, std::move(this->addresses_to_read_));
 }
 
 void WaterFurnaceAurora::process_poll_response_(const protocol::ParsedResponse &resp) {
-  // Convert to RegisterMap
-  RegisterMap result;
-  result.reserve(resp.registers.size());
+  // Merge response directly into cache — no intermediate allocation.
+  // reg_insert() handles insert-or-update in the sorted vector.
   for (const auto &rv : resp.registers) {
-    result.emplace_back(rv.address, rv.value);
-  }
-  std::sort(result.begin(), result.end(),
-      [](const std::pair<uint16_t, uint16_t> &a, const std::pair<uint16_t, uint16_t> &b) {
-        return a.first < b.first;
-      });
-  
-  // Merge into cache (update existing, insert new)
-  for (const auto &entry : result) {
-    reg_insert(this->register_cache_, entry.first, entry.second);
+    reg_insert(this->register_cache_, rv.address, rv.value);
   }
   
   // Publish all sensors from the cache
@@ -836,13 +860,19 @@ void WaterFurnaceAurora::process_poll_response_(const protocol::ParsedResponse &
 void WaterFurnaceAurora::start_fault_history_read_() {
   auto frame = protocol::build_read_holding_request(this->address_, registers::FAULT_HISTORY_START, 99);
   
-  std::vector<uint16_t> expected;
-  expected.reserve(99);
-  for (uint16_t i = 0; i < 99; i++) {
-    expected.push_back(registers::FAULT_HISTORY_START + i);
+  // Build fault history address list once (static local, persists across calls).
+  // Thread-safe: ESPHome main loop is single-threaded; no concurrent access.
+  static std::vector<uint16_t> fault_history_addrs;
+  if (fault_history_addrs.empty()) {
+    fault_history_addrs.reserve(99);
+    for (uint16_t i = 0; i < 99; i++) {
+      fault_history_addrs.push_back(registers::FAULT_HISTORY_START + i);
+    }
   }
   
-  this->send_request_(frame, PendingRequest::POLL_FAULT_HISTORY, expected);
+  // Copy the static vector (send_request_ takes by value for move semantics)
+  this->send_request_(frame, PendingRequest::POLL_FAULT_HISTORY,
+                      std::vector<uint16_t>(fault_history_addrs));
 }
 
 void WaterFurnaceAurora::process_fault_history_response_(const protocol::ParsedResponse &resp) {
@@ -1269,6 +1299,10 @@ void WaterFurnaceAurora::write_register(uint16_t addr, uint16_t value) {
       pw.second = value;
       return;
     }
+  }
+  if (this->pending_writes_.size() >= MAX_PENDING_WRITES) {
+    ESP_LOGW(TAG, "Write queue full (%d), dropping write to reg %d", MAX_PENDING_WRITES, addr);
+    return;
   }
   this->pending_writes_.emplace_back(addr, value);
 }

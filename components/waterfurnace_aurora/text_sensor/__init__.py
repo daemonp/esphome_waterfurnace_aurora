@@ -5,7 +5,7 @@ from esphome.components import text_sensor
 from .. import waterfurnace_aurora_ns, WaterFurnaceAurora, CONF_AURORA_ID
 
 DEPENDENCIES = ["waterfurnace_aurora"]
-CODEOWNERS = ["@damonmaria"]
+CODEOWNERS = ["@daemonp"]
 
 # Text sensor configuration keys
 CONF_CURRENT_MODE = "current_mode"

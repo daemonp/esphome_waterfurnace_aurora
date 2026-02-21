@@ -18,7 +18,7 @@ from esphome.const import (
 from .. import waterfurnace_aurora_ns, WaterFurnaceAurora, CONF_AURORA_ID
 
 DEPENDENCIES = ["waterfurnace_aurora"]
-CODEOWNERS = ["@damonmaria"]
+CODEOWNERS = ["@daemonp"]
 
 # Sensor configuration keys
 CONF_ENTERING_AIR_TEMPERATURE = "entering_air_temperature"

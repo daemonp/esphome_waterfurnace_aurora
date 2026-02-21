@@ -37,7 +37,6 @@ static constexpr uint8_t FUNC_READ_REGISTERS = 0x42;  // 'B' — read specific a
 static constexpr uint8_t FUNC_READ_HOLDING = 0x03;    // Standard read holding registers
 static constexpr uint8_t FUNC_WRITE_SINGLE = 0x06;    // Standard write single register
 static constexpr uint8_t FUNC_WRITE_MULTI = 0x43;     // Func 67 — batch write multiple
-static constexpr uint8_t SLAVE_ADDRESS = 1;
 static constexpr uint8_t ERROR_MASK = 0x80;
 static constexpr size_t MAX_REGISTERS_PER_REQUEST = 100;
 static constexpr size_t MIN_FRAME_SIZE = 4;   // addr + func + 2 CRC

@@ -1,7 +1,6 @@
-# Minimal test configuration for CI compilation checks.
-# This exercises all platforms (sensor, binary_sensor, text_sensor, climate,
-# number, switch, button) with the local component source but does NOT
-# require secrets, WiFi, or real hardware.
+# CI compilation test — exercises ALL entity code paths.
+# Ensures every Python to_code() block and C++ setter compiles correctly.
+# Does NOT require secrets, WiFi, or real hardware.
 
 esphome:
   name: waterfurnace-test
@@ -97,7 +96,7 @@ number:
     dehumidification_target:
       name: "Test Dehumidification Target"
 
-# --- Sensors (representative subset — covers all conversion types) ---
+# --- ALL Sensors (complete coverage) ---
 sensor:
   - platform: waterfurnace_aurora
     aurora_id: aurora
@@ -105,14 +104,36 @@ sensor:
       name: "Test Entering Air Temp"
     leaving_air_temperature:
       name: "Test Leaving Air Temp"
+    ambient_temperature:
+      name: "Test Ambient Temp"
+    outdoor_temperature:
+      name: "Test Outdoor Temp"
     entering_water_temperature:
       name: "Test Entering Water Temp"
     leaving_water_temperature:
       name: "Test Leaving Water Temp"
+    heating_setpoint:
+      name: "Test Heating Setpoint"
+    cooling_setpoint:
+      name: "Test Cooling Setpoint"
+    dhw_temperature:
+      name: "Test DHW Temp"
+    dhw_setpoint:
+      name: "Test DHW Setpoint Sensor"
+    superheat_temperature:
+      name: "Test Superheat Temp"
+    humidity:
+      name: "Test Humidity"
     compressor_speed:
       name: "Test Compressor Speed"
     discharge_pressure:
       name: "Test Discharge Pressure"
+    suction_pressure:
+      name: "Test Suction Pressure"
+    loop_pressure:
+      name: "Test Loop Pressure"
+    eev_open_percentage:
+      name: "Test EEV Open"
     line_voltage:
       name: "Test Line Voltage"
     total_watts:
@@ -121,24 +142,86 @@ sensor:
       name: "Test Compressor Power"
     blower_watts:
       name: "Test Blower Power"
+    aux_heat_watts:
+      name: "Test Aux Heat Power"
+    pump_watts:
+      name: "Test Pump Power"
     waterflow:
       name: "Test Water Flow"
-    blower_speed:
-      name: "Test Blower Speed"
-    pump_speed:
-      name: "Test Pump Speed"
     fault_code:
       name: "Test Fault Code"
     lockout_fault_code:
       name: "Test Lockout Fault Code"
+    fp1_temperature:
+      name: "Test FP1 Temp"
+    fp2_temperature:
+      name: "Test FP2 Temp"
+    line_voltage_setting:
+      name: "Test Line Voltage Setting"
+    anti_short_cycle:
+      name: "Test Anti Short Cycle"
+    compressor_desired_speed:
+      name: "Test Compressor Desired Speed"
+    discharge_temperature:
+      name: "Test Discharge Temp"
+    suction_temperature:
+      name: "Test Suction Temp"
+    vs_drive_temperature:
+      name: "Test VS Drive Temp"
+    vs_inverter_temperature:
+      name: "Test VS Inverter Temp"
+    blower_speed:
+      name: "Test Blower Speed"
+    blower_only_speed:
+      name: "Test Blower Only Speed Sensor"
+    lo_compressor_speed:
+      name: "Test Lo Compressor Speed Sensor"
+    hi_compressor_speed:
+      name: "Test Hi Compressor Speed Sensor"
+    aux_heat_speed:
+      name: "Test Aux Heat Speed Sensor"
+    pump_speed:
+      name: "Test Pump Speed"
+    pump_min_speed:
+      name: "Test Pump Min Speed Sensor"
+    pump_max_speed:
+      name: "Test Pump Max Speed Sensor"
+    heating_liquid_line_temperature:
+      name: "Test Heating Liquid Line Temp"
+    saturated_condenser_temperature:
+      name: "Test Saturated Condenser Temp"
+    subcool_temperature:
+      name: "Test Subcool Temp"
+    heat_of_extraction:
+      name: "Test Heat of Extraction"
+    heat_of_rejection:
+      name: "Test Heat of Rejection"
+    vs_fan_speed:
+      name: "Test VS Fan Speed"
+    vs_ambient_temperature:
+      name: "Test VS Ambient Temp"
+    vs_compressor_watts:
+      name: "Test VS Compressor Watts"
+    saturated_evaporator_discharge_temperature:
+      name: "Test Sat Evap Discharge Temp"
+    aux_heat_stage:
+      name: "Test Aux Heat Stage"
+    humidification_target:
+      name: "Test Humidification Target Sensor"
+    dehumidification_target:
+      name: "Test Dehumidification Target Sensor"
+    iz2_compressor_speed:
+      name: "Test IZ2 Compressor Speed"
+    iz2_blower_speed:
+      name: "Test IZ2 Blower Speed"
     cop:
       name: "Test COP"
     water_delta_t:
       name: "Test Water Delta-T"
-    humidity:
-      name: "Test Humidity"
+    approach_temperature:
+      name: "Test Approach Temp"
 
-# --- Binary sensors ---
+# --- ALL Binary sensors ---
 binary_sensor:
   - platform: waterfurnace_aurora
     aurora_id: aurora
@@ -146,10 +229,28 @@ binary_sensor:
       name: "Test Compressor Running"
     blower_running:
       name: "Test Blower Running"
+    aux_heat_running:
+      name: "Test Aux Heat Running"
+    dhw_running:
+      name: "Test DHW Running"
+    loop_pump_running:
+      name: "Test Loop Pump Running"
     lockout:
       name: "Test Lockout"
+    humidifier_running:
+      name: "Test Humidifier Running"
+    dehumidifier_running:
+      name: "Test Dehumidifier Running"
+    low_pressure_switch:
+      name: "Test LPS"
+    high_pressure_switch:
+      name: "Test HPS"
+    emergency_shutdown:
+      name: "Test Emergency Shutdown"
+    load_shed:
+      name: "Test Load Shed"
 
-# --- Text sensors ---
+# --- ALL Text sensors ---
 text_sensor:
   - platform: waterfurnace_aurora
     aurora_id: aurora
@@ -163,6 +264,24 @@ text_sensor:
       name: "Test Fault Description"
     model_number:
       name: "Test Model Number"
+    serial_number:
+      name: "Test Serial Number"
+    fault_history:
+      name: "Test Fault History"
+    vs_derate:
+      name: "Test VS Derate"
+    vs_safe_mode:
+      name: "Test VS Safe Mode"
+    vs_alarm:
+      name: "Test VS Alarm"
+    axb_inputs:
+      name: "Test AXB Inputs"
+    humidifier_mode:
+      name: "Test Humidifier Mode"
+    dehumidifier_mode:
+      name: "Test Dehumidifier Mode"
+    pump_type:
+      name: "Test Pump Type"
     lockout_fault_description:
       name: "Test Lockout Fault Description"
     outputs_at_lockout:
