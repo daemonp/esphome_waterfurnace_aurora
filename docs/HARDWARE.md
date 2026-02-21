@@ -18,22 +18,27 @@ The AID Tool port on the front of your heat pump uses an RJ45 jack. The 8 pins c
 
 ### RJ45 Plug Pin Numbering
 
-When building your cable, you need to know how pin numbers map to wire positions. Looking at the RJ45 plug with the **clip facing away** from you and the contacts facing up:
+When building your cable, you need to know how pin numbers map to wire positions. Looking at the RJ45 plug with the **clip pointing away** from you and the gold contacts facing up, **pin 1 is on the left**:
 
 ```
-         RJ45 Plug (clip facing away, contacts up)
-        ┌─────────────────────────┐
-        │                         │
-        │  ┌──┬──┬──┬──┬──┬──┬──┬──┐
-        │  │1 │2 │3 │4 │5 │6 │7 │8 │  ← pin numbers
-        │  └──┴──┴──┴──┴──┴──┴──┴──┘
-        │         contacts            │
-        │                             │
-        │          ┌──────┐           │
-        │          │ clip │           │
-        └──────────┴──────┴───────────┘
-                      │
-                   to cable
+        RJ45 Plug (clip pointing away from you, contacts up)
+
+        ┌─────────────────────────────────────────────┐
+        │  ┌────┬────┬────┬────┬────┬────┬────┬────┐  │
+        │  │ 1  │ 2  │ 3  │ 4  │ 5  │ 6  │ 7  │ 8  │  │
+        │  │W/Or│ Or │W/Gn│ Bl │W/Bl│ Gn │W/Br│ Br │  │
+        │  └────┴────┴────┴────┴────┴────┴────┴────┘  │
+        │              gold contacts                    │
+        │                                               │
+        │              ┌────────┐                       │
+        │              │  clip  │                       │
+        └──────────────┴────────┴───────────────────────┘
+                            │
+                         to cable
+
+        T568B wire order (left to right):
+        1: White/Orange  2: Orange  3: White/Green  4: Blue
+        5: White/Blue    6: Green   7: White/Brown  8: Brown
 ```
 
 ### Heat Pump AID Tool Port
@@ -41,18 +46,17 @@ When building your cable, you need to know how pin numbers map to wire positions
 Looking at the RJ45 **jack** on the heat pump (the port you plug into), the pin order is **mirrored** — pin 1 is on the right:
 
 ```
-     Heat Pump AID Tool Port (looking at the jack)
-    ┌───────────────────────────────┐
-    │                               │
-    │  ┌──┬──┬──┬──┬──┬──┬──┬──┐   │
-    │  │8 │7 │6 │5 │4 │3 │2 │1 │   │
-    │  └──┴──┴──┴──┴──┴──┴──┴──┘   │
-    │         ╔══════════╗          │
-    │         ║ AID Tool ║          │
-    └─────────╚══════════╝──────────┘
+      Heat Pump AID Tool Port (looking at the jack)
+     ┌───────────────────────────────────────────────┐
+     │  ┌────┬────┬────┬────┬────┬────┬────┬────┐    │
+     │  │ 8  │ 7  │ 6  │ 5  │ 4  │ 3  │ 2  │ 1  │    │
+     │  └────┴────┴────┴────┴────┴────┴────┴────┘    │
+     │               ╔════════════╗                   │
+     │               ║  AID Tool  ║                   │
+     └───────────────╚════════════╝───────────────────┘
 ```
 
-When you plug in, pin 1 on the plug mates with pin 1 on the jack — the mirroring is handled by the connector geometry. Just make sure you have the right wires on the right pins.
+When you plug in, pin 1 on the plug mates with pin 1 on the jack — the mirroring is handled by the connector geometry. Just make sure you have the right wires on the right pins of the plug.
 
 ### Pin Assignment
 
