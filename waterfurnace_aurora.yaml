@@ -132,30 +132,30 @@ number:
     # DHW setpoint (100-140°F)
     dhw_setpoint:
       name: "DHW Setpoint"
-    # Blower/ECM speed settings (1-12)
+    # Indoor Blower/ECM speed settings (1-12)
     blower_only_speed:
-      name: "Blower Only Speed"
+      name: "Indoor Blower Only Speed"
     lo_compressor_speed:
       name: "Low Compressor ECM Speed"
     hi_compressor_speed:
       name: "High Compressor ECM Speed"
     aux_heat_speed:
-      name: "Aux Heat ECM Speed"
-    # VS Pump speed settings (1-100%)
+      name: "Aux Electric Heat ECM Speed"
+    # Loop Pump speed settings (1-100%)
     pump_min_speed:
-      name: "Pump Minimum Speed"
+      name: "Loop Pump Minimum Speed"
     pump_max_speed:
-      name: "Pump Maximum Speed"
+      name: "Loop Pump Maximum Speed"
     # Fan intermittent timing (minutes)
     fan_intermittent_on:
       name: "Fan Intermittent On Time"
     fan_intermittent_off:
       name: "Fan Intermittent Off Time"
-    # Humidity targets (%)
+    # Humidity setpoints (%)
     humidification_target:
-      name: "Humidification Target"
+      name: "Humidification Setpoint"
     dehumidification_target:
-      name: "Dehumidification Target"
+      name: "Dehumidification Setpoint"
 
 # =============================================================================
 # SENSORS - TEMPERATURES
@@ -167,9 +167,9 @@ sensor:
     
     # Air temperatures
     entering_air_temperature:
-      name: "Entering Air Temperature"
+      name: "Return Air Temperature"
     leaving_air_temperature:
-      name: "Leaving Air Temperature"
+      name: "Supply Air Temperature"
     ambient_temperature:
       name: "Ambient Temperature"
     outdoor_temperature:
@@ -189,7 +189,7 @@ sensor:
     
     # Humidity
     humidity:
-      name: "Relative Humidity"
+      name: "Humidity"
     
     # DHW (Domestic Hot Water)
     dhw_temperature:
@@ -247,23 +247,23 @@ sensor:
     vs_compressor_watts:
       name: "VS Compressor Power"
     
-    # Aux heat
+    # Aux electric heat
     aux_heat_stage:
-      name: "Aux Heat Stage"
+      name: "Aux Electric Heat Stage"
     
     # Energy / Power
     line_voltage:
       name: "Line Voltage"
     total_watts:
-      name: "Total Power"
+      name: "Total Unit Power"
     compressor_watts:
       name: "Compressor Power"
     blower_watts:
-      name: "Blower Power"
+      name: "Indoor Blower Power"
     aux_heat_watts:
-      name: "Aux Heat Power"
+      name: "Aux Electric Heat Power"
     pump_watts:
-      name: "Pump Power"
+      name: "Loop Pump Power"
     heat_of_extraction:
       name: "Heat of Extraction"
     heat_of_rejection:
@@ -273,31 +273,31 @@ sensor:
     waterflow:
       name: "Loop Flow Rate"
     
-    # Blower/ECM speeds
+    # Indoor Blower/ECM speeds
     blower_speed:
-      name: "Blower Speed"
+      name: "Indoor Blower Speed"
     blower_only_speed:
-      name: "Blower Only Speed Setting"
+      name: "Indoor Blower Only Speed Setting"
     lo_compressor_speed:
       name: "Low Compressor ECM Speed Setting"
     hi_compressor_speed:
       name: "High Compressor ECM Speed Setting"
     aux_heat_speed:
-      name: "Aux Heat ECM Speed Setting"
+      name: "Aux Electric Heat ECM Speed Setting"
     
-    # VS Pump speeds
+    # Loop Pump speeds
     pump_speed:
-      name: "Pump Speed"
+      name: "Loop Pump Speed"
     pump_min_speed:
-      name: "Pump Minimum Speed Setting"
+      name: "Loop Pump Minimum Speed Setting"
     pump_max_speed:
-      name: "Pump Maximum Speed Setting"
+      name: "Loop Pump Maximum Speed Setting"
     
-    # Humidity targets (read-only sensor versions)
+    # Humidity setpoints (read-only sensor versions)
     humidification_target:
-      name: "Humidification Target Sensor"
+      name: "Humidification Setpoint"
     dehumidification_target:
-      name: "Dehumidification Target Sensor"
+      name: "Dehumidification Setpoint"
     
     # System status
     line_voltage_setting:
@@ -333,9 +333,9 @@ binary_sensor:
     compressor_running:
       name: "Compressor Running"
     blower_running:
-      name: "Blower Running"
+      name: "Indoor Blower Running"
     aux_heat_running:
-      name: "Aux Heat Running"
+      name: "Aux Electric Heat Running"
     dhw_running:
       name: "DHW Running"
     loop_pump_running:

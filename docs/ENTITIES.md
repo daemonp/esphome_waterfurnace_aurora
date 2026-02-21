@@ -6,15 +6,15 @@ Complete reference of all Home Assistant entities created by this component.
 
 | Sensor | Unit | Description | Register |
 | :--- | :--- | :--- | :--- |
-| `entering_air_temperature` | °F | Air temperature entering the unit | 567/740 |
-| `leaving_air_temperature` | °F | Air temperature leaving the unit | 900 |
+| `entering_air_temperature` | °F | Return air temperature (air entering the unit) | 567/740 |
+| `leaving_air_temperature` | °F | Supply air temperature (air leaving the unit) | 900 |
 | `ambient_temperature` | °F | Room/zone temperature | 502 |
 | `outdoor_temperature` | °F | Outdoor temperature (AWL) | 742 |
 | `entering_water_temperature` | °F | Loop water entering the unit | 1111 |
 | `leaving_water_temperature` | °F | Loop water leaving the unit | 1110 |
 | `heating_setpoint` | °F | Current heating setpoint | 745 |
 | `cooling_setpoint` | °F | Current cooling setpoint | 746 |
-| `humidity` | % | Relative humidity | 741 |
+| `humidity` | % | Humidity level | 741 |
 | `compressor_speed` | RPM | Actual compressor speed (VS) | 3001 |
 | `compressor_desired_speed` | RPM | Target compressor speed (VS) | 3000 |
 | `discharge_pressure` | psi | Refrigerant discharge pressure | 3322 |
@@ -22,10 +22,10 @@ Complete reference of all Home Assistant entities created by this component.
 | `superheat_temperature` | °F | Superheat temperature | 3906 |
 | `eev_open_percentage` | % | Electronic expansion valve opening | 3808 |
 | `line_voltage` | V | Incoming line voltage | 16 |
-| `total_watts` | W | Total system power consumption | 1152-1153 |
+| `total_watts` | W | Total unit power consumption | 1152-1153 |
 | `compressor_watts` | W | Compressor power consumption | 1146-1147 |
-| `blower_watts` | W | Blower power consumption | 1148-1149 |
-| `aux_heat_watts` | W | Auxiliary heat power consumption | 1150-1151 |
+| `blower_watts` | W | Indoor blower power consumption | 1148-1149 |
+| `aux_heat_watts` | W | Aux electric heat power consumption | 1150-1151 |
 | `pump_watts` | W | Loop pump power consumption | 1164-1165 |
 | `waterflow` | GPM | Loop water flow rate | 1117 |
 | `loop_pressure` | psi | Loop pressure | 1119 |
@@ -39,8 +39,8 @@ Complete reference of all Home Assistant entities created by this component.
 | `suction_temperature` | °F | Compressor suction temperature | 3903 |
 | `vs_drive_temperature` | °F | VS drive board temperature | 3327 |
 | `vs_inverter_temperature` | °F | VS inverter temperature | 3522 |
-| `blower_speed` | - | Current ECM blower speed | 344 |
-| `pump_speed` | % | Current VS pump speed | 325 |
+| `blower_speed` | - | Current indoor blower ECM speed | 344 |
+| `pump_speed` | % | Current loop pump speed | 325 |
 | `heating_liquid_line_temperature` | °F | Heating mode liquid line temp | 1109 |
 | `saturated_condenser_temperature` | °F | Saturated condenser temperature | 1134 |
 | `subcool_temperature` | °F | Subcooling temperature | 1135/1136 |
@@ -53,15 +53,15 @@ Complete reference of all Home Assistant entities created by this component.
 | `vs_ambient_temperature` | °F | VS compressor ambient temperature (5/7-Series) | 3326 |
 | `vs_compressor_watts` | W | VS drive compressor power (5/7-Series) | 3422-3423 |
 | `saturated_evaporator_discharge_temperature` | °F | Saturated evaporator discharge temp | 3905 |
-| `aux_heat_stage` | - | Aux heat stage (0=off, 1=EH1, 2=EH1+EH2) | Derived (reg 30) |
-| `blower_only_speed` | - | Blower-only ECM speed setting | 340 |
+| `aux_heat_stage` | - | Aux electric heat stage (0=off, 1=EH1, 2=EH1+EH2) | Derived (reg 30) |
+| `blower_only_speed` | - | Indoor blower-only ECM speed setting | 340 |
 | `lo_compressor_speed` | - | Low compressor ECM speed setting | 341 |
 | `hi_compressor_speed` | - | High compressor ECM speed setting | 342 |
-| `aux_heat_speed` | - | Aux heat ECM speed setting | 347 |
-| `pump_min_speed` | % | VS pump minimum speed setting | 321 |
-| `pump_max_speed` | % | VS pump maximum speed setting | 322 |
-| `humidification_target` | % | Humidification target | 12310/31110 |
-| `dehumidification_target` | % | Dehumidification target | 12310/31110 |
+| `aux_heat_speed` | - | Aux electric heat ECM speed setting | 347 |
+| `pump_min_speed` | % | Loop pump minimum speed setting | 321 |
+| `pump_max_speed` | % | Loop pump maximum speed setting | 322 |
+| `humidification_target` | % | Humidification setpoint | 12310/31110 |
+| `dehumidification_target` | % | Dehumidification setpoint | 12310/31110 |
 | `line_voltage_setting` | V | Configured line voltage setting | 112 |
 
 ### Derived Sensor Details
@@ -82,8 +82,8 @@ Complete reference of all Home Assistant entities created by this component.
 | Sensor | Description | Source |
 | :--- | :--- | :--- |
 | `compressor_running` | Compressor is running | Register 30 (CC/CC2 bits) |
-| `blower_running` | Blower is running | Register 30 (BLOWER bit) |
-| `aux_heat_running` | Auxiliary heat is active | Register 30 (EH1/EH2 bits) |
+| `blower_running` | Indoor blower is running | Register 30 (BLOWER bit) |
+| `aux_heat_running` | Aux electric heat is active | Register 30 (EH1/EH2 bits) |
 | `dhw_running` | DHW mode is active | Register 1104 (DHW bit) |
 | `loop_pump_running` | Loop pump is running | Register 1104 (LOOP_PUMP bit) |
 | `lockout` | System is in lockout | Register 25 (bit 15) |
@@ -123,7 +123,7 @@ Complete reference of all Home Assistant entities created by this component.
 | `Heating + Aux` | Heating with auxiliary electric heat |
 | `Emergency Heat` | Electric heat only, compressor locked out |
 | `Dehumidify` | Active dehumidification |
-| `Fan Only` | Blower running, no compressor |
+| `Fan Only` | Indoor blower running, no compressor |
 | `Waiting` | Anti-short-cycle countdown active |
 | `Lockout` | System locked out due to fault |
 
@@ -132,16 +132,16 @@ Complete reference of all Home Assistant entities created by this component.
 | Control | Range | Description |
 | :--- | :--- | :--- |
 | `dhw_setpoint` | 100-140°F | DHW temperature setpoint |
-| `blower_only_speed` | 1-12 | ECM blower speed for fan-only mode |
-| `lo_compressor_speed` | 1-12 | ECM blower speed for low compressor |
-| `hi_compressor_speed` | 1-12 | ECM blower speed for high compressor |
-| `aux_heat_speed` | 1-12 | ECM blower speed for aux heat |
-| `pump_min_speed` | 1-100% | VS pump minimum speed |
-| `pump_max_speed` | 1-100% | VS pump maximum speed |
+| `blower_only_speed` | 1-12 | Indoor blower ECM speed for fan-only mode |
+| `lo_compressor_speed` | 1-12 | Indoor blower ECM speed for low compressor |
+| `hi_compressor_speed` | 1-12 | Indoor blower ECM speed for high compressor |
+| `aux_heat_speed` | 1-12 | Indoor blower ECM speed for aux electric heat |
+| `pump_min_speed` | 1-100% | Loop pump minimum speed |
+| `pump_max_speed` | 1-100% | Loop pump maximum speed |
 | `fan_intermittent_on` | 0-25 min | Fan on time (intermittent mode) |
 | `fan_intermittent_off` | 5-40 min | Fan off time (intermittent mode) |
-| `humidification_target` | 15-50% | Humidification setpoint |
-| `dehumidification_target` | 35-65% | Dehumidification setpoint |
+| `humidification_target` | 15-50% | Humidification setpoint (Symphony: Hum Setpoint) |
+| `dehumidification_target` | 35-65% | Dehumidification setpoint (Symphony: Hum Setpoint) |
 
 ## Switches
 
