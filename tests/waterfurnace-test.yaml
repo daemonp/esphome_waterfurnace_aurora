@@ -28,6 +28,7 @@ wifi:
 api:
   encryption:
     key: "dGVzdGtleXRlc3RrZXl0ZXN0a2V5dGVzdGtleTE="
+  custom_services: true
 
 ota:
   - platform: esphome
@@ -51,6 +52,9 @@ waterfurnace_aurora:
   address: 1
   update_interval: 10s
   flow_control_pin: GPIO4
+  connected:
+    name: "Test Heat Pump Connected"
+  connected_timeout: 30s
 
 # --- Climate (main thermostat) ---
 climate:

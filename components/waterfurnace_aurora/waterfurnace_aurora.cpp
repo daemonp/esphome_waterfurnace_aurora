@@ -221,7 +221,13 @@ void WaterFurnaceAurora::setup() {
   
   // State machine starts at SETUP_READ_ID — loop() will drive it
   this->transition_(State::SETUP_READ_ID);
-  
+
+#ifdef USE_API_CUSTOM_SERVICES
+  register_service(&WaterFurnaceAurora::on_write_register_service_, "write_register",
+                   {"address", "value"});
+  ESP_LOGD(TAG, "Registered write_register API service");
+#endif
+
   ESP_LOGD(TAG, "Setup initialized — state machine will handle hardware detection");
 }
 
@@ -1522,6 +1528,26 @@ void WaterFurnaceAurora::publish_derived_sensors(const RegisterMap &regs) {
     }
   }
 }
+
+// ============================================================================
+// HA API Custom Services
+// ============================================================================
+
+#ifdef USE_API_CUSTOM_SERVICES
+
+void WaterFurnaceAurora::on_write_register_service_(int32_t address, int32_t value) {
+  if (address < 0 || address > 65535 || value < 0 || value > 65535) {
+    ESP_LOGW(TAG, "API write_register: invalid args address=%d value=%d",
+             static_cast<int>(address), static_cast<int>(value));
+    return;
+  }
+  ESP_LOGI(TAG, "API write_register: address=%d value=%d",
+           static_cast<int>(address), static_cast<int>(value));
+  this->write_register(static_cast<uint16_t>(address),
+                       static_cast<uint16_t>(value));
+}
+
+#endif  // USE_API_CUSTOM_SERVICES
 
 }  // namespace waterfurnace_aurora
 }  // namespace esphome

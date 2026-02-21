@@ -7,6 +7,10 @@
 #include "esphome/components/binary_sensor/binary_sensor.h"
 #include "esphome/components/text_sensor/text_sensor.h"
 
+#ifdef USE_API_CUSTOM_SERVICES
+#include "esphome/components/api/custom_api_device.h"
+#endif
+
 #include "registers.h"
 #include "protocol.h"
 
@@ -56,7 +60,11 @@ static constexpr uint32_t WRITE_COOLDOWN_MS = 10000;
 // Hub Class
 // ============================================================================
 
-class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
+class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
+#ifdef USE_API_CUSTOM_SERVICES
+    , public api::CustomAPIDevice
+#endif
+{
  public:
   WaterFurnaceAurora() = default;
 
@@ -298,6 +306,11 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice {
   
   // Zone number validation helper
   bool validate_zone_number(uint8_t zone_number) const;
+
+#ifdef USE_API_CUSTOM_SERVICES
+  // HA API custom service handler
+  void on_write_register_service_(int32_t address, int32_t value);
+#endif
   
   // AWL version helpers
   bool awl_axb() const { return has_axb_ && axb_version_ >= 2.0f; }
