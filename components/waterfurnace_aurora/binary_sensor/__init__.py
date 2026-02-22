@@ -25,6 +25,9 @@ CONF_HPS = "high_pressure_switch"
 CONF_EMERGENCY_SHUTDOWN = "emergency_shutdown"
 CONF_LOAD_SHED = "load_shed"
 CONF_FAN_CALL = "fan_call"
+CONF_DERATED = "derated"
+CONF_SAFE_MODE = "safe_mode"
+CONF_DIVERTING_VALVE = "diverting_valve"
 
 CONFIG_SCHEMA = cv.Schema(
     {
@@ -66,6 +69,15 @@ CONFIG_SCHEMA = cv.Schema(
             device_class=DEVICE_CLASS_RUNNING,
         ),
         cv.Optional(CONF_FAN_CALL): binary_sensor.binary_sensor_schema(
+            device_class=DEVICE_CLASS_RUNNING,
+        ),
+        cv.Optional(CONF_DERATED): binary_sensor.binary_sensor_schema(
+            device_class=DEVICE_CLASS_PROBLEM,
+        ),
+        cv.Optional(CONF_SAFE_MODE): binary_sensor.binary_sensor_schema(
+            device_class=DEVICE_CLASS_PROBLEM,
+        ),
+        cv.Optional(CONF_DIVERTING_VALVE): binary_sensor.binary_sensor_schema(
             device_class=DEVICE_CLASS_RUNNING,
         ),
     }
@@ -126,3 +138,15 @@ async def to_code(config):
     if CONF_FAN_CALL in config:
         sens = await binary_sensor.new_binary_sensor(config[CONF_FAN_CALL])
         cg.add(parent.set_fan_call_binary_sensor(sens))
+
+    if CONF_DERATED in config:
+        sens = await binary_sensor.new_binary_sensor(config[CONF_DERATED])
+        cg.add(parent.set_derated_binary_sensor(sens))
+
+    if CONF_SAFE_MODE in config:
+        sens = await binary_sensor.new_binary_sensor(config[CONF_SAFE_MODE])
+        cg.add(parent.set_safe_mode_binary_sensor(sens))
+
+    if CONF_DIVERTING_VALVE in config:
+        sens = await binary_sensor.new_binary_sensor(config[CONF_DIVERTING_VALVE])
+        cg.add(parent.set_diverting_valve_binary_sensor(sens))

@@ -63,6 +63,15 @@ Complete reference of all Home Assistant entities created by this component.
 | `humidification_target` | % | Humidification setpoint | 12310/31110 |
 | `dehumidification_target` | % | Dehumidification setpoint | 12310/31110 |
 | `line_voltage_setting` | V | Configured line voltage setting | 112 |
+| `vs_entering_water_temperature` | °F | VS Drive entering water temperature | 3330 |
+| `vs_line_voltage` | V | VS Drive line voltage | 3331 |
+| `vs_thermo_power` | % | VS Drive thermo power | 3332 |
+| `vs_supply_voltage` | V | VS Drive supply voltage | 3424-3425 |
+| `vs_udc_voltage` | V | VS Drive UDC voltage | 3523 |
+| `blower_amps` | A | AXB blower current draw | 1105 |
+| `aux_amps` | A | AXB aux heat current draw | 1106 |
+| `compressor_1_amps` | A | AXB compressor 1 current draw | 1107 |
+| `compressor_2_amps` | A | AXB compressor 2 current draw | 1108 |
 
 ### Derived Sensor Details
 
@@ -91,6 +100,10 @@ Complete reference of all Home Assistant entities created by this component.
 | `high_pressure_switch` | HPS has tripped | Register 31 (bit 8) |
 | `emergency_shutdown` | Emergency shutdown active | Register 31 (bit 6) |
 | `load_shed` | Load shed/demand response active | Register 31 (bit 9) |
+| `fan_call` | Fan call (G signal from thermostat bus) | Register 31 (bit 4) |
+| `derated` | Compressor is derated (fault 41-46) | Derived (register 25) |
+| `safe_mode` | VS drive in safe mode (fault 47-49/72/74) | Derived (register 25) |
+| `diverting_valve` | AXB diverting valve active | Register 1104 (bit 2) |
 | `humidifier_running` | Humidifier is running | Register 30 (ACCESSORY bit) |
 | `dehumidifier_running` | Dehumidifier/active dehum | Register 362 / 1104 |
 

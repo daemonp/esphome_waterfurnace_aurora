@@ -231,6 +231,12 @@ namespace registers {
   static constexpr uint16_t HEAT_OF_REJECTION = 1156;
   static constexpr uint16_t PUMP_WATTS = 1164;
 
+  // AXB current sensors (amps, /10 for tenths)
+  static constexpr uint16_t AXB_BLOWER_AMPS = 1105;
+  static constexpr uint16_t AXB_AUX_AMPS = 1106;
+  static constexpr uint16_t AXB_COMPRESSOR1_AMPS = 1107;
+  static constexpr uint16_t AXB_COMPRESSOR2_AMPS = 1108;
+
   // VS Drive
   static constexpr uint16_t COMPRESSOR_SPEED_DESIRED = 3000;
   static constexpr uint16_t COMPRESSOR_SPEED_ACTUAL = 3001;
@@ -239,8 +245,13 @@ namespace registers {
   static constexpr uint16_t VS_DISCHARGE_TEMP = 3325;
   static constexpr uint16_t VS_AMBIENT_TEMP = 3326;
   static constexpr uint16_t VS_DRIVE_TEMP = 3327;
+  static constexpr uint16_t VS_ENTERING_WATER_TEMP = 3330;
+  static constexpr uint16_t VS_LINE_VOLTAGE = 3331;
+  static constexpr uint16_t VS_THERMO_POWER = 3332;
   static constexpr uint16_t VS_COMPRESSOR_WATTS = 3422;
+  static constexpr uint16_t VS_SUPPLY_VOLTAGE = 3424;
   static constexpr uint16_t VS_INVERTER_TEMP = 3522;
+  static constexpr uint16_t VS_UDC_VOLTAGE = 3523;
   static constexpr uint16_t VS_FAN_SPEED = 3524;
   static constexpr uint16_t VS_EEV_OPEN = 3808;
   static constexpr uint16_t VS_SUCTION_TEMP = 3903;

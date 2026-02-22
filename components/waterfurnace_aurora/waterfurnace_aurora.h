@@ -136,6 +136,19 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   void set_vs_compressor_watts_sensor(sensor::Sensor *sensor) { vs_compressor_watts_sensor_ = sensor; }
   void set_sat_evap_discharge_temp_sensor(sensor::Sensor *sensor) { sat_evap_discharge_temp_sensor_ = sensor; }
   void set_aux_heat_stage_sensor(sensor::Sensor *sensor) { aux_heat_stage_sensor_ = sensor; }
+  
+  // VS Drive additional diagnostics
+  void set_vs_entering_water_temp_sensor(sensor::Sensor *sensor) { vs_entering_water_temp_sensor_ = sensor; }
+  void set_vs_line_voltage_sensor(sensor::Sensor *sensor) { vs_line_voltage_sensor_ = sensor; }
+  void set_vs_thermo_power_sensor(sensor::Sensor *sensor) { vs_thermo_power_sensor_ = sensor; }
+  void set_vs_supply_voltage_sensor(sensor::Sensor *sensor) { vs_supply_voltage_sensor_ = sensor; }
+  void set_vs_udc_voltage_sensor(sensor::Sensor *sensor) { vs_udc_voltage_sensor_ = sensor; }
+  
+  // AXB current sensors
+  void set_blower_amps_sensor(sensor::Sensor *sensor) { blower_amps_sensor_ = sensor; }
+  void set_aux_amps_sensor(sensor::Sensor *sensor) { aux_amps_sensor_ = sensor; }
+  void set_compressor1_amps_sensor(sensor::Sensor *sensor) { compressor1_amps_sensor_ = sensor; }
+  void set_compressor2_amps_sensor(sensor::Sensor *sensor) { compressor2_amps_sensor_ = sensor; }
 
   // IZ2 desired speed sensors
   void set_iz2_compressor_speed_sensor(sensor::Sensor *sensor) { iz2_compressor_speed_sensor_ = sensor; }
@@ -183,6 +196,9 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   void set_emergency_shutdown_binary_sensor(binary_sensor::BinarySensor *sensor) { emergency_shutdown_sensor_ = sensor; }
   void set_load_shed_binary_sensor(binary_sensor::BinarySensor *sensor) { load_shed_sensor_ = sensor; }
   void set_fan_call_binary_sensor(binary_sensor::BinarySensor *sensor) { fan_call_sensor_ = sensor; }
+  void set_derated_binary_sensor(binary_sensor::BinarySensor *sensor) { derated_sensor_ = sensor; }
+  void set_safe_mode_binary_sensor(binary_sensor::BinarySensor *sensor) { safe_mode_sensor_ = sensor; }
+  void set_diverting_valve_binary_sensor(binary_sensor::BinarySensor *sensor) { diverting_valve_sensor_ = sensor; }
 
   // Text sensors
   void set_current_mode_sensor(text_sensor::TextSensor *sensor) { current_mode_sensor_ = sensor; }
@@ -603,6 +619,19 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   sensor::Sensor *sat_evap_discharge_temp_sensor_{nullptr};
   sensor::Sensor *aux_heat_stage_sensor_{nullptr};
   
+  // VS Drive additional diagnostics
+  sensor::Sensor *vs_entering_water_temp_sensor_{nullptr};
+  sensor::Sensor *vs_line_voltage_sensor_{nullptr};
+  sensor::Sensor *vs_thermo_power_sensor_{nullptr};
+  sensor::Sensor *vs_supply_voltage_sensor_{nullptr};
+  sensor::Sensor *vs_udc_voltage_sensor_{nullptr};
+  
+  // AXB current sensors
+  sensor::Sensor *blower_amps_sensor_{nullptr};
+  sensor::Sensor *aux_amps_sensor_{nullptr};
+  sensor::Sensor *compressor1_amps_sensor_{nullptr};
+  sensor::Sensor *compressor2_amps_sensor_{nullptr};
+  
   sensor::Sensor *iz2_compressor_speed_sensor_{nullptr};
   sensor::Sensor *iz2_blower_speed_sensor_{nullptr};
   
@@ -643,6 +672,9 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   binary_sensor::BinarySensor *emergency_shutdown_sensor_{nullptr};
   binary_sensor::BinarySensor *load_shed_sensor_{nullptr};
   binary_sensor::BinarySensor *fan_call_sensor_{nullptr};
+  binary_sensor::BinarySensor *derated_sensor_{nullptr};
+  binary_sensor::BinarySensor *safe_mode_sensor_{nullptr};
+  binary_sensor::BinarySensor *diverting_valve_sensor_{nullptr};
 
   // Text sensors
   text_sensor::TextSensor *current_mode_sensor_{nullptr};

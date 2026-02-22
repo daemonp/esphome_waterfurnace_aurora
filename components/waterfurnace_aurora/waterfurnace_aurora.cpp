@@ -819,10 +819,24 @@ void WaterFurnaceAurora::build_poll_addresses_() {
     this->addresses_to_read_.push_back(registers::VS_SUCTION_TEMP);
     this->addresses_to_read_.push_back(registers::VS_SAT_EVAP_DISCHARGE_TEMP);
     this->addresses_to_read_.push_back(registers::VS_SUPERHEAT_TEMP);
+    this->addresses_to_read_.push_back(registers::VS_ENTERING_WATER_TEMP);
+    this->addresses_to_read_.push_back(registers::VS_LINE_VOLTAGE);
+    this->addresses_to_read_.push_back(registers::VS_THERMO_POWER);
+    this->addresses_to_read_.push_back(registers::VS_SUPPLY_VOLTAGE);
+    this->addresses_to_read_.push_back(registers::VS_SUPPLY_VOLTAGE + 1);  // uint32 low word
+    this->addresses_to_read_.push_back(registers::VS_UDC_VOLTAGE);
   }
   
   if (this->has_axb_ && this->awl_axb()) {
     this->addresses_to_read_.push_back(registers::VS_PUMP_SPEED);
+  }
+  
+  // AXB current sensors (amps)
+  if (this->has_axb_) {
+    this->addresses_to_read_.push_back(registers::AXB_BLOWER_AMPS);
+    this->addresses_to_read_.push_back(registers::AXB_AUX_AMPS);
+    this->addresses_to_read_.push_back(registers::AXB_COMPRESSOR1_AMPS);
+    this->addresses_to_read_.push_back(registers::AXB_COMPRESSOR2_AMPS);
   }
 
   // DHW writable registers on fast tier — ensures the 7s write cooldown window
@@ -1015,6 +1029,14 @@ void WaterFurnaceAurora::publish_all_sensors_() {
       this->publish_text_if_changed(this->fault_description_sensor_, this->cached_fault_description_,
                                      get_fault_description(this->current_fault_));
       publish_binary_if_changed_(this->lockout_sensor_, this->locked_out_);
+      // Derated: fault codes 41-46 (gem: abc_client.rb line 248)
+      publish_binary_if_changed_(this->derated_sensor_,
+                                 this->current_fault_ >= 41 && this->current_fault_ <= 46);
+      // Safe mode: fault codes 47, 48, 49, 72, 74 (gem: abc_client.rb line 249)
+      publish_binary_if_changed_(this->safe_mode_sensor_,
+                                 this->current_fault_ == 47 || this->current_fault_ == 48 ||
+                                 this->current_fault_ == 49 || this->current_fault_ == 72 ||
+                                 this->current_fault_ == 74);
     }
   }
   
@@ -1103,6 +1125,8 @@ void WaterFurnaceAurora::publish_all_sensors_() {
                                  (this->axb_outputs_ & AXB_OUTPUT_DHW) != 0);
       publish_binary_if_changed_(this->loop_pump_sensor_,
                                  (this->axb_outputs_ & AXB_OUTPUT_LOOP_PUMP) != 0);
+      publish_binary_if_changed_(this->diverting_valve_sensor_,
+                                 (this->axb_outputs_ & AXB_OUTPUT_DIVERTING_VALVE) != 0);
     }
   }
   
@@ -1243,6 +1267,19 @@ void WaterFurnaceAurora::publish_all_sensors_() {
   this->publish_sensor_signed_tenths(regs, registers::VS_AMBIENT_TEMP, this->vs_ambient_temp_sensor_);
   this->publish_sensor_uint32(regs, registers::VS_COMPRESSOR_WATTS, this->vs_compressor_watts_sensor_);
   this->publish_sensor_signed_tenths(regs, registers::VS_SAT_EVAP_DISCHARGE_TEMP, this->sat_evap_discharge_temp_sensor_);
+  
+  // VS Drive additional diagnostics
+  this->publish_sensor_signed_tenths(regs, registers::VS_ENTERING_WATER_TEMP, this->vs_entering_water_temp_sensor_);
+  this->publish_sensor(regs, registers::VS_LINE_VOLTAGE, this->vs_line_voltage_sensor_);
+  this->publish_sensor(regs, registers::VS_THERMO_POWER, this->vs_thermo_power_sensor_);
+  this->publish_sensor_uint32(regs, registers::VS_SUPPLY_VOLTAGE, this->vs_supply_voltage_sensor_);
+  this->publish_sensor(regs, registers::VS_UDC_VOLTAGE, this->vs_udc_voltage_sensor_);
+  
+  // AXB current sensors (tenths of amps)
+  this->publish_sensor_tenths(regs, registers::AXB_BLOWER_AMPS, this->blower_amps_sensor_);
+  this->publish_sensor_tenths(regs, registers::AXB_AUX_AMPS, this->aux_amps_sensor_);
+  this->publish_sensor_tenths(regs, registers::AXB_COMPRESSOR1_AMPS, this->compressor1_amps_sensor_);
+  this->publish_sensor_tenths(regs, registers::AXB_COMPRESSOR2_AMPS, this->compressor2_amps_sensor_);
   
   // VS Drive status strings — guard with raw register comparison to avoid
   // bitmask_to_string() heap allocation when the underlying register is unchanged.

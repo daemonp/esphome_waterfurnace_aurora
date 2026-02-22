@@ -24,7 +24,10 @@ CONFIG_SCHEMA = (
 
 async def to_code(config):
     var = await water_heater.new_water_heater(config)
-    await cg.register_component(var, config)
+    # NOTE: Do NOT call cg.register_component() here — ESPHome 2026.1's
+    # water_heater.register_water_heater() (called by new_water_heater)
+    # already calls register_component() internally. Double registration
+    # causes a ValueError that crashes the entire compile.
 
     parent = await cg.get_variable(config[CONF_AURORA_ID])
     cg.add(var.set_parent(parent))
