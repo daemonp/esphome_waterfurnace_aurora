@@ -819,20 +819,26 @@ void WaterFurnaceAurora::build_poll_addresses_() {
     this->addresses_to_read_.push_back(registers::VS_SUCTION_TEMP);
     this->addresses_to_read_.push_back(registers::VS_SAT_EVAP_DISCHARGE_TEMP);
     this->addresses_to_read_.push_back(registers::VS_SUPERHEAT_TEMP);
-    this->addresses_to_read_.push_back(registers::VS_ENTERING_WATER_TEMP);
-    this->addresses_to_read_.push_back(registers::VS_LINE_VOLTAGE);
-    this->addresses_to_read_.push_back(registers::VS_THERMO_POWER);
-    this->addresses_to_read_.push_back(registers::VS_SUPPLY_VOLTAGE);
-    this->addresses_to_read_.push_back(registers::VS_SUPPLY_VOLTAGE + 1);  // uint32 low word
-    this->addresses_to_read_.push_back(registers::VS_UDC_VOLTAGE);
+    // VS Drive additional diagnostics — only poll if at least one sensor is configured
+    if (this->vs_entering_water_temp_sensor_ || this->vs_line_voltage_sensor_ ||
+        this->vs_thermo_power_sensor_ || this->vs_supply_voltage_sensor_ ||
+        this->vs_udc_voltage_sensor_) {
+      this->addresses_to_read_.push_back(registers::VS_ENTERING_WATER_TEMP);
+      this->addresses_to_read_.push_back(registers::VS_LINE_VOLTAGE);
+      this->addresses_to_read_.push_back(registers::VS_THERMO_POWER);
+      this->addresses_to_read_.push_back(registers::VS_SUPPLY_VOLTAGE);
+      this->addresses_to_read_.push_back(registers::VS_SUPPLY_VOLTAGE + 1);  // uint32 low word
+      this->addresses_to_read_.push_back(registers::VS_UDC_VOLTAGE);
+    }
   }
   
   if (this->has_axb_ && this->awl_axb()) {
     this->addresses_to_read_.push_back(registers::VS_PUMP_SPEED);
   }
   
-  // AXB current sensors (amps)
-  if (this->has_axb_) {
+  // AXB current sensors (amps) — only poll if at least one current sensor is configured
+  if (this->has_axb_ && (this->blower_amps_sensor_ || this->aux_amps_sensor_ ||
+                         this->compressor1_amps_sensor_ || this->compressor2_amps_sensor_)) {
     this->addresses_to_read_.push_back(registers::AXB_BLOWER_AMPS);
     this->addresses_to_read_.push_back(registers::AXB_AUX_AMPS);
     this->addresses_to_read_.push_back(registers::AXB_COMPRESSOR1_AMPS);
@@ -1157,12 +1163,14 @@ void WaterFurnaceAurora::publish_all_sensors_() {
   this->publish_sensor_signed_tenths(regs, registers::LEAVING_WATER, this->leaving_water_sensor_);
   this->publish_sensor_signed_tenths(regs, registers::ENTERING_WATER, this->entering_water_sensor_);
   
-  // Humidity
+  // Humidity — update cached value for climate entity current_humidity,
+  // and publish to the standalone sensor if configured.
   {
     const uint16_t *val_rh = reg_find(regs, registers::RELATIVE_HUMIDITY);
     if (val_rh) {
       this->relative_humidity_ = static_cast<float>(*val_rh);
-      if (sensor_value_changed_(this->humidity_sensor_, this->relative_humidity_))
+      if (this->humidity_sensor_ != nullptr &&
+          sensor_value_changed_(this->humidity_sensor_, this->relative_humidity_))
         this->humidity_sensor_->publish_state(this->relative_humidity_);
     }
   }
@@ -1643,6 +1651,10 @@ bool WaterFurnaceAurora::set_humidifier_mode(bool auto_mode) {
                            ? registers::IZ2_HUMIDISTAT_SETTINGS
                            : registers::HUMIDISTAT_SETTINGS;
   const uint16_t *current = reg_find(this->register_cache_, read_reg);
+  if (!current) {
+    ESP_LOGW(TAG, "Humidistat register %u not yet cached; writing with zeroed base "
+                  "(other mode bits may be reset)", read_reg);
+  }
   // Start with prior value, mask off humidifier auto bit (0x8000), preserve everything else
   uint16_t raw_value = current ? (*current & ~0x8000) : 0;
   if (auto_mode) raw_value |= 0x8000;
@@ -1660,6 +1672,10 @@ bool WaterFurnaceAurora::set_dehumidifier_mode(bool auto_mode) {
                            ? registers::IZ2_HUMIDISTAT_SETTINGS
                            : registers::HUMIDISTAT_SETTINGS;
   const uint16_t *current = reg_find(this->register_cache_, read_reg);
+  if (!current) {
+    ESP_LOGW(TAG, "Humidistat register %u not yet cached; writing with zeroed base "
+                  "(other mode bits may be reset)", read_reg);
+  }
   // Start with prior value, mask off dehumidifier auto bit (0x4000), preserve everything else
   uint16_t raw_value = current ? (*current & ~0x4000) : 0;
   if (auto_mode) raw_value |= 0x4000;
@@ -1781,11 +1797,11 @@ void WaterFurnaceAurora::publish_derived_sensors(const RegisterMap &regs) {
               }
             }
           } else {
-            ESP_LOGW(TAG, "COP: heat register %u not found in poll results", heat_reg);
+            ESP_LOGD(TAG, "COP: heat register %u not found in poll results (may appear during startup)", heat_reg);
           }
         }
       } else {
-        ESP_LOGW(TAG, "COP: TOTAL_WATTS register not found in poll results");
+        ESP_LOGD(TAG, "COP: TOTAL_WATTS register not found in poll results (may appear during startup)");
       }
     } else {
       this->cop_sensor_->publish_state(0.0f);

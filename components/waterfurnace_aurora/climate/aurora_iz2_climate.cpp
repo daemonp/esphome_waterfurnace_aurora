@@ -76,18 +76,20 @@ void AuroraIZ2Climate::control(const climate::ClimateCall &call) {
 
   // Handle mode change
   if (call.get_mode().has_value()) {
-    // DRY mode is display-only — Aurora enters dehumidify automatically based on humidistat settings
+    // DRY mode is display-only — Aurora enters dehumidify automatically based on humidistat settings.
+    // Skip only the mode write; fall through to handle any other fields in this call
+    // (e.g., setpoints or fan mode sent in the same ClimateCall).
     if (*call.get_mode() == climate::CLIMATE_MODE_DRY) {
-      ESP_LOGW(TAG, "DRY mode is automatic — controlled by the humidistat dehumidifier settings");
-      return;
-    }
-    HeatingMode aurora_mode;
-    if (!esphome_to_aurora_mode(*call.get_mode(), aurora_mode)) {
-      ESP_LOGW(TAG, "Unsupported mode for zone %d", this->zone_number_);
-      return;
-    }
-    if (this->parent_->set_zone_hvac_mode(this->zone_number_, aurora_mode)) {
-      this->mode = *call.get_mode();
+      ESP_LOGW(TAG, "DRY mode is display-only; ignoring mode change (other fields in this call still processed)");
+    } else {
+      HeatingMode aurora_mode;
+      if (!esphome_to_aurora_mode(*call.get_mode(), aurora_mode)) {
+        ESP_LOGW(TAG, "Unsupported mode for zone %d", this->zone_number_);
+        return;
+      }
+      if (this->parent_->set_zone_hvac_mode(this->zone_number_, aurora_mode)) {
+        this->mode = *call.get_mode();
+      }
     }
   }
 

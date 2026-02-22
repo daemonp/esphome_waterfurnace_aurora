@@ -77,9 +77,8 @@ inline optional<climate::ClimateFanMode> aurora_to_esphome_fan(FanMode aurora_fa
     case FanMode::CONTINUOUS:
       return climate::CLIMATE_FAN_ON;
     case FanMode::INTERMITTENT:
-      return {};  // Needs custom fan mode — caller handles via set_custom_fan_mode_()
     default:
-      return climate::CLIMATE_FAN_AUTO;
+      return {};  // Needs custom handling or unknown — caller decides
   }
 }
 

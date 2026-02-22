@@ -1,4 +1,4 @@
-#include "aurora_dhw_number.h"
+#include "aurora_number.h"
 #include "../registers.h"
 #include "esphome/core/log.h"
 

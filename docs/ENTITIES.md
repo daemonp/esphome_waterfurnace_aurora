@@ -176,3 +176,35 @@ The component creates climate entities for thermostat control:
 - **IZ2 Zone thermostats** (zones 1-6) — Per-zone climate entities with independent temperature, setpoints, mode, and fan controls
 
 > **Note**: On IZ2 systems, disable the main thermostat entity and use zone-specific entities instead. See [IZ2 Zone Configuration](../README.md#iz2-zone-configuration) in the README.
+
+## Water Heater Entity
+
+The component creates a water heater entity for DHW (Domestic Hot Water) control:
+
+- **Domestic Hot Water** — Current water temperature, target setpoint (100-140°F), and mode (Off / Heat Pump)
+
+## Humidistat (Humidifier / Dehumidifier Cards)
+
+The Aurora has a built-in humidistat with **two independent targets**: a humidification target (15-50%) for adding moisture and a dehumidification target (35-65%) for removing moisture. Both are always active regardless of heating/cooling mode.
+
+ESPHome does not have a native `humidifier` platform, so this component exposes humidistat controls as individual entities:
+
+| Entity | Platform | Purpose |
+| :--- | :--- | :--- |
+| `humidity` | sensor | Current relative humidity (%) |
+| `humidification_setpoint` | number | Humidification target (15-50%, writable) |
+| `dehumidification_setpoint` | number | Dehumidification target (35-65%, writable) |
+| `humidifier_mode` | select | Humidifier mode (Auto/Manual, writable) |
+| `dehumidifier_mode` | select | Dehumidifier mode (Auto/Manual, writable) |
+| `humidifier_running` | binary_sensor | Humidifier relay active |
+| `dehumidifier_running` | binary_sensor | Active dehumidification or AXB relay active |
+
+### Getting Proper Humidifier Cards in Lovelace
+
+To display these as full humidifier/dehumidifier cards (with target slider, mode selector, and on/off toggle), create **Home Assistant template humidifier entities** that wrap the ESPHome entities above.
+
+A ready-to-paste configuration is provided in **[`docs/ha_humidifier_templates.yaml`](ha_humidifier_templates.yaml)**. Copy it into your HA `configuration.yaml` and replace `waterfurnace_aurora` with your ESPHome device name.
+
+This creates two entities:
+- `humidifier.aurora_humidifier` — proper humidifier card (device_class: humidifier)
+- `humidifier.aurora_dehumidifier` — proper dehumidifier card (device_class: dehumidifier)
