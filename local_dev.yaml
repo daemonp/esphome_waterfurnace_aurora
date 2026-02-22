@@ -127,14 +127,29 @@ climate:
   #   zone: 2
 
 # =============================================================================
+# WATER HEATER (Domestic Hot Water)
+# =============================================================================
+# Unified water heater entity — replaces the separate DHW switch + number.
+# Provides current temperature, target setpoint, and mode (OFF / HEAT_PUMP)
+# as a single Water Heater card in Home Assistant. Requires HA 2026.2+.
+
+water_heater:
+  - platform: waterfurnace_aurora
+    id: aurora_dhw
+    name: "Domestic Hot Water"
+    aurora_id: aurora
+
+# =============================================================================
 # CONTROLS - SWITCHES
 # =============================================================================
 
 switch:
   - platform: waterfurnace_aurora
     aurora_id: aurora
-    dhw_enabled:
-      name: "DHW Enabled"
+    # Legacy DHW switch — superseded by the water_heater entity above.
+    # Uncomment if you prefer separate switch + number controls instead.
+    # dhw_enabled:
+    #   name: "DHW Enabled"
 
 # =============================================================================
 # CONTROLS - NUMBER INPUTS
@@ -143,9 +158,10 @@ switch:
 number:
   - platform: waterfurnace_aurora
     aurora_id: aurora
-    # DHW setpoint (100-140°F)
-    dhw_setpoint:
-      name: "DHW Setpoint"
+    # Legacy DHW setpoint — superseded by the water_heater entity above.
+    # Uncomment if you prefer separate switch + number controls instead.
+    # dhw_setpoint:
+    #   name: "DHW Setpoint"
     # Indoor Blower/ECM speed settings (1-12)
     blower_only_speed:
       name: "Indoor Blower Only Speed"
@@ -435,6 +451,18 @@ text_sensor:
   # ESPHome version
   - platform: version
     name: "ESPHome Version"
+
+# =============================================================================
+# SELECTS
+# =============================================================================
+
+select:
+  - platform: waterfurnace_aurora
+    aurora_id: aurora
+    humidifier_mode:
+      name: "Humidifier Mode"
+    dehumidifier_mode:
+      name: "Dehumidifier Mode"
 
 # =============================================================================
 # BUTTONS

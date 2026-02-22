@@ -9,8 +9,7 @@ namespace waterfurnace_aurora {
 
 // Control type enum for generic number entities
 enum class AuroraNumberType : uint8_t {
-  DHW_SETPOINT,
-  BLOWER_ONLY_SPEED,
+  BLOWER_ONLY_SPEED = 0,
   LO_COMPRESSOR_SPEED,
   HI_COMPRESSOR_SPEED,
   AUX_HEAT_SPEED,
@@ -51,13 +50,15 @@ class AuroraNumber : public number::Number, public Component {
 
   void set_parent(WaterFurnaceAurora *parent) { this->parent_ = parent; }
   void set_type(AuroraNumberType type) { this->type_ = type; }
+  void set_zone_number(uint8_t zone) { this->zone_number_ = zone; }
 
  protected:
   void control(float value) override;
   void update_state_();
 
   WaterFurnaceAurora *parent_{nullptr};
-  AuroraNumberType type_{AuroraNumberType::DHW_SETPOINT};
+  AuroraNumberType type_{AuroraNumberType::BLOWER_ONLY_SPEED};
+  uint8_t zone_number_{0};  // 0 = system-wide, 1-6 = IZ2 zone
   float last_value_{NAN};
 };
 

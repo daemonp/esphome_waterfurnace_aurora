@@ -85,6 +85,19 @@ CONF_VS_COMPRESSOR_WATTS = "vs_compressor_watts"
 CONF_SAT_EVAP_DISCHARGE_TEMPERATURE = "saturated_evaporator_discharge_temperature"
 CONF_AUX_HEAT_STAGE = "aux_heat_stage"
 
+# VS Drive additional diagnostics
+CONF_VS_ENTERING_WATER_TEMPERATURE = "vs_entering_water_temperature"
+CONF_VS_LINE_VOLTAGE = "vs_line_voltage"
+CONF_VS_THERMO_POWER = "vs_thermo_power"
+CONF_VS_SUPPLY_VOLTAGE = "vs_supply_voltage"
+CONF_VS_UDC_VOLTAGE = "vs_udc_voltage"
+
+# AXB current sensors
+CONF_BLOWER_AMPS = "blower_amps"
+CONF_AUX_AMPS = "aux_amps"
+CONF_COMPRESSOR1_AMPS = "compressor_1_amps"
+CONF_COMPRESSOR2_AMPS = "compressor_2_amps"
+
 # Humidifier sensors
 CONF_HUMIDIFICATION_TARGET = "humidification_target"
 CONF_DEHUMIDIFICATION_TARGET = "dehumidification_target"
@@ -102,6 +115,7 @@ CONF_APPROACH_TEMPERATURE = "approach_temperature"
 UNIT_FAHRENHEIT = "°F"
 UNIT_PSI = "psi"
 UNIT_GPM = "gpm"
+UNIT_AMPERE = "A"
 
 # Sensor schema for temperature sensors
 TEMPERATURE_SENSOR_SCHEMA = sensor.sensor_schema(
@@ -281,6 +295,56 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_SAT_EVAP_DISCHARGE_TEMPERATURE): TEMPERATURE_SENSOR_SCHEMA,
         cv.Optional(CONF_AUX_HEAT_STAGE): sensor.sensor_schema(
             accuracy_decimals=0,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        # VS Drive additional diagnostics
+        cv.Optional(CONF_VS_ENTERING_WATER_TEMPERATURE): TEMPERATURE_SENSOR_SCHEMA,
+        cv.Optional(CONF_VS_LINE_VOLTAGE): sensor.sensor_schema(
+            unit_of_measurement=UNIT_VOLT,
+            accuracy_decimals=0,
+            device_class=DEVICE_CLASS_VOLTAGE,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        cv.Optional(CONF_VS_THERMO_POWER): sensor.sensor_schema(
+            unit_of_measurement=UNIT_PERCENT,
+            accuracy_decimals=0,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        cv.Optional(CONF_VS_SUPPLY_VOLTAGE): sensor.sensor_schema(
+            unit_of_measurement=UNIT_VOLT,
+            accuracy_decimals=0,
+            device_class=DEVICE_CLASS_VOLTAGE,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        cv.Optional(CONF_VS_UDC_VOLTAGE): sensor.sensor_schema(
+            unit_of_measurement=UNIT_VOLT,
+            accuracy_decimals=0,
+            device_class=DEVICE_CLASS_VOLTAGE,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        # AXB current sensors
+        cv.Optional(CONF_BLOWER_AMPS): sensor.sensor_schema(
+            unit_of_measurement=UNIT_AMPERE,
+            accuracy_decimals=1,
+            device_class="current",
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        cv.Optional(CONF_AUX_AMPS): sensor.sensor_schema(
+            unit_of_measurement=UNIT_AMPERE,
+            accuracy_decimals=1,
+            device_class="current",
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        cv.Optional(CONF_COMPRESSOR1_AMPS): sensor.sensor_schema(
+            unit_of_measurement=UNIT_AMPERE,
+            accuracy_decimals=1,
+            device_class="current",
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        cv.Optional(CONF_COMPRESSOR2_AMPS): sensor.sensor_schema(
+            unit_of_measurement=UNIT_AMPERE,
+            accuracy_decimals=1,
+            device_class="current",
             state_class=STATE_CLASS_MEASUREMENT,
         ),
         # Humidifier sensors
@@ -548,6 +612,44 @@ async def to_code(config):
     if CONF_AUX_HEAT_STAGE in config:
         sens = await sensor.new_sensor(config[CONF_AUX_HEAT_STAGE])
         cg.add(parent.set_aux_heat_stage_sensor(sens))
+
+    # VS Drive additional diagnostics
+    if CONF_VS_ENTERING_WATER_TEMPERATURE in config:
+        sens = await sensor.new_sensor(config[CONF_VS_ENTERING_WATER_TEMPERATURE])
+        cg.add(parent.set_vs_entering_water_temp_sensor(sens))
+
+    if CONF_VS_LINE_VOLTAGE in config:
+        sens = await sensor.new_sensor(config[CONF_VS_LINE_VOLTAGE])
+        cg.add(parent.set_vs_line_voltage_sensor(sens))
+
+    if CONF_VS_THERMO_POWER in config:
+        sens = await sensor.new_sensor(config[CONF_VS_THERMO_POWER])
+        cg.add(parent.set_vs_thermo_power_sensor(sens))
+
+    if CONF_VS_SUPPLY_VOLTAGE in config:
+        sens = await sensor.new_sensor(config[CONF_VS_SUPPLY_VOLTAGE])
+        cg.add(parent.set_vs_supply_voltage_sensor(sens))
+
+    if CONF_VS_UDC_VOLTAGE in config:
+        sens = await sensor.new_sensor(config[CONF_VS_UDC_VOLTAGE])
+        cg.add(parent.set_vs_udc_voltage_sensor(sens))
+
+    # AXB current sensors
+    if CONF_BLOWER_AMPS in config:
+        sens = await sensor.new_sensor(config[CONF_BLOWER_AMPS])
+        cg.add(parent.set_blower_amps_sensor(sens))
+
+    if CONF_AUX_AMPS in config:
+        sens = await sensor.new_sensor(config[CONF_AUX_AMPS])
+        cg.add(parent.set_aux_amps_sensor(sens))
+
+    if CONF_COMPRESSOR1_AMPS in config:
+        sens = await sensor.new_sensor(config[CONF_COMPRESSOR1_AMPS])
+        cg.add(parent.set_compressor1_amps_sensor(sens))
+
+    if CONF_COMPRESSOR2_AMPS in config:
+        sens = await sensor.new_sensor(config[CONF_COMPRESSOR2_AMPS])
+        cg.add(parent.set_compressor2_amps_sensor(sens))
 
     # Humidifier sensors
     if CONF_HUMIDIFICATION_TARGET in config:

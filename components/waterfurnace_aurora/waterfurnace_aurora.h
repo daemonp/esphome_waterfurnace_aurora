@@ -136,6 +136,19 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   void set_vs_compressor_watts_sensor(sensor::Sensor *sensor) { vs_compressor_watts_sensor_ = sensor; }
   void set_sat_evap_discharge_temp_sensor(sensor::Sensor *sensor) { sat_evap_discharge_temp_sensor_ = sensor; }
   void set_aux_heat_stage_sensor(sensor::Sensor *sensor) { aux_heat_stage_sensor_ = sensor; }
+  
+  // VS Drive additional diagnostics
+  void set_vs_entering_water_temp_sensor(sensor::Sensor *sensor) { vs_entering_water_temp_sensor_ = sensor; }
+  void set_vs_line_voltage_sensor(sensor::Sensor *sensor) { vs_line_voltage_sensor_ = sensor; }
+  void set_vs_thermo_power_sensor(sensor::Sensor *sensor) { vs_thermo_power_sensor_ = sensor; }
+  void set_vs_supply_voltage_sensor(sensor::Sensor *sensor) { vs_supply_voltage_sensor_ = sensor; }
+  void set_vs_udc_voltage_sensor(sensor::Sensor *sensor) { vs_udc_voltage_sensor_ = sensor; }
+  
+  // AXB current sensors
+  void set_blower_amps_sensor(sensor::Sensor *sensor) { blower_amps_sensor_ = sensor; }
+  void set_aux_amps_sensor(sensor::Sensor *sensor) { aux_amps_sensor_ = sensor; }
+  void set_compressor1_amps_sensor(sensor::Sensor *sensor) { compressor1_amps_sensor_ = sensor; }
+  void set_compressor2_amps_sensor(sensor::Sensor *sensor) { compressor2_amps_sensor_ = sensor; }
 
   // IZ2 desired speed sensors
   void set_iz2_compressor_speed_sensor(sensor::Sensor *sensor) { iz2_compressor_speed_sensor_ = sensor; }
@@ -182,6 +195,10 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   void set_hps_binary_sensor(binary_sensor::BinarySensor *sensor) { hps_sensor_ = sensor; }
   void set_emergency_shutdown_binary_sensor(binary_sensor::BinarySensor *sensor) { emergency_shutdown_sensor_ = sensor; }
   void set_load_shed_binary_sensor(binary_sensor::BinarySensor *sensor) { load_shed_sensor_ = sensor; }
+  void set_fan_call_binary_sensor(binary_sensor::BinarySensor *sensor) { fan_call_sensor_ = sensor; }
+  void set_derated_binary_sensor(binary_sensor::BinarySensor *sensor) { derated_sensor_ = sensor; }
+  void set_safe_mode_binary_sensor(binary_sensor::BinarySensor *sensor) { safe_mode_sensor_ = sensor; }
+  void set_diverting_valve_binary_sensor(binary_sensor::BinarySensor *sensor) { diverting_valve_sensor_ = sensor; }
 
   // Text sensors
   void set_current_mode_sensor(text_sensor::TextSensor *sensor) { current_mode_sensor_ = sensor; }
@@ -231,6 +248,8 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   // Humidifier controls
   bool set_humidification_target(uint8_t percent);
   bool set_dehumidification_target(uint8_t percent);
+  bool set_humidifier_mode(bool auto_mode);
+  bool set_dehumidifier_mode(bool auto_mode);
   
   // System controls
   bool clear_fault_history();
@@ -254,6 +273,7 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   bool setpoint_cooldown_active() const { return (millis() - last_setpoint_write_) <= WRITE_COOLDOWN_MS; }
   bool mode_cooldown_active() const { return (millis() - last_mode_write_) <= WRITE_COOLDOWN_MS; }
   bool fan_cooldown_active() const { return (millis() - last_fan_write_) <= WRITE_COOLDOWN_MS; }
+  bool dhw_cooldown_active() const { return (millis() - last_dhw_write_) <= WRITE_COOLDOWN_MS; }
   bool is_dhw_enabled() const { return dhw_enabled_; }
   float get_dhw_setpoint() const { return dhw_setpoint_; }
   float get_dhw_temperature() const { return dhw_temp_; }
@@ -261,6 +281,10 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   uint16_t get_axb_outputs() const { return axb_outputs_; }
   bool is_locked_out() const { return locked_out_; }
   bool is_setup_complete() const { return setup_complete_; }
+  bool is_active_dehumidify() const { return active_dehumidify_; }
+  float get_relative_humidity() const { return relative_humidity_; }
+  bool get_humidifier_auto() const { return humidifier_auto_; }
+  bool get_dehumidifier_auto() const { return dehumidifier_auto_; }
   
   /// Look up a raw register value from the cache. Returns NAN if not found.
   /// Used by AuroraNumber entities to get current read-back values.
@@ -506,6 +530,7 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   uint32_t last_mode_write_{COOLDOWN_BOOT_INIT};
   uint32_t last_setpoint_write_{COOLDOWN_BOOT_INIT};
   uint32_t last_fan_write_{COOLDOWN_BOOT_INIT};
+  uint32_t last_dhw_write_{COOLDOWN_BOOT_INIT};
   
   // Setup callbacks — fired once when hardware detection completes
   std::vector<std::function<void()>> setup_callbacks_;
@@ -534,6 +559,9 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   bool has_iz2_{false};
   uint8_t num_iz2_zones_{0};
   bool active_dehumidify_{false};
+  float relative_humidity_{NAN};
+  bool humidifier_auto_{false};
+  bool dehumidifier_auto_{false};
 
   // AWL version fields
   float thermostat_version_{0.0f};
@@ -548,7 +576,13 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   // IZ2 Zone data
   IZ2ZoneData iz2_zones_[MAX_IZ2_ZONES];
   
-  // --- Sensors ---
+  // =========================================================================
+  // Sensor pointers — grouped by subsystem for readability.
+  // All are set via set_*_sensor() from Python codegen; nullptr when not
+  // configured in YAML.
+  // =========================================================================
+
+  // --- Core HVAC sensors ---
   sensor::Sensor *entering_air_sensor_{nullptr};
   sensor::Sensor *leaving_air_sensor_{nullptr};
   sensor::Sensor *ambient_temp_sensor_{nullptr};
@@ -559,79 +593,114 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   sensor::Sensor *cooling_setpoint_sensor_{nullptr};
   sensor::Sensor *humidity_sensor_{nullptr};
   sensor::Sensor *compressor_speed_sensor_{nullptr};
+  sensor::Sensor *fault_code_sensor_{nullptr};
+  sensor::Sensor *line_voltage_setting_sensor_{nullptr};
+  sensor::Sensor *anti_short_cycle_sensor_{nullptr};
+
+  // --- Energy monitoring sensors ---
   sensor::Sensor *total_watts_sensor_{nullptr};
   sensor::Sensor *compressor_watts_sensor_{nullptr};
   sensor::Sensor *blower_watts_sensor_{nullptr};
   sensor::Sensor *aux_watts_sensor_{nullptr};
   sensor::Sensor *pump_watts_sensor_{nullptr};
   sensor::Sensor *line_voltage_sensor_{nullptr};
-  sensor::Sensor *waterflow_sensor_{nullptr};
-  sensor::Sensor *loop_pressure_sensor_{nullptr};
-  sensor::Sensor *dhw_temp_sensor_{nullptr};
-  sensor::Sensor *dhw_setpoint_sensor_{nullptr};
-  sensor::Sensor *fault_code_sensor_{nullptr};
+
+  // --- Refrigeration sensors ---
   sensor::Sensor *discharge_pressure_sensor_{nullptr};
   sensor::Sensor *suction_pressure_sensor_{nullptr};
   sensor::Sensor *eev_open_sensor_{nullptr};
   sensor::Sensor *superheat_sensor_{nullptr};
   sensor::Sensor *fp1_sensor_{nullptr};
   sensor::Sensor *fp2_sensor_{nullptr};
-  sensor::Sensor *line_voltage_setting_sensor_{nullptr};
-  sensor::Sensor *anti_short_cycle_sensor_{nullptr};
-  
-  sensor::Sensor *compressor_desired_speed_sensor_{nullptr};
-  sensor::Sensor *discharge_temp_sensor_{nullptr};
-  sensor::Sensor *suction_temp_sensor_{nullptr};
-  sensor::Sensor *vs_drive_temp_sensor_{nullptr};
-  sensor::Sensor *vs_inverter_temp_sensor_{nullptr};
-  
-  sensor::Sensor *vs_fan_speed_sensor_{nullptr};
-  sensor::Sensor *vs_ambient_temp_sensor_{nullptr};
-  sensor::Sensor *vs_compressor_watts_sensor_{nullptr};
-  sensor::Sensor *sat_evap_discharge_temp_sensor_{nullptr};
-  sensor::Sensor *aux_heat_stage_sensor_{nullptr};
-  
-  sensor::Sensor *iz2_compressor_speed_sensor_{nullptr};
-  sensor::Sensor *iz2_blower_speed_sensor_{nullptr};
-  
-  sensor::Sensor *cop_sensor_{nullptr};
-  sensor::Sensor *water_delta_t_sensor_{nullptr};
-  sensor::Sensor *approach_temp_sensor_{nullptr};
-  
-  sensor::Sensor *blower_speed_sensor_{nullptr};
-  sensor::Sensor *blower_only_speed_sensor_{nullptr};
-  sensor::Sensor *lo_compressor_speed_sensor_{nullptr};
-  sensor::Sensor *hi_compressor_speed_sensor_{nullptr};
-  sensor::Sensor *aux_heat_speed_sensor_{nullptr};
-  
-  sensor::Sensor *pump_speed_sensor_{nullptr};
-  sensor::Sensor *pump_min_speed_sensor_{nullptr};
-  sensor::Sensor *pump_max_speed_sensor_{nullptr};
-  
   sensor::Sensor *heating_liquid_line_temp_sensor_{nullptr};
   sensor::Sensor *saturated_condenser_temp_sensor_{nullptr};
   sensor::Sensor *subcool_temp_sensor_{nullptr};
   sensor::Sensor *heat_of_extraction_sensor_{nullptr};
   sensor::Sensor *heat_of_rejection_sensor_{nullptr};
-  
+
+  // --- AXB / DHW sensors ---
+  sensor::Sensor *waterflow_sensor_{nullptr};
+  sensor::Sensor *loop_pressure_sensor_{nullptr};
+  sensor::Sensor *dhw_temp_sensor_{nullptr};
+  sensor::Sensor *dhw_setpoint_sensor_{nullptr};
+  sensor::Sensor *blower_amps_sensor_{nullptr};
+  sensor::Sensor *aux_amps_sensor_{nullptr};
+  sensor::Sensor *compressor1_amps_sensor_{nullptr};
+  sensor::Sensor *compressor2_amps_sensor_{nullptr};
+
+  // --- VS Drive sensors ---
+  sensor::Sensor *compressor_desired_speed_sensor_{nullptr};
+  sensor::Sensor *discharge_temp_sensor_{nullptr};
+  sensor::Sensor *suction_temp_sensor_{nullptr};
+  sensor::Sensor *vs_drive_temp_sensor_{nullptr};
+  sensor::Sensor *vs_inverter_temp_sensor_{nullptr};
+  sensor::Sensor *vs_fan_speed_sensor_{nullptr};
+  sensor::Sensor *vs_ambient_temp_sensor_{nullptr};
+  sensor::Sensor *vs_compressor_watts_sensor_{nullptr};
+  sensor::Sensor *sat_evap_discharge_temp_sensor_{nullptr};
+  sensor::Sensor *vs_entering_water_temp_sensor_{nullptr};
+  sensor::Sensor *vs_line_voltage_sensor_{nullptr};
+  sensor::Sensor *vs_thermo_power_sensor_{nullptr};
+  sensor::Sensor *vs_supply_voltage_sensor_{nullptr};
+  sensor::Sensor *vs_udc_voltage_sensor_{nullptr};
+
+  // --- ECM / blower speed sensors ---
+  sensor::Sensor *aux_heat_stage_sensor_{nullptr};
+  sensor::Sensor *blower_speed_sensor_{nullptr};
+  sensor::Sensor *blower_only_speed_sensor_{nullptr};
+  sensor::Sensor *lo_compressor_speed_sensor_{nullptr};
+  sensor::Sensor *hi_compressor_speed_sensor_{nullptr};
+  sensor::Sensor *aux_heat_speed_sensor_{nullptr};
+
+  // --- Pump sensors ---
+  sensor::Sensor *pump_speed_sensor_{nullptr};
+  sensor::Sensor *pump_min_speed_sensor_{nullptr};
+  sensor::Sensor *pump_max_speed_sensor_{nullptr};
+
+  // --- IZ2 zone sensors ---
+  sensor::Sensor *iz2_compressor_speed_sensor_{nullptr};
+  sensor::Sensor *iz2_blower_speed_sensor_{nullptr};
+
+  // --- Humidity control sensors ---
   sensor::Sensor *humidification_target_sensor_{nullptr};
   sensor::Sensor *dehumidification_target_sensor_{nullptr};
-  
-  // Binary sensors
+
+  // --- Derived / computed sensors ---
+  sensor::Sensor *cop_sensor_{nullptr};
+  sensor::Sensor *water_delta_t_sensor_{nullptr};
+  sensor::Sensor *approach_temp_sensor_{nullptr};
+
+  // =========================================================================
+  // Binary sensors — grouped by subsystem
+  // =========================================================================
+
+  // --- System status ---
   binary_sensor::BinarySensor *compressor_sensor_{nullptr};
   binary_sensor::BinarySensor *blower_sensor_{nullptr};
   binary_sensor::BinarySensor *aux_heat_sensor_{nullptr};
-  binary_sensor::BinarySensor *dhw_running_sensor_{nullptr};
   binary_sensor::BinarySensor *lockout_sensor_{nullptr};
-  binary_sensor::BinarySensor *loop_pump_sensor_{nullptr};
-  binary_sensor::BinarySensor *humidifier_running_sensor_{nullptr};
-  binary_sensor::BinarySensor *dehumidifier_running_sensor_{nullptr};
-  binary_sensor::BinarySensor *lps_sensor_{nullptr};
-  binary_sensor::BinarySensor *hps_sensor_{nullptr};
   binary_sensor::BinarySensor *emergency_shutdown_sensor_{nullptr};
   binary_sensor::BinarySensor *load_shed_sensor_{nullptr};
+  binary_sensor::BinarySensor *fan_call_sensor_{nullptr};
+  binary_sensor::BinarySensor *derated_sensor_{nullptr};
+  binary_sensor::BinarySensor *safe_mode_sensor_{nullptr};
 
+  // --- Pressure switches ---
+  binary_sensor::BinarySensor *lps_sensor_{nullptr};
+  binary_sensor::BinarySensor *hps_sensor_{nullptr};
+
+  // --- AXB outputs ---
+  binary_sensor::BinarySensor *dhw_running_sensor_{nullptr};
+  binary_sensor::BinarySensor *loop_pump_sensor_{nullptr};
+  binary_sensor::BinarySensor *diverting_valve_sensor_{nullptr};
+
+  // --- Humidity ---
+  binary_sensor::BinarySensor *humidifier_running_sensor_{nullptr};
+  binary_sensor::BinarySensor *dehumidifier_running_sensor_{nullptr};
+
+  // =========================================================================
   // Text sensors
+  // =========================================================================
   text_sensor::TextSensor *current_mode_sensor_{nullptr};
   text_sensor::TextSensor *fault_description_sensor_{nullptr};
   text_sensor::TextSensor *hvac_mode_sensor_{nullptr};
@@ -647,7 +716,7 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   text_sensor::TextSensor *dehumidifier_mode_sensor_{nullptr};
   text_sensor::TextSensor *pump_type_sensor_{nullptr};
   
-  // Lockout diagnostic sensors
+  // --- Lockout diagnostic sensors ---
   sensor::Sensor *lockout_fault_sensor_{nullptr};
   text_sensor::TextSensor *lockout_fault_description_sensor_{nullptr};
   text_sensor::TextSensor *outputs_at_lockout_sensor_{nullptr};

@@ -419,6 +419,12 @@ void WaterFurnaceAurora::dump_config() {
   ESP_LOGCONFIG(TAG, "  Energy Monitor: %s",
                 this->energy_monitor_level_ == 0 ? "None" :
                 this->energy_monitor_level_ == 1 ? "Compressor Monitor" : "Energy Monitor");
+  if (this->cop_sensor_ != nullptr && this->energy_monitor_level_ < 2) {
+    ESP_LOGW(TAG, "  COP sensor configured but unit reports energy_monitor_level=%d; "
+                  "TOTAL_WATTS and heat registers will be polled but values may be "
+                  "unreliable without a hardware energy monitor",
+             this->energy_monitor_level_);
+  }
 }
 
 // ============================================================================
@@ -777,6 +783,21 @@ void WaterFurnaceAurora::build_poll_addresses_() {
     this->addresses_to_read_.push_back(registers::PUMP_WATTS + 1);
   }
   
+  // COP requires TOTAL_WATTS + heat registers regardless of energy_monitor_level.
+  // When those blocks above didn't already add them, add just what COP needs.
+  if (this->cop_sensor_ != nullptr) {
+    if (!this->energy_monitoring()) {
+      this->addresses_to_read_.push_back(registers::TOTAL_WATTS);
+      this->addresses_to_read_.push_back(registers::TOTAL_WATTS + 1);
+    }
+    if (!this->refrigeration_monitoring()) {
+      this->addresses_to_read_.push_back(registers::HEAT_OF_EXTRACTION);
+      this->addresses_to_read_.push_back(registers::HEAT_OF_EXTRACTION + 1);
+      this->addresses_to_read_.push_back(registers::HEAT_OF_REJECTION);
+      this->addresses_to_read_.push_back(registers::HEAT_OF_REJECTION + 1);
+    }
+  }
+  
   if (this->is_ecm_blower() || this->blower_type_ == BlowerType::FIVE_SPEED) {
     this->addresses_to_read_.push_back(registers::ECM_SPEED);
   }
@@ -798,10 +819,38 @@ void WaterFurnaceAurora::build_poll_addresses_() {
     this->addresses_to_read_.push_back(registers::VS_SUCTION_TEMP);
     this->addresses_to_read_.push_back(registers::VS_SAT_EVAP_DISCHARGE_TEMP);
     this->addresses_to_read_.push_back(registers::VS_SUPERHEAT_TEMP);
+    // VS Drive additional diagnostics — only poll if at least one sensor is configured
+    if (this->vs_entering_water_temp_sensor_ || this->vs_line_voltage_sensor_ ||
+        this->vs_thermo_power_sensor_ || this->vs_supply_voltage_sensor_ ||
+        this->vs_udc_voltage_sensor_) {
+      this->addresses_to_read_.push_back(registers::VS_ENTERING_WATER_TEMP);
+      this->addresses_to_read_.push_back(registers::VS_LINE_VOLTAGE);
+      this->addresses_to_read_.push_back(registers::VS_THERMO_POWER);
+      this->addresses_to_read_.push_back(registers::VS_SUPPLY_VOLTAGE);
+      this->addresses_to_read_.push_back(registers::VS_SUPPLY_VOLTAGE + 1);  // uint32 low word
+      this->addresses_to_read_.push_back(registers::VS_UDC_VOLTAGE);
+    }
   }
   
   if (this->has_axb_ && this->awl_axb()) {
     this->addresses_to_read_.push_back(registers::VS_PUMP_SPEED);
+  }
+  
+  // AXB current sensors (amps) — only poll if at least one current sensor is configured
+  if (this->has_axb_ && (this->blower_amps_sensor_ || this->aux_amps_sensor_ ||
+                         this->compressor1_amps_sensor_ || this->compressor2_amps_sensor_)) {
+    this->addresses_to_read_.push_back(registers::AXB_BLOWER_AMPS);
+    this->addresses_to_read_.push_back(registers::AXB_AUX_AMPS);
+    this->addresses_to_read_.push_back(registers::AXB_COMPRESSOR1_AMPS);
+    this->addresses_to_read_.push_back(registers::AXB_COMPRESSOR2_AMPS);
+  }
+
+  // DHW writable registers on fast tier — ensures the 7s write cooldown window
+  // always contains at least one fresh read-back (same reason climate setpoints
+  // were moved to fast tier).  DHW_TEMP stays on medium tier since it's read-only.
+  if (this->has_axb_) {
+    this->addresses_to_read_.push_back(registers::DHW_ENABLED);
+    this->addresses_to_read_.push_back(registers::DHW_SETPOINT);
   }
   
   if (this->has_iz2_ && this->num_iz2_zones_ > 0) {
@@ -829,8 +878,8 @@ void WaterFurnaceAurora::build_poll_addresses_() {
     this->addresses_to_read_.push_back(registers::LINE_VOLTAGE_SETTING);
     
     if (this->has_axb_) {
-      this->addresses_to_read_.push_back(registers::DHW_ENABLED);
-      this->addresses_to_read_.push_back(registers::DHW_SETPOINT);
+      // Note: DHW_ENABLED and DHW_SETPOINT moved to fast tier (writable registers
+      // need fresh read-back within the 7s cooldown window).
       this->addresses_to_read_.push_back(registers::DHW_TEMP);
       this->addresses_to_read_.push_back(registers::LOOP_PRESSURE);
       this->addresses_to_read_.push_back(registers::AXB_INPUTS);
@@ -986,6 +1035,14 @@ void WaterFurnaceAurora::publish_all_sensors_() {
       this->publish_text_if_changed(this->fault_description_sensor_, this->cached_fault_description_,
                                      get_fault_description(this->current_fault_));
       publish_binary_if_changed_(this->lockout_sensor_, this->locked_out_);
+      // Derated: fault codes 41-46 (gem: abc_client.rb line 248)
+      publish_binary_if_changed_(this->derated_sensor_,
+                                 this->current_fault_ >= 41 && this->current_fault_ <= 46);
+      // Safe mode: fault codes 47, 48, 49, 72, 74 (gem: abc_client.rb line 249)
+      publish_binary_if_changed_(this->safe_mode_sensor_,
+                                 this->current_fault_ == 47 || this->current_fault_ == 48 ||
+                                 this->current_fault_ == 49 || this->current_fault_ == 72 ||
+                                 this->current_fault_ == 74);
     }
   }
   
@@ -1050,6 +1107,10 @@ void WaterFurnaceAurora::publish_all_sensors_() {
       publish_binary_if_changed_(this->emergency_shutdown_sensor_,
                                  (status & STATUS_EMERGENCY_SHUTDOWN) != 0);
       publish_binary_if_changed_(this->load_shed_sensor_, (status & STATUS_LOAD_SHED) != 0);
+      // Fan call (G signal) — thermostat is requesting fan operation.
+      // On IZ2 systems, the zone damper_open state is more meaningful per-zone;
+      // this reflects the system-wide G signal from the thermostat bus.
+      publish_binary_if_changed_(this->fan_call_sensor_, (status & STATUS_G) != 0);
     }
   }
   
@@ -1070,6 +1131,8 @@ void WaterFurnaceAurora::publish_all_sensors_() {
                                  (this->axb_outputs_ & AXB_OUTPUT_DHW) != 0);
       publish_binary_if_changed_(this->loop_pump_sensor_,
                                  (this->axb_outputs_ & AXB_OUTPUT_LOOP_PUMP) != 0);
+      publish_binary_if_changed_(this->diverting_valve_sensor_,
+                                 (this->axb_outputs_ & AXB_OUTPUT_DIVERTING_VALVE) != 0);
     }
   }
   
@@ -1100,8 +1163,17 @@ void WaterFurnaceAurora::publish_all_sensors_() {
   this->publish_sensor_signed_tenths(regs, registers::LEAVING_WATER, this->leaving_water_sensor_);
   this->publish_sensor_signed_tenths(regs, registers::ENTERING_WATER, this->entering_water_sensor_);
   
-  // Humidity
-  this->publish_sensor(regs, registers::RELATIVE_HUMIDITY, this->humidity_sensor_);
+  // Humidity — update cached value for climate entity current_humidity,
+  // and publish to the standalone sensor if configured.
+  {
+    const uint16_t *val_rh = reg_find(regs, registers::RELATIVE_HUMIDITY);
+    if (val_rh) {
+      this->relative_humidity_ = static_cast<float>(*val_rh);
+      if (this->humidity_sensor_ != nullptr &&
+          sensor_value_changed_(this->humidity_sensor_, this->relative_humidity_))
+        this->humidity_sensor_->publish_state(this->relative_humidity_);
+    }
+  }
   
   // Setpoints (respect write cooldown)
   if ((millis() - this->last_setpoint_write_) > WRITE_COOLDOWN_MS) {
@@ -1119,12 +1191,11 @@ void WaterFurnaceAurora::publish_all_sensors_() {
     }
   }
   
-  // DHW
-  {
+  // DHW (respect write cooldown — same pattern as climate setpoints)
+  if (!this->dhw_cooldown_active()) {
     const uint16_t *val_dhw = reg_find(regs, registers::DHW_ENABLED);
     if (val_dhw) this->dhw_enabled_ = (*val_dhw != 0);
-  }
-  {
+
     const uint16_t *val_dhwsp = reg_find(regs, registers::DHW_SETPOINT);
     if (val_dhwsp) {
       this->dhw_setpoint_ = to_tenths(*val_dhwsp);
@@ -1204,6 +1275,19 @@ void WaterFurnaceAurora::publish_all_sensors_() {
   this->publish_sensor_signed_tenths(regs, registers::VS_AMBIENT_TEMP, this->vs_ambient_temp_sensor_);
   this->publish_sensor_uint32(regs, registers::VS_COMPRESSOR_WATTS, this->vs_compressor_watts_sensor_);
   this->publish_sensor_signed_tenths(regs, registers::VS_SAT_EVAP_DISCHARGE_TEMP, this->sat_evap_discharge_temp_sensor_);
+  
+  // VS Drive additional diagnostics
+  this->publish_sensor_signed_tenths(regs, registers::VS_ENTERING_WATER_TEMP, this->vs_entering_water_temp_sensor_);
+  this->publish_sensor(regs, registers::VS_LINE_VOLTAGE, this->vs_line_voltage_sensor_);
+  this->publish_sensor(regs, registers::VS_THERMO_POWER, this->vs_thermo_power_sensor_);
+  this->publish_sensor_uint32(regs, registers::VS_SUPPLY_VOLTAGE, this->vs_supply_voltage_sensor_);
+  this->publish_sensor(regs, registers::VS_UDC_VOLTAGE, this->vs_udc_voltage_sensor_);
+  
+  // AXB current sensors (tenths of amps)
+  this->publish_sensor_tenths(regs, registers::AXB_BLOWER_AMPS, this->blower_amps_sensor_);
+  this->publish_sensor_tenths(regs, registers::AXB_AUX_AMPS, this->aux_amps_sensor_);
+  this->publish_sensor_tenths(regs, registers::AXB_COMPRESSOR1_AMPS, this->compressor1_amps_sensor_);
+  this->publish_sensor_tenths(regs, registers::AXB_COMPRESSOR2_AMPS, this->compressor2_amps_sensor_);
   
   // VS Drive status strings — guard with raw register comparison to avoid
   // bitmask_to_string() heap allocation when the underlying register is unchanged.
@@ -1290,10 +1374,12 @@ void WaterFurnaceAurora::publish_all_sensors_() {
 
     const uint16_t *val_mode = reg_find(regs, mode_reg);
     if (val_mode) {
+      this->humidifier_auto_ = (*val_mode & 0x8000) != 0;
+      this->dehumidifier_auto_ = (*val_mode & 0x4000) != 0;
       this->publish_text_if_changed(this->humidifier_mode_sensor_, this->cached_humidifier_mode_,
-                                     (*val_mode & 0x8000) ? "Auto" : "Manual");
+                                     this->humidifier_auto_ ? "Auto" : "Manual");
       this->publish_text_if_changed(this->dehumidifier_mode_sensor_, this->cached_dehumidifier_mode_,
-                                     (*val_mode & 0x4000) ? "Auto" : "Manual");
+                                     this->dehumidifier_auto_ ? "Auto" : "Manual");
     }
 
     const uint16_t *val_targets = reg_find(regs, target_reg);
@@ -1445,6 +1531,7 @@ bool WaterFurnaceAurora::set_dhw_enabled(bool enabled) {
   // DHW enabled (400) and DHW setpoint (401) are read-write at the same address.
   this->write_register(registers::DHW_ENABLED, enabled ? 1 : 0);
   this->dhw_enabled_ = enabled;  // Optimistic update
+  this->last_dhw_write_ = millis();
   return true;
 }
 
@@ -1456,6 +1543,7 @@ bool WaterFurnaceAurora::set_dhw_setpoint(float temp) {
   // Same-address read/write — see set_dhw_enabled() comment.
   this->write_register(registers::DHW_SETPOINT, static_cast<uint16_t>(temp * 10));
   this->dhw_setpoint_ = temp;  // Optimistic update
+  this->last_dhw_write_ = millis();
   return true;
 }
 
@@ -1554,6 +1642,49 @@ bool WaterFurnaceAurora::set_dehumidification_target(uint8_t percent) {
   return true;
 }
 
+bool WaterFurnaceAurora::set_humidifier_mode(bool auto_mode) {
+  // Read current settings register to preserve other bits (like the Ruby gem does)
+  uint16_t read_reg = (this->has_iz2_ && this->awl_communicating())
+                          ? registers::IZ2_HUMIDISTAT_MODE
+                          : registers::HUMIDISTAT_SETTINGS;
+  uint16_t write_reg = (this->has_iz2_ && this->awl_communicating())
+                           ? registers::IZ2_HUMIDISTAT_SETTINGS
+                           : registers::HUMIDISTAT_SETTINGS;
+  const uint16_t *current = reg_find(this->register_cache_, read_reg);
+  if (!current) {
+    ESP_LOGW(TAG, "Humidistat register %u not yet cached; writing with zeroed base "
+                  "(other mode bits may be reset)", read_reg);
+  }
+  // Start with prior value, mask off humidifier auto bit (0x8000), preserve everything else
+  uint16_t raw_value = current ? (*current & ~0x8000) : 0;
+  if (auto_mode) raw_value |= 0x8000;
+  ESP_LOGI(TAG, "Setting humidifier mode to %s (reg %d = 0x%04X)", auto_mode ? "Auto" : "Manual", write_reg, raw_value);
+  this->write_register(write_reg, raw_value);
+  this->humidifier_auto_ = auto_mode;
+  return true;
+}
+
+bool WaterFurnaceAurora::set_dehumidifier_mode(bool auto_mode) {
+  uint16_t read_reg = (this->has_iz2_ && this->awl_communicating())
+                          ? registers::IZ2_HUMIDISTAT_MODE
+                          : registers::HUMIDISTAT_SETTINGS;
+  uint16_t write_reg = (this->has_iz2_ && this->awl_communicating())
+                           ? registers::IZ2_HUMIDISTAT_SETTINGS
+                           : registers::HUMIDISTAT_SETTINGS;
+  const uint16_t *current = reg_find(this->register_cache_, read_reg);
+  if (!current) {
+    ESP_LOGW(TAG, "Humidistat register %u not yet cached; writing with zeroed base "
+                  "(other mode bits may be reset)", read_reg);
+  }
+  // Start with prior value, mask off dehumidifier auto bit (0x4000), preserve everything else
+  uint16_t raw_value = current ? (*current & ~0x4000) : 0;
+  if (auto_mode) raw_value |= 0x4000;
+  ESP_LOGI(TAG, "Setting dehumidifier mode to %s (reg %d = 0x%04X)", auto_mode ? "Auto" : "Manual", write_reg, raw_value);
+  this->write_register(write_reg, raw_value);
+  this->dehumidifier_auto_ = auto_mode;
+  return true;
+}
+
 bool WaterFurnaceAurora::clear_fault_history() {
   ESP_LOGI(TAG, "Clearing fault history");
   this->write_register(registers::CLEAR_FAULT_HISTORY, registers::CLEAR_FAULT_MAGIC);
@@ -1627,7 +1758,15 @@ void WaterFurnaceAurora::publish_derived_sensors(const RegisterMap &regs) {
     }
   }
   
-  // COP
+  // COP = useful heat output / electrical energy input
+  //
+  // The Aurora register names are from the ground loop's perspective:
+  //   HEAT_OF_EXTRACTION = heat extracted FROM the ground (non-zero in heating)
+  //   HEAT_OF_REJECTION  = heat rejected  TO  the ground (non-zero in cooling)
+  //
+  // Thermodynamics (energy conservation: Q_hot = Q_cold + W):
+  //   Heating COP = Q_to_house   / W = (Q_from_ground + W) / W
+  //   Cooling COP = Q_from_house / W = (Q_to_ground   - W) / W
   if (this->cop_sensor_ != nullptr) {
     bool compressor_running = (this->system_outputs_ & (OUTPUT_CC | OUTPUT_CC2)) != 0;
     if (compressor_running) {
@@ -1637,17 +1776,32 @@ void WaterFurnaceAurora::publish_derived_sensors(const RegisterMap &regs) {
         uint32_t total_watts = to_uint32(*tw_h, *tw_l);
         if (total_watts > 0) {
           bool cooling = (this->system_outputs_ & OUTPUT_RV) != 0;
-          uint16_t heat_reg = cooling ? registers::HEAT_OF_EXTRACTION : registers::HEAT_OF_REJECTION;
+          // Heating → ground-side heat is EXTRACTION; Cooling → ground-side heat is REJECTION
+          uint16_t heat_reg = cooling ? registers::HEAT_OF_REJECTION : registers::HEAT_OF_EXTRACTION;
           const uint16_t *heat_h = reg_find(regs, heat_reg);
           const uint16_t *heat_l = reg_find(regs, heat_reg + 1);
           if (heat_h && heat_l) {
-            int32_t heat_btu = to_int32(*heat_h, *heat_l);
-            float cop = static_cast<float>(std::abs(heat_btu)) /
-                        (static_cast<float>(total_watts) * BTU_PER_WATT_HOUR);
-            if (cop >= 0.5f && cop <= 15.0f)
-              this->cop_sensor_->publish_state(cop);
+            float ground_btu = static_cast<float>(std::abs(to_int32(*heat_h, *heat_l)));
+            float watts_btu = static_cast<float>(total_watts) * BTU_PER_WATT_HOUR;
+            // Heating: useful output = ground heat + compressor work
+            // Cooling: useful output = ground heat - compressor work
+            float useful_btu = cooling ? (ground_btu - watts_btu) : (ground_btu + watts_btu);
+            if (useful_btu > 0.0f) {
+              float cop = useful_btu / watts_btu;
+              if (cop >= 0.5f && cop <= 15.0f) {
+                this->cop_sensor_->publish_state(cop);
+              } else {
+                ESP_LOGD(TAG, "COP %.2f outside plausible range [0.5, 15.0], skipping publish "
+                              "(ground_btu=%.0f, watts_btu=%.0f, cooling=%d)", cop,
+                              ground_btu, watts_btu, cooling);
+              }
+            }
+          } else {
+            ESP_LOGD(TAG, "COP: heat register %u not found in poll results (may appear during startup)", heat_reg);
           }
         }
+      } else {
+        ESP_LOGD(TAG, "COP: TOTAL_WATTS register not found in poll results (may appear during startup)");
       }
     } else {
       this->cop_sensor_->publish_state(0.0f);

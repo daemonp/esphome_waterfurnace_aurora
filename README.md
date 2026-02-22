@@ -191,6 +191,26 @@ The component creates 50+ sensors, 12 binary sensors, 14 text sensors, 11 number
 
 For the complete list of every entity with registers and descriptions, see **[Exposed Entities](docs/ENTITIES.md)**.
 
+## Humidistat Setup (Humidifier / Dehumidifier Cards)
+
+The Aurora's humidistat has two independent targets — humidification (15-50%) and dehumidification (35-65%) — both always active. ESPHome does not have a native `humidifier` platform, so the component exposes humidistat controls as individual `number`, `select`, and `binary_sensor` entities.
+
+To get proper **humidifier and dehumidifier cards** in Lovelace (with target slider, mode selector, and on/off toggle), add the provided Home Assistant template configuration to your `configuration.yaml`:
+
+```yaml
+# In your HA configuration.yaml — copy from docs/ha_humidifier_templates.yaml
+# Replace "waterfurnace_aurora" with your ESPHome device name
+humidifier: !include ha_humidifier_templates.yaml
+```
+
+Or paste the contents of [`docs/ha_humidifier_templates.yaml`](docs/ha_humidifier_templates.yaml) directly into your `configuration.yaml`.
+
+This creates two entities:
+- **`humidifier.aurora_humidifier`** — adds moisture when RH drops below target
+- **`humidifier.aurora_dehumidifier`** — removes moisture when RH rises above target
+
+See **[Exposed Entities — Humidistat](docs/ENTITIES.md#humidistat-humidifier--dehumidifier-cards)** for details on the underlying ESPHome entities.
+
 ## Troubleshooting
 
 ### No Communication

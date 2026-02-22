@@ -55,6 +55,13 @@ waterfurnace_aurora:
     name: "Test Heat Pump Connected"
   connected_timeout: 30s
 
+# --- Water Heater (DHW) ---
+water_heater:
+  - platform: waterfurnace_aurora
+    id: aurora_dhw
+    name: "Test Domestic Hot Water"
+    aurora_id: aurora
+
 # --- Climate (main thermostat) ---
 climate:
   - platform: waterfurnace_aurora
@@ -220,6 +227,24 @@ sensor:
       name: "Test Water Delta-T"
     approach_temperature:
       name: "Test Approach Temp"
+    vs_entering_water_temperature:
+      name: "Test VS Entering Water Temp"
+    vs_line_voltage:
+      name: "Test VS Line Voltage"
+    vs_thermo_power:
+      name: "Test VS Thermo Power"
+    vs_supply_voltage:
+      name: "Test VS Supply Voltage"
+    vs_udc_voltage:
+      name: "Test VS UDC Voltage"
+    blower_amps:
+      name: "Test Blower Amps"
+    aux_amps:
+      name: "Test Aux Amps"
+    compressor_1_amps:
+      name: "Test Compressor 1 Amps"
+    compressor_2_amps:
+      name: "Test Compressor 2 Amps"
 
 # --- ALL Binary sensors ---
 binary_sensor:
@@ -249,6 +274,14 @@ binary_sensor:
       name: "Test Emergency Shutdown"
     load_shed:
       name: "Test Load Shed"
+    fan_call:
+      name: "Test Fan Call"
+    derated:
+      name: "Test Derated"
+    safe_mode:
+      name: "Test Safe Mode"
+    diverting_valve:
+      name: "Test Diverting Valve"
 
 # --- ALL Text sensors ---
 text_sensor:
@@ -288,6 +321,15 @@ text_sensor:
       name: "Test Outputs at Lockout"
     inputs_at_lockout:
       name: "Test Inputs at Lockout"
+
+# --- Selects ---
+select:
+  - platform: waterfurnace_aurora
+    aurora_id: aurora
+    humidifier_mode:
+      name: "Test Humidifier Mode Select"
+    dehumidifier_mode:
+      name: "Test Dehumidifier Mode Select"
 
 # --- Buttons ---
 button:

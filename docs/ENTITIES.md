@@ -63,6 +63,15 @@ Complete reference of all Home Assistant entities created by this component.
 | `humidification_target` | % | Humidification setpoint | 12310/31110 |
 | `dehumidification_target` | % | Dehumidification setpoint | 12310/31110 |
 | `line_voltage_setting` | V | Configured line voltage setting | 112 |
+| `vs_entering_water_temperature` | °F | VS Drive entering water temperature | 3330 |
+| `vs_line_voltage` | V | VS Drive line voltage | 3331 |
+| `vs_thermo_power` | % | VS Drive thermo power | 3332 |
+| `vs_supply_voltage` | V | VS Drive supply voltage | 3424-3425 |
+| `vs_udc_voltage` | V | VS Drive UDC voltage | 3523 |
+| `blower_amps` | A | AXB blower current draw | 1105 |
+| `aux_amps` | A | AXB aux heat current draw | 1106 |
+| `compressor_1_amps` | A | AXB compressor 1 current draw | 1107 |
+| `compressor_2_amps` | A | AXB compressor 2 current draw | 1108 |
 
 ### Derived Sensor Details
 
@@ -91,6 +100,10 @@ Complete reference of all Home Assistant entities created by this component.
 | `high_pressure_switch` | HPS has tripped | Register 31 (bit 8) |
 | `emergency_shutdown` | Emergency shutdown active | Register 31 (bit 6) |
 | `load_shed` | Load shed/demand response active | Register 31 (bit 9) |
+| `fan_call` | Fan call (G signal from thermostat bus) | Register 31 (bit 4) |
+| `derated` | Compressor is derated (fault 41-46) | Derived (register 25) |
+| `safe_mode` | VS drive in safe mode (fault 47-49/72/74) | Derived (register 25) |
+| `diverting_valve` | AXB diverting valve active | Register 1104 (bit 2) |
 | `humidifier_running` | Humidifier is running | Register 30 (ACCESSORY bit) |
 | `dehumidifier_running` | Dehumidifier/active dehum | Register 362 / 1104 |
 
@@ -163,3 +176,35 @@ The component creates climate entities for thermostat control:
 - **IZ2 Zone thermostats** (zones 1-6) — Per-zone climate entities with independent temperature, setpoints, mode, and fan controls
 
 > **Note**: On IZ2 systems, disable the main thermostat entity and use zone-specific entities instead. See [IZ2 Zone Configuration](../README.md#iz2-zone-configuration) in the README.
+
+## Water Heater Entity
+
+The component creates a water heater entity for DHW (Domestic Hot Water) control:
+
+- **Domestic Hot Water** — Current water temperature, target setpoint (100-140°F), and mode (Off / Heat Pump)
+
+## Humidistat (Humidifier / Dehumidifier Cards)
+
+The Aurora has a built-in humidistat with **two independent targets**: a humidification target (15-50%) for adding moisture and a dehumidification target (35-65%) for removing moisture. Both are always active regardless of heating/cooling mode.
+
+ESPHome does not have a native `humidifier` platform, so this component exposes humidistat controls as individual entities:
+
+| Entity | Platform | Purpose |
+| :--- | :--- | :--- |
+| `humidity` | sensor | Current relative humidity (%) |
+| `humidification_setpoint` | number | Humidification target (15-50%, writable) |
+| `dehumidification_setpoint` | number | Dehumidification target (35-65%, writable) |
+| `humidifier_mode` | select | Humidifier mode (Auto/Manual, writable) |
+| `dehumidifier_mode` | select | Dehumidifier mode (Auto/Manual, writable) |
+| `humidifier_running` | binary_sensor | Humidifier relay active |
+| `dehumidifier_running` | binary_sensor | Active dehumidification or AXB relay active |
+
+### Getting Proper Humidifier Cards in Lovelace
+
+To display these as full humidifier/dehumidifier cards (with target slider, mode selector, and on/off toggle), create **Home Assistant template humidifier entities** that wrap the ESPHome entities above.
+
+A ready-to-paste configuration is provided in **[`docs/ha_humidifier_templates.yaml`](ha_humidifier_templates.yaml)**. Copy it into your HA `configuration.yaml` and replace `waterfurnace_aurora` with your ESPHome device name.
+
+This creates two entities:
+- `humidifier.aurora_humidifier` — proper humidifier card (device_class: humidifier)
+- `humidifier.aurora_dehumidifier` — proper dehumidifier card (device_class: dehumidifier)

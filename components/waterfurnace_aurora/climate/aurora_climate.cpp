@@ -29,6 +29,7 @@ climate::ClimateTraits AuroraClimate::traits() {
   
   // Feature flags - use add_feature_flags() instead of deprecated set_supports_*() methods
   traits.add_feature_flags(climate::CLIMATE_SUPPORTS_CURRENT_TEMPERATURE);
+  traits.add_feature_flags(climate::CLIMATE_SUPPORTS_CURRENT_HUMIDITY);
   traits.add_feature_flags(climate::CLIMATE_REQUIRES_TWO_POINT_TARGET_TEMPERATURE);
   traits.add_feature_flags(climate::CLIMATE_SUPPORTS_ACTION);
   
@@ -37,10 +38,14 @@ climate::ClimateTraits AuroraClimate::traits() {
   traits.add_supported_mode(climate::CLIMATE_MODE_HEAT_COOL);  // Auto
   traits.add_supported_mode(climate::CLIMATE_MODE_COOL);
   traits.add_supported_mode(climate::CLIMATE_MODE_HEAT);
+  traits.add_supported_mode(climate::CLIMATE_MODE_DRY);  // Active dehumidification (VS Drive)
   
   // Supported fan modes from registers.rb FAN_MODE
+  // Auto and On (Continuous) are built-in ESPHome fan modes.
+  // Intermittent is a WaterFurnace-specific mode exposed as a custom fan mode string.
   traits.add_supported_fan_mode(climate::CLIMATE_FAN_AUTO);
   traits.add_supported_fan_mode(climate::CLIMATE_FAN_ON);  // Continuous
+  traits.set_supported_custom_fan_modes({CUSTOM_FAN_MODE_INTERMITTENT});
   
   // Presets - use BOOST for emergency heat (there's no CLIMATE_PRESET_EMERGENCY_HEAT)
   traits.add_supported_preset(climate::CLIMATE_PRESET_NONE);
@@ -63,13 +68,20 @@ void AuroraClimate::control(const climate::ClimateCall &call) {
 
   // Handle mode change
   if (call.get_mode().has_value()) {
-    HeatingMode aurora_mode;
-    if (!esphome_to_aurora_mode(*call.get_mode(), aurora_mode)) {
-      ESP_LOGW(TAG, "Unsupported mode");
-      return;
-    }
-    if (this->parent_->set_hvac_mode(aurora_mode)) {
-      this->mode = *call.get_mode();
+    // DRY mode is display-only — Aurora enters dehumidify automatically based on humidistat settings.
+    // Skip only the mode write; fall through to handle any other fields in this call
+    // (e.g., setpoints or fan mode sent in the same ClimateCall).
+    if (*call.get_mode() == climate::CLIMATE_MODE_DRY) {
+      ESP_LOGW(TAG, "DRY mode is display-only; ignoring mode change (other fields in this call still processed)");
+    } else {
+      HeatingMode aurora_mode;
+      if (!esphome_to_aurora_mode(*call.get_mode(), aurora_mode)) {
+        ESP_LOGW(TAG, "Unsupported mode");
+        return;
+      }
+      if (this->parent_->set_hvac_mode(aurora_mode)) {
+        this->mode = *call.get_mode();
+      }
     }
   }
 
@@ -89,11 +101,17 @@ void AuroraClimate::control(const climate::ClimateCall &call) {
     }
   }
 
-  // Handle fan mode
+  // Handle fan mode (built-in: Auto/On, or custom: Intermittent)
   if (call.get_fan_mode().has_value()) {
+    // Built-in fan mode selected (Auto or On/Continuous)
     FanMode aurora_fan = esphome_to_aurora_fan(*call.get_fan_mode());
     if (this->parent_->set_fan_mode(aurora_fan)) {
       this->fan_mode = *call.get_fan_mode();
+    }
+  } else if (call.has_custom_fan_mode()) {
+    // Custom fan mode selected (Intermittent)
+    if (this->parent_->set_fan_mode(FanMode::INTERMITTENT)) {
+      this->set_custom_fan_mode_(CUSTOM_FAN_MODE_INTERMITTENT);
     }
   }
 
@@ -140,6 +158,12 @@ void AuroraClimate::update_state_() {
     this->current_temperature = fahrenheit_to_celsius(ambient);
   }
 
+  // Update current humidity (register 741 — raw %)
+  float rh = this->parent_->get_relative_humidity();
+  if (!std::isnan(rh)) {
+    this->current_humidity = rh;
+  }
+
   // Update setpoints (hardware reports °F, climate entity uses °C)
   // Skip during write cooldown — prevents stale device read-back from
   // overwriting the optimistic value set by control().
@@ -170,9 +194,13 @@ void AuroraClimate::update_state_() {
   bool cooling = (outputs & OUTPUT_RV) != 0;
   bool aux_heat = (outputs & (OUTPUT_EH1 | OUTPUT_EH2)) != 0;
   bool blower = (outputs & OUTPUT_BLOWER) != 0;
+  bool dehumidifying = this->parent_->is_active_dehumidify();
   
   if (this->parent_->is_locked_out()) {
     this->action = climate::CLIMATE_ACTION_OFF;
+  } else if (dehumidifying) {
+    // VS Drive active dehumidification — show as DRYING
+    this->action = climate::CLIMATE_ACTION_DRYING;
   } else if (compressor && cooling) {
     this->action = climate::CLIMATE_ACTION_COOLING;
   } else if (compressor || aux_heat) {
@@ -184,8 +212,16 @@ void AuroraClimate::update_state_() {
   }
 
   // Update fan mode (skip during fan cooldown)
+  // Built-in modes (Auto/On) set fan_mode; Intermittent uses custom_fan_mode.
   if (!this->parent_->fan_cooldown_active()) {
-    this->fan_mode = aurora_to_esphome_fan(this->parent_->get_fan_mode());
+    FanMode aurora_fan = this->parent_->get_fan_mode();
+    auto builtin = aurora_to_esphome_fan(aurora_fan);
+    if (builtin.has_value()) {
+      this->fan_mode = *builtin;
+    } else {
+      // Intermittent — set via protected custom fan mode API
+      this->set_custom_fan_mode_(CUSTOM_FAN_MODE_INTERMITTENT);
+    }
   }
 
   this->publish_state();

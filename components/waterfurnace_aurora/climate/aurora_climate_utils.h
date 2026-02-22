@@ -12,6 +12,11 @@
 namespace esphome {
 namespace waterfurnace_aurora {
 
+// Custom fan mode string for Intermittent (matches WaterFurnace thermostat UI)
+// ESPHome's built-in ClimateFanMode enum has no "Intermittent" value, so we use
+// the custom fan mode mechanism which allows arbitrary string labels.
+static const char *const CUSTOM_FAN_MODE_INTERMITTENT = "Intermittent";
+
 // Convert Aurora HeatingMode to ESPHome ClimateMode
 // Returns false if the mode is not mappable (caller should handle)
 inline bool aurora_to_esphome_mode(HeatingMode aurora_mode,
@@ -61,20 +66,23 @@ inline bool esphome_to_aurora_mode(climate::ClimateMode mode, HeatingMode &auror
   }
 }
 
-// Convert Aurora FanMode to ESPHome ClimateFanMode
-inline climate::ClimateFanMode aurora_to_esphome_fan(FanMode aurora_fan) {
+// Convert Aurora FanMode to ESPHome ClimateFanMode for built-in modes.
+// Returns the built-in fan mode, or nullopt for modes that need custom handling (Intermittent).
+// Callers should check for INTERMITTENT separately and use set_custom_fan_mode_() from within
+// the climate class (it's a protected method).
+inline optional<climate::ClimateFanMode> aurora_to_esphome_fan(FanMode aurora_fan) {
   switch (aurora_fan) {
     case FanMode::AUTO:
       return climate::CLIMATE_FAN_AUTO;
     case FanMode::CONTINUOUS:
-    case FanMode::INTERMITTENT:
       return climate::CLIMATE_FAN_ON;
+    case FanMode::INTERMITTENT:
     default:
-      return climate::CLIMATE_FAN_AUTO;
+      return {};  // Needs custom handling or unknown — caller decides
   }
 }
 
-// Convert ESPHome ClimateFanMode to Aurora FanMode
+// Convert ESPHome ClimateFanMode (built-in) to Aurora FanMode
 inline FanMode esphome_to_aurora_fan(climate::ClimateFanMode fan_mode) {
   switch (fan_mode) {
     case climate::CLIMATE_FAN_AUTO:
