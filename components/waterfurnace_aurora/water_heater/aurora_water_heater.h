@@ -1,13 +1,12 @@
 #pragma once
 
-#include "esphome/core/component.h"
 #include "esphome/components/water_heater/water_heater.h"
 #include "../waterfurnace_aurora.h"
 
 namespace esphome {
 namespace waterfurnace_aurora {
 
-class AuroraWaterHeater : public water_heater::WaterHeater, public Component {
+class AuroraWaterHeater : public water_heater::WaterHeater {
  public:
   void setup() override;
   void dump_config() override;

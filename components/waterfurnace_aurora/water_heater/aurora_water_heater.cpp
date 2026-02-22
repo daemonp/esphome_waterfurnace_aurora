@@ -10,6 +10,9 @@ namespace waterfurnace_aurora {
 static const char *const TAG = "aurora.water_heater";
 
 void AuroraWaterHeater::setup() {
+  // Initialize flash preferences for state persistence across reboots.
+  water_heater::WaterHeater::setup();
+
   // Register with parent to receive data update notifications.
   if (this->parent_ != nullptr) {
     this->parent_->register_listener([this]() { this->update_state_(); });
