@@ -9,13 +9,9 @@ from esphome.const import (
     DEVICE_CLASS_TEMPERATURE,
     DEVICE_CLASS_HUMIDITY,
     UNIT_PERCENT,
-    UNIT_MINUTE,
 )
 
-from .. import waterfurnace_aurora_ns, WaterFurnaceAurora, CONF_AURORA_ID
-
-UNIT_FAHRENHEIT = "°F"
-CONF_ZONE = "zone"
+from .. import waterfurnace_aurora_ns, WaterFurnaceAurora, CONF_AURORA_ID, CONF_ZONE, validate_zone, UNIT_FAHRENHEIT
 
 DEPENDENCIES = ["waterfurnace_aurora"]
 CODEOWNERS = ["@daemonp"]
@@ -82,14 +78,6 @@ PUMP_SPEED_SCHEMA = number.number_schema(
         cv.Optional(CONF_STEP, default=1): cv.float_,
     }
 ).extend(cv.COMPONENT_SCHEMA)
-
-def validate_zone(value):
-    """Validate zone number is 1-6."""
-    value = cv.int_(value)
-    if value < 1 or value > 6:
-        raise cv.Invalid("Zone number must be between 1 and 6")
-    return value
-
 
 # Schema for fan intermittent on time (0, 5, 10, 15, 20, 25 minutes)
 # Supports optional zone parameter for IZ2 per-zone control.

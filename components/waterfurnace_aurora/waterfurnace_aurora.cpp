@@ -51,9 +51,9 @@ void WaterFurnaceAurora::transition_(State new_state) {
   }
 }
 
-/// Common send logic — factored out to avoid duplication across overloads.
-void WaterFurnaceAurora::send_request_(const std::vector<uint8_t> &frame, PendingRequest type,
-                                        const std::vector<uint16_t> &expected_addrs) {
+/// Common send logic — flushes bus, toggles RS-485 to TX, writes frame, sets timing.
+/// Caller must set expected_addresses_ before calling this.
+void WaterFurnaceAurora::send_request_common_(const std::vector<uint8_t> &frame, PendingRequest type) {
   // Clear any stale data on the bus (bounded to prevent spin if junk is streaming)
   for (int i = 0; i < 512 && this->available(); i++) {
     this->read();
@@ -74,36 +74,26 @@ void WaterFurnaceAurora::send_request_(const std::vector<uint8_t> &frame, Pendin
   this->write_array(frame.data(), frame.size());
   
   this->pending_request_ = type;
-  this->expected_addresses_ = expected_addrs;
   this->last_request_time_ = millis();
   this->tx_complete_time_ = millis() + this->tx_time_ms_(frame.size());
   this->transition_(State::TX_PENDING);
 }
 
 void WaterFurnaceAurora::send_request_(const std::vector<uint8_t> &frame, PendingRequest type,
+                                        const std::vector<uint16_t> &expected_addrs) {
+  this->expected_addresses_ = expected_addrs;
+  this->send_request_common_(frame, type);
+}
+
+void WaterFurnaceAurora::send_request_(const std::vector<uint8_t> &frame, PendingRequest type,
                                         std::vector<uint16_t> &&expected_addrs) {
-  // Clear any stale data on the bus (bounded to prevent spin if junk is streaming)
-  for (int i = 0; i < 512 && this->available(); i++) {
-    this->read();
-  }
-  this->rx_buffer_.clear();
-  
-  if (this->flow_control_pin_ != nullptr) {
-    this->flow_control_pin_->digital_write(true);
-  }
-  
-  this->write_array(frame.data(), frame.size());
-  
-  this->pending_request_ = type;
   this->expected_addresses_ = std::move(expected_addrs);
-  this->last_request_time_ = millis();
-  this->tx_complete_time_ = millis() + this->tx_time_ms_(frame.size());
-  this->transition_(State::TX_PENDING);
+  this->send_request_common_(frame, type);
 }
 
 void WaterFurnaceAurora::send_request_(const std::vector<uint8_t> &frame, PendingRequest type) {
-  static const std::vector<uint16_t> empty;
-  this->send_request_(frame, type, empty);
+  this->expected_addresses_.clear();
+  this->send_request_common_(frame, type);
 }
 
 bool WaterFurnaceAurora::read_frame_(std::vector<uint8_t> &frame) {
@@ -260,6 +250,7 @@ void WaterFurnaceAurora::setup() {
   this->response_frame_.reserve(protocol::MAX_FRAME_SIZE);
   this->listeners_.reserve(MAX_LISTENERS);
   this->pending_writes_.reserve(MAX_PENDING_WRITES);
+  this->register_cache_.reserve(128);  // Typical poll cycle reads 60-100 registers
   this->cached_fault_history_.reserve(256);
   this->last_successful_response_ = millis();
   this->update_connected_(false);
@@ -996,7 +987,9 @@ void WaterFurnaceAurora::process_fault_history_response_(const protocol::ParsedR
     
     if (!this->cached_fault_history_.empty()) this->cached_fault_history_ += "; ";
     this->cached_fault_history_ += "E";
-    this->cached_fault_history_ += std::to_string(fault_code);
+    char code_buf[4];
+    snprintf(code_buf, sizeof(code_buf), "%u", fault_code);
+    this->cached_fault_history_ += code_buf;
     
     const char *desc = get_fault_description(fault_code);
     if (desc && strcmp(desc, "Unknown Fault") != 0) {
@@ -1024,6 +1017,26 @@ void WaterFurnaceAurora::process_fault_history_response_(const protocol::ParsedR
 void WaterFurnaceAurora::publish_all_sensors_() {
   const RegisterMap &regs = this->register_cache_;
   
+  this->publish_fault_sensors_(regs);
+  this->publish_system_status_sensors_(regs);
+  this->publish_temperature_sensors_(regs);
+  this->publish_mode_sensors_(regs);
+  this->publish_power_loop_sensors_(regs);
+  this->publish_vs_drive_sensors_(regs);
+  this->publish_equipment_sensors_(regs);
+  this->publish_humidity_control_sensors_(regs);
+  this->publish_iz2_zone_sensors_(regs);
+  
+  // Derived sensors
+  this->publish_derived_sensors(regs);
+  
+  // Notify listeners
+  for (auto &listener : this->listeners_) {
+    listener();
+  }
+}
+
+void WaterFurnaceAurora::publish_fault_sensors_(const RegisterMap &regs) {
   // Fault status
   {
     const uint16_t *val = reg_find(regs, registers::LAST_FAULT);
@@ -1076,7 +1089,9 @@ void WaterFurnaceAurora::publish_all_sensors_() {
                                       get_inputs_string(*val));
     }
   }
-  
+}
+
+void WaterFurnaceAurora::publish_system_status_sensors_(const RegisterMap &regs) {
   // System outputs
   {
     const uint16_t *val = reg_find(regs, registers::SYSTEM_OUTPUTS);
@@ -1145,7 +1160,9 @@ void WaterFurnaceAurora::publish_all_sensors_() {
   // Current mode
   this->publish_text_if_changed(this->current_mode_sensor_, this->cached_mode_string_,
                                  this->get_current_mode_string());
-  
+}
+
+void WaterFurnaceAurora::publish_temperature_sensors_(const RegisterMap &regs) {
   // Temperatures
   {
     const uint16_t *val_amb = reg_find(regs, registers::AMBIENT_TEMP);
@@ -1211,7 +1228,9 @@ void WaterFurnaceAurora::publish_all_sensors_() {
         this->dhw_temp_sensor_->publish_state(this->dhw_temp_);
     }
   }
-  
+}
+
+void WaterFurnaceAurora::publish_mode_sensors_(const RegisterMap &regs) {
   // HVAC mode (respect write cooldown)
   if ((millis() - this->last_mode_write_) > WRITE_COOLDOWN_MS) {
     const uint16_t *val_mode = reg_find(regs, registers::HEATING_MODE_READ);
@@ -1238,7 +1257,9 @@ void WaterFurnaceAurora::publish_all_sensors_() {
                                      get_fan_mode_string(this->fan_mode_));
     }
   }
-  
+}
+
+void WaterFurnaceAurora::publish_power_loop_sensors_(const RegisterMap &regs) {
   // Line voltage
   this->publish_sensor(regs, registers::LINE_VOLTAGE, this->line_voltage_sensor_);
   
@@ -1259,7 +1280,9 @@ void WaterFurnaceAurora::publish_all_sensors_() {
         this->loop_pressure_sensor_->publish_state(fval);
     }
   }
-  
+}
+
+void WaterFurnaceAurora::publish_vs_drive_sensors_(const RegisterMap &regs) {
   // VS Drive
   this->publish_sensor(regs, registers::COMPRESSOR_SPEED_ACTUAL, this->compressor_speed_sensor_);
   this->publish_sensor_tenths(regs, registers::VS_DISCHARGE_PRESSURE, this->discharge_pressure_sensor_);
@@ -1318,7 +1341,9 @@ void WaterFurnaceAurora::publish_all_sensors_() {
                                       get_vs_alarm_string(*val_a1, *val_a2));
     }
   }
-  
+}
+
+void WaterFurnaceAurora::publish_equipment_sensors_(const RegisterMap &regs) {
   // FP1/FP2
   this->publish_sensor_signed_tenths(regs, registers::FP1_TEMP, this->fp1_sensor_);
   this->publish_sensor_signed_tenths(regs, registers::FP2_TEMP, this->fp2_sensor_);
@@ -1356,7 +1381,9 @@ void WaterFurnaceAurora::publish_all_sensors_() {
   
   this->publish_sensor_int32(regs, registers::HEAT_OF_EXTRACTION, this->heat_of_extraction_sensor_);
   this->publish_sensor_int32(regs, registers::HEAT_OF_REJECTION, this->heat_of_rejection_sensor_);
-  
+}
+
+void WaterFurnaceAurora::publish_humidity_control_sensors_(const RegisterMap &regs) {
   // Humidifier/Dehumidifier running
   publish_binary_if_changed_(this->humidifier_running_sensor_,
                              (this->system_outputs_ & OUTPUT_ACCESSORY) != 0);
@@ -1403,57 +1430,50 @@ void WaterFurnaceAurora::publish_all_sensors_() {
       }
     }
   }
+}
+
+void WaterFurnaceAurora::publish_iz2_zone_sensors_(const RegisterMap &regs) {
+  if (!this->has_iz2_ || this->num_iz2_zones_ == 0) return;
   
-  // IZ2 zone data
-  if (this->has_iz2_ && this->num_iz2_zones_ > 0) {
-    for (uint8_t zone = 1; zone <= this->num_iz2_zones_; zone++) {
-      IZ2ZoneData &zone_data = this->iz2_zones_[zone - 1];
-      
-      const uint16_t *val_amb = reg_find(regs, registers::IZ2_AMBIENT_BASE + ((zone - 1) * 3));
-      if (val_amb) zone_data.ambient_temperature = to_signed_tenths(*val_amb);
-      
-      const uint16_t *val_c1 = reg_find(regs, registers::IZ2_CONFIG1_BASE + ((zone - 1) * 3));
-      if (val_c1) {
-        uint16_t config1 = *val_c1;
-        zone_data.target_fan_mode = iz2_extract_fan_mode(config1);
-        zone_data.fan_on_time = iz2_extract_fan_on_time(config1);
-        zone_data.fan_off_time = iz2_extract_fan_off_time(config1);
-        zone_data.cooling_setpoint = iz2_extract_cooling_setpoint(config1);
-      }
-      
-      const uint16_t *val_c2 = reg_find(regs, registers::IZ2_CONFIG2_BASE + ((zone - 1) * 3));
-      if (val_c2 && val_c1) {
-        uint16_t config2 = *val_c2;
-        uint16_t config1 = *val_c1;
-        zone_data.current_call = iz2_extract_current_call(config2);
-        zone_data.target_mode = iz2_extract_mode(config2);
-        zone_data.damper_open = iz2_extract_damper_open(config2);
-        zone_data.heating_setpoint = iz2_extract_heating_setpoint(config1, config2);
-      }
-      
-      const uint16_t *val_c3 = reg_find(regs, registers::IZ2_CONFIG3_BASE + ((zone - 1) * 3));
-      if (val_c3) {
-        uint16_t config3 = *val_c3;
-        zone_data.priority = iz2_extract_priority(config3);
-        zone_data.size = iz2_extract_size(config3);
-        zone_data.normalized_size = iz2_extract_normalized_size(config3);
-      }
+  for (uint8_t zone = 1; zone <= this->num_iz2_zones_; zone++) {
+    IZ2ZoneData &zone_data = this->iz2_zones_[zone - 1];
+    
+    const uint16_t *val_amb = reg_find(regs, registers::IZ2_AMBIENT_BASE + ((zone - 1) * 3));
+    if (val_amb) zone_data.ambient_temperature = to_signed_tenths(*val_amb);
+    
+    const uint16_t *val_c1 = reg_find(regs, registers::IZ2_CONFIG1_BASE + ((zone - 1) * 3));
+    if (val_c1) {
+      uint16_t config1 = *val_c1;
+      zone_data.target_fan_mode = iz2_extract_fan_mode(config1);
+      zone_data.fan_on_time = iz2_extract_fan_on_time(config1);
+      zone_data.fan_off_time = iz2_extract_fan_off_time(config1);
+      zone_data.cooling_setpoint = iz2_extract_cooling_setpoint(config1);
     }
     
-    this->publish_sensor(regs, registers::IZ2_COMPRESSOR_SPEED_DESIRED, this->iz2_compressor_speed_sensor_);
-    {
-      const uint16_t *val = reg_find(regs, registers::IZ2_BLOWER_SPEED_DESIRED);
-      if (val && this->iz2_blower_speed_sensor_ != nullptr)
-        this->iz2_blower_speed_sensor_->publish_state(iz2_fan_desired(*val));
+    const uint16_t *val_c2 = reg_find(regs, registers::IZ2_CONFIG2_BASE + ((zone - 1) * 3));
+    if (val_c2 && val_c1) {
+      uint16_t config2 = *val_c2;
+      uint16_t config1 = *val_c1;
+      zone_data.current_call = iz2_extract_current_call(config2);
+      zone_data.target_mode = iz2_extract_mode(config2);
+      zone_data.damper_open = iz2_extract_damper_open(config2);
+      zone_data.heating_setpoint = iz2_extract_heating_setpoint(config1, config2);
+    }
+    
+    const uint16_t *val_c3 = reg_find(regs, registers::IZ2_CONFIG3_BASE + ((zone - 1) * 3));
+    if (val_c3) {
+      uint16_t config3 = *val_c3;
+      zone_data.priority = iz2_extract_priority(config3);
+      zone_data.size = iz2_extract_size(config3);
+      zone_data.normalized_size = iz2_extract_normalized_size(config3);
     }
   }
   
-  // Derived sensors
-  this->publish_derived_sensors(regs);
-  
-  // Notify listeners
-  for (auto &listener : this->listeners_) {
-    listener();
+  this->publish_sensor(regs, registers::IZ2_COMPRESSOR_SPEED_DESIRED, this->iz2_compressor_speed_sensor_);
+  {
+    const uint16_t *val = reg_find(regs, registers::IZ2_BLOWER_SPEED_DESIRED);
+    if (val && this->iz2_blower_speed_sensor_ != nullptr)
+      this->iz2_blower_speed_sensor_->publish_state(iz2_fan_desired(*val));
   }
 }
 

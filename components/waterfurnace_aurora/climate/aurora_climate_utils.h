@@ -17,7 +17,8 @@ namespace waterfurnace_aurora {
 // Custom fan mode string for Intermittent (matches WaterFurnace thermostat UI)
 // ESPHome's built-in ClimateFanMode enum has no "Intermittent" value, so we use
 // the custom fan mode mechanism which allows arbitrary string labels.
-static const char *const CUSTOM_FAN_MODE_INTERMITTENT = "Intermittent";
+// inline constexpr avoids per-TU duplication (vs. static const in a header).
+inline constexpr const char *CUSTOM_FAN_MODE_INTERMITTENT = "Intermittent";
 
 // Convert Aurora HeatingMode to ESPHome ClimateMode
 // Returns false if the mode is not mappable (caller should handle)
@@ -100,6 +101,9 @@ inline FanMode esphome_to_aurora_fan(climate::ClimateFanMode fan_mode) {
 // Humidity target helpers — shared by AuroraClimate and AuroraIZ2Climate
 // ============================================================================
 
+// TAG for humidity helper logging — inline constexpr avoids per-TU duplication.
+inline constexpr const char *TAG_CLIMATE_UTILS = "aurora.climate";
+
 /// Route a target_humidity write to the correct humidistat register based on HVAC mode.
 /// Clamps to the mode-appropriate sub-range (15-50% for humidification, 35-65% for
 /// dehumidification) with proper rounding. Returns true and sets out_target on success.
@@ -112,7 +116,7 @@ inline bool route_humidity_write(WaterFurnaceAurora *hub, climate::ClimateMode m
       float clamped_f = std::max(15.0f, std::min(50.0f, std::round(target)));
       uint8_t clamped = static_cast<uint8_t>(clamped_f);
       if (std::round(target) != clamped_f) {
-        ESP_LOGW("aurora.climate", "%sHumidification target clamped from %.0f to %u%%",
+        ESP_LOGW(TAG_CLIMATE_UTILS, "%sHumidification target clamped from %.0f to %u%%",
                  log_prefix, target, clamped);
       }
       if (hub->set_humidification_target(clamped)) {
@@ -125,7 +129,7 @@ inline bool route_humidity_write(WaterFurnaceAurora *hub, climate::ClimateMode m
       float clamped_f = std::max(35.0f, std::min(65.0f, std::round(target)));
       uint8_t clamped = static_cast<uint8_t>(clamped_f);
       if (std::round(target) != clamped_f) {
-        ESP_LOGW("aurora.climate", "%sDehumidification target clamped from %.0f to %u%%",
+        ESP_LOGW(TAG_CLIMATE_UTILS, "%sDehumidification target clamped from %.0f to %u%%",
                  log_prefix, target, clamped);
       }
       if (hub->set_dehumidification_target(clamped)) {
@@ -135,7 +139,7 @@ inline bool route_humidity_write(WaterFurnaceAurora *hub, climate::ClimateMode m
       return false;
     }
     default:
-      ESP_LOGW("aurora.climate", "%sTarget humidity not applicable in current mode; ignoring",
+      ESP_LOGW(TAG_CLIMATE_UTILS, "%sTarget humidity not applicable in current mode; ignoring",
                log_prefix);
       return false;
   }

@@ -3,6 +3,7 @@ import esphome.config_validation as cv
 from esphome.components import sensor
 from esphome.const import (
     CONF_ID,
+    DEVICE_CLASS_CURRENT,
     DEVICE_CLASS_TEMPERATURE,
     DEVICE_CLASS_HUMIDITY,
     DEVICE_CLASS_VOLTAGE,
@@ -10,13 +11,14 @@ from esphome.const import (
     DEVICE_CLASS_PRESSURE,
     ENTITY_CATEGORY_DIAGNOSTIC,
     STATE_CLASS_MEASUREMENT,
+    UNIT_AMPERE,
     UNIT_CELSIUS,
     UNIT_PERCENT,
     UNIT_VOLT,
     UNIT_WATT,
 )
 
-from .. import waterfurnace_aurora_ns, WaterFurnaceAurora, CONF_AURORA_ID
+from .. import waterfurnace_aurora_ns, WaterFurnaceAurora, CONF_AURORA_ID, UNIT_FAHRENHEIT
 
 DEPENDENCIES = ["waterfurnace_aurora"]
 CODEOWNERS = ["@daemonp"]
@@ -111,11 +113,9 @@ CONF_COP = "cop"
 CONF_WATER_DELTA_T = "water_delta_t"
 CONF_APPROACH_TEMPERATURE = "approach_temperature"
 
-# Unit definitions
-UNIT_FAHRENHEIT = "°F"
+# Unit definitions (UNIT_AMPERE imported from esphome.const, UNIT_FAHRENHEIT from parent)
 UNIT_PSI = "psi"
 UNIT_GPM = "gpm"
-UNIT_AMPERE = "A"
 
 # Sensor schema for temperature sensors
 TEMPERATURE_SENSOR_SCHEMA = sensor.sensor_schema(
@@ -326,25 +326,25 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_BLOWER_AMPS): sensor.sensor_schema(
             unit_of_measurement=UNIT_AMPERE,
             accuracy_decimals=1,
-            device_class="current",
+            device_class=DEVICE_CLASS_CURRENT,
             state_class=STATE_CLASS_MEASUREMENT,
         ),
         cv.Optional(CONF_AUX_AMPS): sensor.sensor_schema(
             unit_of_measurement=UNIT_AMPERE,
             accuracy_decimals=1,
-            device_class="current",
+            device_class=DEVICE_CLASS_CURRENT,
             state_class=STATE_CLASS_MEASUREMENT,
         ),
         cv.Optional(CONF_COMPRESSOR1_AMPS): sensor.sensor_schema(
             unit_of_measurement=UNIT_AMPERE,
             accuracy_decimals=1,
-            device_class="current",
+            device_class=DEVICE_CLASS_CURRENT,
             state_class=STATE_CLASS_MEASUREMENT,
         ),
         cv.Optional(CONF_COMPRESSOR2_AMPS): sensor.sensor_schema(
             unit_of_measurement=UNIT_AMPERE,
             accuracy_decimals=1,
-            device_class="current",
+            device_class=DEVICE_CLASS_CURRENT,
             state_class=STATE_CLASS_MEASUREMENT,
         ),
         # Humidifier sensors
