@@ -12,6 +12,7 @@ tests/test_registers
 tests/test_hub
 
 # Local-only files
+esphome/
 home.yaml
 mise.toml
 CODEREVIEW-esphome.md

@@ -172,8 +172,24 @@ Complete reference of all Home Assistant entities created by this component.
 
 The component creates climate entities for thermostat control:
 
-- **Main thermostat** — Full HVAC control (heat, cool, auto, emergency heat) with dual setpoints and fan modes
-- **IZ2 Zone thermostats** (zones 1-6) — Per-zone climate entities with independent temperature, setpoints, mode, and fan controls
+- **Main thermostat** — Full HVAC control (heat, cool, auto, emergency heat) with dual setpoints, fan modes, and humidity target
+- **IZ2 Zone thermostats** (zones 1-6) — Per-zone climate entities with independent temperature, setpoints, mode, fan, and humidity target controls
+
+### Mode-Aware Humidity Slider (`target_humidity`)
+
+The climate card includes a humidity slider that **automatically controls the correct humidistat target** based on the current HVAC mode:
+
+| HVAC Mode | Slider Controls | Valid Range |
+| :--- | :--- | :--- |
+| Heat, Emergency Heat (Boost), Auto | Humidification target | 15–50% |
+| Cool | Dehumidification target | 35–65% |
+| Off | No-op (value preserved) | — |
+
+When you switch modes, the slider value updates to reflect the newly relevant target. The two targets are independent values stored in different bytes of the same register — adjusting one does not affect the other.
+
+The slider range is 15–65% (the union of both sub-ranges). Out-of-range values are clamped automatically with a log warning.
+
+On IZ2 systems, all zones share the same system-wide humidistat targets, but each zone's slider routes based on *that zone's* mode. Zone 1 in Heat shows the humidification target while Zone 2 in Cool shows the dehumidification target.
 
 > **Note**: On IZ2 systems, disable the main thermostat entity and use zone-specific entities instead. See [IZ2 Zone Configuration](../README.md#iz2-zone-configuration) in the README.
 
@@ -183,11 +199,17 @@ The component creates a water heater entity for DHW (Domestic Hot Water) control
 
 - **Domestic Hot Water** — Current water temperature, target setpoint (100-140°F), and mode (Off / Heat Pump)
 
-## Humidistat (Humidifier / Dehumidifier Cards)
+## Humidistat (Humidifier / Dehumidifier)
 
-The Aurora has a built-in humidistat with **two independent targets**: a humidification target (15-50%) for adding moisture and a dehumidification target (35-65%) for removing moisture. Both are always active regardless of heating/cooling mode.
+The Aurora has a built-in humidistat with **two independent targets**: a humidification target (15-50%) for adding moisture and a dehumidification target (35-65%) for removing moisture.
 
-ESPHome does not have a native `humidifier` platform, so this component exposes humidistat controls as individual entities:
+### Climate Card Integration
+
+The **simplest way** to control humidity is through the climate card's built-in humidity slider. The slider automatically controls the correct target based on the current HVAC mode (see [Mode-Aware Humidity Slider](#mode-aware-humidity-slider-target_humidity) above). No additional HA configuration is needed.
+
+### Individual Entities (Advanced)
+
+For power users, automation backing, or users who prefer separate humidifier domain cards, the component also exposes humidistat controls as individual entities:
 
 | Entity | Platform | Purpose |
 | :--- | :--- | :--- |
@@ -199,11 +221,11 @@ ESPHome does not have a native `humidifier` platform, so this component exposes 
 | `humidifier_running` | binary_sensor | Humidifier relay active |
 | `dehumidifier_running` | binary_sensor | Active dehumidification or AXB relay active |
 
-### Getting Proper Humidifier Cards in Lovelace
+Both the climate slider and the individual entities write through the same hub methods, so there is no risk of desynchronization.
 
-To display these as full humidifier/dehumidifier cards (with target slider, mode selector, and on/off toggle), create **Home Assistant template humidifier entities** that wrap the ESPHome entities above.
+### Template Humidifier Cards (Optional)
 
-A ready-to-paste configuration is provided in **[`docs/ha_humidifier_templates.yaml`](ha_humidifier_templates.yaml)**. Copy it into your HA `configuration.yaml` and replace `waterfurnace_aurora` with your ESPHome device name.
+For users who prefer full humidifier/dehumidifier domain cards (with target slider, mode selector, and on/off toggle), a ready-to-paste HA template configuration is provided in **[`docs/ha_humidifier_templates.yaml`](ha_humidifier_templates.yaml)**. Copy it into your HA `configuration.yaml` and replace `waterfurnace_aurora` with your ESPHome device name.
 
 This creates two entities:
 - `humidifier.aurora_humidifier` — proper humidifier card (device_class: humidifier)
