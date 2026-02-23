@@ -11,11 +11,9 @@
 // lives here; the hub just reads/writes raw values.
 //
 // Improvements over rw-wf's registers.h (470 lines):
-//   - RegisterType enum (compile-time) instead of runtime string comparison
-//   - Sentinel-aware conversions built into convert_register()
 //   - Constexpr BitLabel tables for bitmask-to-string (no heap per entry)
+//   - Sentinel-aware conversions (to_signed_tenths, to_tenths)
 //   - IZ2 zone extraction as standalone inline functions (testable)
-//   - RegisterCapability enum with zero-cost dispatch (not string→enum at setup)
 
 #include <algorithm>
 #include <cmath>
@@ -26,43 +24,6 @@
 
 namespace esphome {
 namespace waterfurnace_aurora {
-
-// ============================================================================
-// Register Type System
-// ============================================================================
-
-/// Data type of a register value. Used for converting raw uint16_t to float.
-/// rw-wf stores this as std::string ("signed_tenths") and does runtime strcmp.
-/// We use an enum — zero overhead at runtime.
-/// NOTE: Currently used by convert_register() for table-driven sensor registration
-/// (planned future refactor to replace the per-sensor publish_sensor_*() calls).
-enum class RegisterType : uint8_t {
-  UNSIGNED,        // Raw uint16
-  SIGNED,          // int16
-  TENTHS,          // uint16 / 10.0
-  SIGNED_TENTHS,   // int16 / 10.0 (sentinel-aware: -999.9/999.9 → NAN)
-  HUNDREDTHS,      // uint16 / 100.0
-  BOOLEAN,         // 0 or 1
-  UINT32,          // Two consecutive registers: (hi << 16) | lo
-  INT32,           // Two consecutive registers, signed
-};
-
-/// Hardware capability required to poll a register.
-/// rw-wf passes this as a string from Python and converts at setup.
-/// We use an enum directly — Python codegen emits the enum value.
-/// NOTE: Infrastructure for a planned table-driven polling model where
-/// build_poll_addresses_() would be auto-generated from a register table.
-enum class RegisterCapability : uint8_t {
-  NONE,               // Always pollable
-  AWL_THERMOSTAT,     // Thermostat v3.0+
-  AWL_AXB,            // AXB v2.0+
-  AWL_COMMUNICATING,  // Thermostat v3.0+ OR IZ2 v2.0+
-  AXB,                // AXB present
-  REFRIGERATION,      // AXB + energy_monitor >= 1
-  ENERGY,             // AXB + energy_monitor == 2
-  VS_DRIVE,           // VS drive present
-  IZ2,                // IZ2 with AWL v2.0+
-};
 
 // ============================================================================
 // Enums (from registers.rb)
@@ -371,39 +332,6 @@ inline constexpr size_t VS_SAFE_MODE_BITS_COUNT = 3;
 // ============================================================================
 // Data Conversion Functions
 // ============================================================================
-
-/// Convert raw uint16_t register value to float based on RegisterType.
-/// Sentinel values (-999.9 / 999.9) are converted to NAN automatically.
-/// rw-wf does sentinel detection per-entity; we do it once here.
-inline float convert_register(uint16_t raw, RegisterType type) {
-  switch (type) {
-    case RegisterType::UNSIGNED:
-      return static_cast<float>(raw);
-
-    case RegisterType::SIGNED:
-      return static_cast<float>(static_cast<int16_t>(raw));
-
-    case RegisterType::TENTHS:
-      // Sentinel: 999.9 (raw 0x270F) → NAN
-      if (raw == 0x270F) return NAN;
-      return raw / 10.0f;
-
-    case RegisterType::SIGNED_TENTHS: {
-      // Sentinel: -999.9 (raw 0xD8F1) or 999.9 (raw 0x270F) → NAN
-      if (raw == 0xD8F1 || raw == 0x270F) return NAN;
-      return static_cast<int16_t>(raw) / 10.0f;
-    }
-
-    case RegisterType::HUNDREDTHS:
-      return raw / 100.0f;
-
-    case RegisterType::BOOLEAN:
-      return (raw != 0) ? 1.0f : 0.0f;
-
-    default:
-      return static_cast<float>(raw);
-  }
-}
 
 /// Convert raw signed tenths (int16 / 10.0). Standalone convenience function.
 /// Sentinel values (-999.9 = 0xD8F1, 999.9 = 0x270F) map to NAN.

@@ -26,6 +26,16 @@ CONF_HAS_AXB = "has_axb"
 CONF_HAS_VS_DRIVE = "has_vs_drive"
 CONF_HAS_IZ2 = "has_iz2"
 CONF_NUM_IZ2_ZONES = "num_iz2_zones"
+CONF_ZONE = "zone"
+UNIT_FAHRENHEIT = "°F"
+
+def validate_zone(value):
+    """Validate zone number is 1-6."""
+    value = cv.int_(value)
+    if value < 1 or value > 6:
+        raise cv.Invalid("Zone number must be between 1 and 6")
+    return value
+
 
 waterfurnace_aurora_ns = cg.esphome_ns.namespace("waterfurnace_aurora")
 WaterFurnaceAurora = waterfurnace_aurora_ns.class_(

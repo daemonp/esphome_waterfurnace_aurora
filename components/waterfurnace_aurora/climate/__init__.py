@@ -3,12 +3,10 @@ import esphome.config_validation as cv
 from esphome.components import climate
 from esphome.const import CONF_ID
 
-from .. import waterfurnace_aurora_ns, WaterFurnaceAurora, CONF_AURORA_ID
+from .. import waterfurnace_aurora_ns, WaterFurnaceAurora, CONF_AURORA_ID, CONF_ZONE, validate_zone
 
 DEPENDENCIES = ["waterfurnace_aurora"]
 CODEOWNERS = ["@daemonp"]
-
-CONF_ZONE = "zone"
 
 AuroraClimate = waterfurnace_aurora_ns.class_(
     "AuroraClimate", climate.Climate, cg.Component
@@ -17,14 +15,6 @@ AuroraClimate = waterfurnace_aurora_ns.class_(
 AuroraIZ2Climate = waterfurnace_aurora_ns.class_(
     "AuroraIZ2Climate", climate.Climate, cg.Component
 )
-
-
-def validate_zone(value):
-    """Validate zone number is 1-6."""
-    value = cv.int_(value)
-    if value < 1 or value > 6:
-        raise cv.Invalid("Zone number must be between 1 and 6")
-    return value
 
 
 # Main thermostat climate schema (no zone specified)
