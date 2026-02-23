@@ -9,6 +9,8 @@
 #include "esphome/components/climate/climate.h"
 #include "../waterfurnace_aurora.h"
 
+#include <cmath>
+
 namespace esphome {
 namespace waterfurnace_aurora {
 
@@ -91,6 +93,72 @@ inline FanMode esphome_to_aurora_fan(climate::ClimateFanMode fan_mode) {
       return FanMode::CONTINUOUS;
     default:
       return FanMode::AUTO;
+  }
+}
+
+// ============================================================================
+// Humidity target helpers — shared by AuroraClimate and AuroraIZ2Climate
+// ============================================================================
+
+/// Route a target_humidity write to the correct humidistat register based on HVAC mode.
+/// Clamps to the mode-appropriate sub-range (15-50% for humidification, 35-65% for
+/// dehumidification) with proper rounding. Returns true and sets out_target on success.
+/// log_prefix is prepended to warning messages (e.g., "Zone 2: ").
+inline bool route_humidity_write(WaterFurnaceAurora *hub, climate::ClimateMode mode,
+                                 float target, float &out_target, const char *log_prefix) {
+  switch (mode) {
+    case climate::CLIMATE_MODE_HEAT:
+    case climate::CLIMATE_MODE_HEAT_COOL: {
+      float clamped_f = std::max(15.0f, std::min(50.0f, std::round(target)));
+      uint8_t clamped = static_cast<uint8_t>(clamped_f);
+      if (std::round(target) != clamped_f) {
+        ESP_LOGW("aurora.climate", "%sHumidification target clamped from %.0f to %u%%",
+                 log_prefix, target, clamped);
+      }
+      if (hub->set_humidification_target(clamped)) {
+        out_target = clamped_f;
+        return true;
+      }
+      return false;
+    }
+    case climate::CLIMATE_MODE_COOL: {
+      float clamped_f = std::max(35.0f, std::min(65.0f, std::round(target)));
+      uint8_t clamped = static_cast<uint8_t>(clamped_f);
+      if (std::round(target) != clamped_f) {
+        ESP_LOGW("aurora.climate", "%sDehumidification target clamped from %.0f to %u%%",
+                 log_prefix, target, clamped);
+      }
+      if (hub->set_dehumidification_target(clamped)) {
+        out_target = clamped_f;
+        return true;
+      }
+      return false;
+    }
+    default:
+      ESP_LOGW("aurora.climate", "%sTarget humidity not applicable in current mode; ignoring",
+               log_prefix);
+      return false;
+  }
+}
+
+/// Read the mode-appropriate humidistat target from the register cache.
+/// Returns the target value (humidification for heat modes, dehumidification for cool),
+/// or NAN if the register is not cached.
+inline float read_mode_humidity_target(WaterFurnaceAurora *hub, climate::ClimateMode mode) {
+  uint16_t target_reg = (hub->has_iz2() && hub->awl_communicating())
+                            ? registers::IZ2_HUMIDISTAT_TARGETS
+                            : registers::HUMIDISTAT_TARGETS;
+  float raw = hub->get_cached_register(target_reg);
+  if (std::isnan(raw)) return NAN;
+
+  uint16_t packed = static_cast<uint16_t>(raw);
+  switch (mode) {
+    case climate::CLIMATE_MODE_COOL:
+      return static_cast<float>(packed & 0xFF);          // Low byte: dehumidification
+    case climate::CLIMATE_MODE_HEAT:
+    case climate::CLIMATE_MODE_HEAT_COOL:
+    default:
+      return static_cast<float>((packed >> 8) & 0xFF);   // High byte: humidification
   }
 }
 

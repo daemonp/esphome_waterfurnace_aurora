@@ -30,15 +30,17 @@ climate::ClimateTraits AuroraClimate::traits() {
   // Feature flags - use add_feature_flags() instead of deprecated set_supports_*() methods
   traits.add_feature_flags(climate::CLIMATE_SUPPORTS_CURRENT_TEMPERATURE);
   traits.add_feature_flags(climate::CLIMATE_SUPPORTS_CURRENT_HUMIDITY);
-  traits.add_feature_flags(climate::CLIMATE_REQUIRES_TWO_POINT_TARGET_TEMPERATURE);
+  traits.add_feature_flags(climate::CLIMATE_SUPPORTS_TARGET_HUMIDITY);
+  traits.add_feature_flags(climate::CLIMATE_SUPPORTS_TWO_POINT_TARGET_TEMPERATURE);
   traits.add_feature_flags(climate::CLIMATE_SUPPORTS_ACTION);
   
   // Supported modes from registers.rb HEATING_MODE
+  // Note: DRY is not a selectable Aurora mode — active dehumidification is automatic
+  // based on humidistat settings. CLIMATE_ACTION_DRYING shows when it's happening.
   traits.add_supported_mode(climate::CLIMATE_MODE_OFF);
   traits.add_supported_mode(climate::CLIMATE_MODE_HEAT_COOL);  // Auto
   traits.add_supported_mode(climate::CLIMATE_MODE_COOL);
   traits.add_supported_mode(climate::CLIMATE_MODE_HEAT);
-  traits.add_supported_mode(climate::CLIMATE_MODE_DRY);  // Active dehumidification (VS Drive)
   
   // Supported fan modes from registers.rb FAN_MODE
   // Auto and On (Continuous) are built-in ESPHome fan modes.
@@ -57,6 +59,12 @@ climate::ClimateTraits AuroraClimate::traits() {
   traits.set_visual_max_temperature(fahrenheit_to_celsius(99));
   traits.set_visual_temperature_step(0.5);
   
+  // Humidity target range — union of humidification (15-50%) and dehumidification (35-65%).
+  // HA caches visual min/max from ListEntitiesClimateResponse (sent once at connection),
+  // so we advertise the full range. control() clamps to the mode-appropriate sub-range.
+  traits.set_visual_min_humidity(15);
+  traits.set_visual_max_humidity(65);
+  
   return traits;
 }
 
@@ -68,20 +76,13 @@ void AuroraClimate::control(const climate::ClimateCall &call) {
 
   // Handle mode change
   if (call.get_mode().has_value()) {
-    // DRY mode is display-only — Aurora enters dehumidify automatically based on humidistat settings.
-    // Skip only the mode write; fall through to handle any other fields in this call
-    // (e.g., setpoints or fan mode sent in the same ClimateCall).
-    if (*call.get_mode() == climate::CLIMATE_MODE_DRY) {
-      ESP_LOGW(TAG, "DRY mode is display-only; ignoring mode change (other fields in this call still processed)");
-    } else {
-      HeatingMode aurora_mode;
-      if (!esphome_to_aurora_mode(*call.get_mode(), aurora_mode)) {
-        ESP_LOGW(TAG, "Unsupported mode");
-        return;
-      }
-      if (this->parent_->set_hvac_mode(aurora_mode)) {
-        this->mode = *call.get_mode();
-      }
+    HeatingMode aurora_mode;
+    if (!esphome_to_aurora_mode(*call.get_mode(), aurora_mode)) {
+      ESP_LOGW(TAG, "Unsupported mode");
+      return;
+    }
+    if (this->parent_->set_hvac_mode(aurora_mode)) {
+      this->mode = *call.get_mode();
     }
   }
 
@@ -98,6 +99,19 @@ void AuroraClimate::control(const climate::ClimateCall &call) {
     float temp_f = celsius_to_fahrenheit(*call.get_target_temperature_high());
     if (this->parent_->set_cooling_setpoint(temp_f)) {
       this->target_temperature_high = *call.get_target_temperature_high();
+    }
+  }
+
+  // Handle target humidity (mode-aware: humidification in heat, dehumidification in cool)
+  if (call.get_target_humidity().has_value()) {
+    if (!this->parent_->is_setup_complete()) {
+      ESP_LOGW(TAG, "Skipping humidity target write — setup not complete");
+    } else {
+      float out_target;
+      if (route_humidity_write(this->parent_, this->mode, *call.get_target_humidity(),
+                               out_target, "")) {
+        this->target_humidity = out_target;
+      }
     }
   }
 
@@ -188,23 +202,36 @@ void AuroraClimate::update_state_() {
     }
   }
 
+  // Update target humidity (mode-aware: humidification in heat, dehumidification in cool)
+  // Skip during write cooldown to preserve optimistic values from control().
+  if (!this->parent_->humidity_target_cooldown_active()) {
+    float humidity_target = read_mode_humidity_target(this->parent_, this->mode);
+    if (!std::isnan(humidity_target)) {
+      this->target_humidity = humidity_target;
+    }
+  }
+
   // Update action based on system outputs
   uint16_t outputs = this->parent_->get_system_outputs();
   bool compressor = (outputs & (OUTPUT_CC | OUTPUT_CC2)) != 0;
   bool cooling = (outputs & OUTPUT_RV) != 0;
   bool aux_heat = (outputs & (OUTPUT_EH1 | OUTPUT_EH2)) != 0;
   bool blower = (outputs & OUTPUT_BLOWER) != 0;
-  bool dehumidifying = this->parent_->is_active_dehumidify();
+  // XXX: Dehumidifier detection needs testing during summer cooling season.
+  // See waterfurnace_aurora.cpp for full explanation of the reversing valve gate.
+  bool dehumidifying = (this->parent_->is_active_dehumidify() && cooling)
+                       || ((this->parent_->get_axb_outputs() & AXB_OUTPUT_DEHUMIDIFIER) != 0);
   
   if (this->parent_->is_locked_out()) {
     this->action = climate::CLIMATE_ACTION_OFF;
-  } else if (dehumidifying) {
-    // VS Drive active dehumidification — show as DRYING
-    this->action = climate::CLIMATE_ACTION_DRYING;
   } else if (compressor && cooling) {
-    this->action = climate::CLIMATE_ACTION_COOLING;
+    // During cooling, show DRYING if actively dehumidifying
+    this->action = dehumidifying ? climate::CLIMATE_ACTION_DRYING : climate::CLIMATE_ACTION_COOLING;
   } else if (compressor || aux_heat) {
     this->action = climate::CLIMATE_ACTION_HEATING;
+  } else if (dehumidifying) {
+    // Standalone dehumidifier running (AXB relay) without compressor
+    this->action = climate::CLIMATE_ACTION_DRYING;
   } else if (blower) {
     this->action = climate::CLIMATE_ACTION_FAN;
   } else {

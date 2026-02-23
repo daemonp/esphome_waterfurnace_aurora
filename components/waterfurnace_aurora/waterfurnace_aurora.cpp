@@ -1360,8 +1360,16 @@ void WaterFurnaceAurora::publish_all_sensors_() {
   // Humidifier/Dehumidifier running
   publish_binary_if_changed_(this->humidifier_running_sensor_,
                              (this->system_outputs_ & OUTPUT_ACCESSORY) != 0);
+  // XXX: Dehumidifier detection needs testing during summer cooling season.
+  // Register 362 ("Active Dehumidify") was observed non-zero during heating and idle,
+  // causing false "Drying" action and dehumidifier_running=ON. Gating on the reversing
+  // valve (OUTPUT_RV) is physically correct — VS Drive active dehumidification only
+  // happens during cooling. The AXB dehumidifier relay (0x10) is left ungated as it's
+  // a physical relay output. Verify both signals during actual cooling+dehumidification.
+  bool cooling_rv = (this->system_outputs_ & OUTPUT_RV) != 0;
   publish_binary_if_changed_(this->dehumidifier_running_sensor_,
-                             this->active_dehumidify_ || ((this->axb_outputs_ & 0x10) != 0));
+                              (this->active_dehumidify_ && cooling_rv)
+                              || ((this->axb_outputs_ & AXB_OUTPUT_DEHUMIDIFIER) != 0));
   
   // Humidistat
   {
@@ -1382,14 +1390,17 @@ void WaterFurnaceAurora::publish_all_sensors_() {
                                      this->dehumidifier_auto_ ? "Auto" : "Manual");
     }
 
-    const uint16_t *val_targets = reg_find(regs, target_reg);
-    if (val_targets) {
-      float hum_target = static_cast<float>((*val_targets >> 8) & 0xFF);
-      if (sensor_value_changed_(this->humidification_target_sensor_, hum_target))
-        this->humidification_target_sensor_->publish_state(hum_target);
-      float dehum_target = static_cast<float>(*val_targets & 0xFF);
-      if (sensor_value_changed_(this->dehumidification_target_sensor_, dehum_target))
-        this->dehumidification_target_sensor_->publish_state(dehum_target);
+    // Humidistat targets (respect write cooldown — same pattern as climate setpoints)
+    if (!this->humidity_target_cooldown_active()) {
+      const uint16_t *val_targets = reg_find(regs, target_reg);
+      if (val_targets) {
+        float hum_target = static_cast<float>((*val_targets >> 8) & 0xFF);
+        if (sensor_value_changed_(this->humidification_target_sensor_, hum_target))
+          this->humidification_target_sensor_->publish_state(hum_target);
+        float dehum_target = static_cast<float>(*val_targets & 0xFF);
+        if (sensor_value_changed_(this->dehumidification_target_sensor_, dehum_target))
+          this->dehumidification_target_sensor_->publish_state(dehum_target);
+      }
     }
   }
   
@@ -1622,6 +1633,7 @@ bool WaterFurnaceAurora::set_humidification_target(uint8_t percent) {
   const uint16_t *current = reg_find(this->register_cache_, target_reg);
   uint8_t dehum_target = current ? (*current & 0xFF) : 50;
   this->write_register(write_reg, (percent << 8) | dehum_target);
+  this->last_humidity_target_write_ = millis();
   return true;
 }
 
@@ -1639,6 +1651,7 @@ bool WaterFurnaceAurora::set_dehumidification_target(uint8_t percent) {
   const uint16_t *current = reg_find(this->register_cache_, target_reg);
   uint8_t hum_target = current ? ((*current >> 8) & 0xFF) : 35;
   this->write_register(write_reg, (hum_target << 8) | percent);
+  this->last_humidity_target_write_ = millis();
   return true;
 }
 

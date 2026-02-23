@@ -28,15 +28,17 @@ climate::ClimateTraits AuroraIZ2Climate::traits() {
   // Feature flags
   traits.add_feature_flags(climate::CLIMATE_SUPPORTS_CURRENT_TEMPERATURE);
   traits.add_feature_flags(climate::CLIMATE_SUPPORTS_CURRENT_HUMIDITY);
-  traits.add_feature_flags(climate::CLIMATE_REQUIRES_TWO_POINT_TARGET_TEMPERATURE);
+  traits.add_feature_flags(climate::CLIMATE_SUPPORTS_TARGET_HUMIDITY);
+  traits.add_feature_flags(climate::CLIMATE_SUPPORTS_TWO_POINT_TARGET_TEMPERATURE);
   traits.add_feature_flags(climate::CLIMATE_SUPPORTS_ACTION);
   
   // Supported modes from registers.rb HEATING_MODE
+  // Note: DRY is not a selectable Aurora mode — active dehumidification is automatic
+  // based on humidistat settings. CLIMATE_ACTION_DRYING shows when it's happening.
   traits.add_supported_mode(climate::CLIMATE_MODE_OFF);
   traits.add_supported_mode(climate::CLIMATE_MODE_HEAT_COOL);  // Auto
   traits.add_supported_mode(climate::CLIMATE_MODE_COOL);
   traits.add_supported_mode(climate::CLIMATE_MODE_HEAT);
-  traits.add_supported_mode(climate::CLIMATE_MODE_DRY);  // Active dehumidification (VS Drive)
   
   // Supported fan modes from registers.rb FAN_MODE
   // Auto and On (Continuous) are built-in ESPHome fan modes.
@@ -54,6 +56,12 @@ climate::ClimateTraits AuroraIZ2Climate::traits() {
   traits.set_visual_min_temperature(fahrenheit_to_celsius(40));
   traits.set_visual_max_temperature(fahrenheit_to_celsius(99));
   traits.set_visual_temperature_step(0.5);
+  
+  // Humidity target range — union of humidification (15-50%) and dehumidification (35-65%).
+  // HA caches visual min/max from ListEntitiesClimateResponse (sent once at connection),
+  // so we advertise the full range. control() clamps to the mode-appropriate sub-range.
+  traits.set_visual_min_humidity(15);
+  traits.set_visual_max_humidity(65);
   
   return traits;
 }
@@ -76,20 +84,13 @@ void AuroraIZ2Climate::control(const climate::ClimateCall &call) {
 
   // Handle mode change
   if (call.get_mode().has_value()) {
-    // DRY mode is display-only — Aurora enters dehumidify automatically based on humidistat settings.
-    // Skip only the mode write; fall through to handle any other fields in this call
-    // (e.g., setpoints or fan mode sent in the same ClimateCall).
-    if (*call.get_mode() == climate::CLIMATE_MODE_DRY) {
-      ESP_LOGW(TAG, "DRY mode is display-only; ignoring mode change (other fields in this call still processed)");
-    } else {
-      HeatingMode aurora_mode;
-      if (!esphome_to_aurora_mode(*call.get_mode(), aurora_mode)) {
-        ESP_LOGW(TAG, "Unsupported mode for zone %d", this->zone_number_);
-        return;
-      }
-      if (this->parent_->set_zone_hvac_mode(this->zone_number_, aurora_mode)) {
-        this->mode = *call.get_mode();
-      }
+    HeatingMode aurora_mode;
+    if (!esphome_to_aurora_mode(*call.get_mode(), aurora_mode)) {
+      ESP_LOGW(TAG, "Unsupported mode for zone %d", this->zone_number_);
+      return;
+    }
+    if (this->parent_->set_zone_hvac_mode(this->zone_number_, aurora_mode)) {
+      this->mode = *call.get_mode();
     }
   }
 
@@ -108,6 +109,22 @@ void AuroraIZ2Climate::control(const climate::ClimateCall &call) {
     float temp_f = celsius_to_fahrenheit(temp_c);
     if (this->parent_->set_zone_cooling_setpoint(this->zone_number_, temp_f)) {
       this->target_temperature_high = temp_c;
+    }
+  }
+
+  // Handle target humidity (mode-aware: humidification in heat, dehumidification in cool)
+  // Humidistat is system-wide (not per-zone), but routing is per-zone based on zone mode.
+  if (call.get_target_humidity().has_value()) {
+    if (!this->parent_->is_setup_complete()) {
+      ESP_LOGW(TAG, "Skipping humidity target write — setup not complete");
+    } else {
+      char prefix[32];
+      snprintf(prefix, sizeof(prefix), "Zone %d: ", this->zone_number_);
+      float out_target;
+      if (route_humidity_write(this->parent_, this->mode, *call.get_target_humidity(),
+                               out_target, prefix)) {
+        this->target_humidity = out_target;
+      }
     }
   }
 
@@ -195,12 +212,24 @@ void AuroraIZ2Climate::update_state_() {
     }
   }
 
-  // Update action based on zone current call, damper state, and active dehumidification
-  if (this->parent_->is_active_dehumidify()) {
-    // VS Drive active dehumidification is system-wide — show as DRYING for all zones
-    this->action = climate::CLIMATE_ACTION_DRYING;
-  } else if (!zone.damper_open) {
-    this->action = climate::CLIMATE_ACTION_IDLE;
+  // Update target humidity (mode-aware: humidification in heat, dehumidification in cool)
+  // Humidistat is system-wide — all IZ2 zones share the same targets, but each zone's
+  // slider reflects the target relevant to that zone's operating mode.
+  if (!this->parent_->humidity_target_cooldown_active()) {
+    float humidity_target = read_mode_humidity_target(this->parent_, this->mode);
+    if (!std::isnan(humidity_target)) {
+      this->target_humidity = humidity_target;
+    }
+  }
+
+  // XXX: Dehumidifier detection needs testing during summer cooling season.
+  // See waterfurnace_aurora.cpp for full explanation of the reversing valve gate.
+  bool cooling = (this->parent_->get_system_outputs() & OUTPUT_RV) != 0;
+  bool dehumidifying = (this->parent_->is_active_dehumidify() && cooling)
+                       || ((this->parent_->get_axb_outputs() & AXB_OUTPUT_DEHUMIDIFIER) != 0);
+  if (!zone.damper_open) {
+    // Zone damper closed — show DRYING only for standalone dehumidifier (AXB relay)
+    this->action = dehumidifying ? climate::CLIMATE_ACTION_DRYING : climate::CLIMATE_ACTION_IDLE;
   } else {
     switch (zone.current_call) {
       case ZoneCall::H1:
@@ -210,11 +239,12 @@ void AuroraIZ2Climate::update_state_() {
         break;
       case ZoneCall::C1:
       case ZoneCall::C2:
-        this->action = climate::CLIMATE_ACTION_COOLING;
+        // During cooling, show DRYING if actively dehumidifying
+        this->action = dehumidifying ? climate::CLIMATE_ACTION_DRYING : climate::CLIMATE_ACTION_COOLING;
         break;
       default:
-        // STANDBY, UNKNOWN1, UNKNOWN7 → idle
-        this->action = climate::CLIMATE_ACTION_IDLE;
+        // STANDBY, UNKNOWN1, UNKNOWN7
+        this->action = dehumidifying ? climate::CLIMATE_ACTION_DRYING : climate::CLIMATE_ACTION_IDLE;
     }
   }
 

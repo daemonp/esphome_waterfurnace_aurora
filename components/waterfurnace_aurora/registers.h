@@ -316,6 +316,7 @@ static constexpr uint16_t OUTPUT_ALARM = 0x800;
 static constexpr uint16_t AXB_OUTPUT_DHW = 0x01;
 static constexpr uint16_t AXB_OUTPUT_LOOP_PUMP = 0x02;
 static constexpr uint16_t AXB_OUTPUT_DIVERTING_VALVE = 0x04;
+static constexpr uint16_t AXB_OUTPUT_DEHUMIDIFIER = 0x10;
 
 // System status (register 31)
 static constexpr uint16_t STATUS_LPS = 0x80;

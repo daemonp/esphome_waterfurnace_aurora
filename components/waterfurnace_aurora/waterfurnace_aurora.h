@@ -274,6 +274,7 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   bool mode_cooldown_active() const { return (millis() - last_mode_write_) <= WRITE_COOLDOWN_MS; }
   bool fan_cooldown_active() const { return (millis() - last_fan_write_) <= WRITE_COOLDOWN_MS; }
   bool dhw_cooldown_active() const { return (millis() - last_dhw_write_) <= WRITE_COOLDOWN_MS; }
+  bool humidity_target_cooldown_active() const { return (millis() - last_humidity_target_write_) <= WRITE_COOLDOWN_MS; }
   bool is_dhw_enabled() const { return dhw_enabled_; }
   float get_dhw_setpoint() const { return dhw_setpoint_; }
   float get_dhw_temperature() const { return dhw_temp_; }
@@ -285,6 +286,7 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   float get_relative_humidity() const { return relative_humidity_; }
   bool get_humidifier_auto() const { return humidifier_auto_; }
   bool get_dehumidifier_auto() const { return dehumidifier_auto_; }
+  bool awl_communicating() const { return awl_thermostat() || awl_iz2(); }
   
   /// Look up a raw register value from the cache. Returns NAN if not found.
   /// Used by AuroraNumber entities to get current read-back values.
@@ -382,7 +384,6 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   bool awl_axb() const { return has_axb_ && axb_version_ >= 2.0f; }
   bool awl_thermostat() const { return thermostat_version_ >= 3.0f; }
   bool awl_iz2() const { return has_iz2_ && iz2_version_ >= 2.0f; }
-  bool awl_communicating() const { return awl_thermostat() || awl_iz2(); }
   bool is_ecm_blower() const { return blower_type_ == BlowerType::ECM_208 || blower_type_ == BlowerType::ECM_265; }
   bool is_vs_pump() const { return pump_type_ == PumpType::VS_PUMP || pump_type_ == PumpType::VS_PUMP_26_99 || pump_type_ == PumpType::VS_PUMP_UPS26_99; }
   bool refrigeration_monitoring() const { return energy_monitor_level_ >= 1; }
@@ -531,6 +532,7 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   uint32_t last_setpoint_write_{COOLDOWN_BOOT_INIT};
   uint32_t last_fan_write_{COOLDOWN_BOOT_INIT};
   uint32_t last_dhw_write_{COOLDOWN_BOOT_INIT};
+  uint32_t last_humidity_target_write_{COOLDOWN_BOOT_INIT};
   
   // Setup callbacks — fired once when hardware detection completes
   std::vector<std::function<void()>> setup_callbacks_;

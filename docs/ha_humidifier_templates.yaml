@@ -1,0 +1,176 @@
+# =============================================================================
+# Home Assistant Template Humidifier Entities for WaterFurnace Aurora
+# =============================================================================
+#
+# NOTE: The climate entity now has a built-in humidity slider (target_humidity)
+# that automatically controls the correct humidistat target based on the current
+# HVAC mode (humidification in heat, dehumidification in cool). For most users,
+# the climate card's humidity slider is sufficient and this template file is
+# NOT required.
+#
+# This template approach is still useful if you prefer separate humidifier/
+# dehumidifier domain entities with independent Auto/Manual mode control and
+# on/off toggles — capabilities not available through the climate slider alone.
+#
+# ESPHome does not have a native humidifier platform, so the Aurora component
+# exposes humidistat controls as individual entities (number, select, binary_sensor).
+# This template configuration combines them into proper HA humidifier entities
+# that render as full humidifier cards in Lovelace.
+#
+# SETUP:
+#   1. Copy this entire file into your HA configuration.yaml, or use:
+#        humidifier: !include ha_humidifier_templates.yaml
+#      (if you place this file alongside configuration.yaml)
+#
+#   2. Replace "waterfurnace_aurora" in all entity IDs below with your actual
+#      ESPHome device name. For example, if your device is named "geothermal",
+#      change "sensor.waterfurnace_aurora_humidity" to "sensor.geothermal_humidity".
+#
+#   3. Restart Home Assistant.
+#
+# The two entities will appear as:
+#   - humidifier.aurora_humidifier    (adds moisture, 15-50% target)
+#   - humidifier.aurora_dehumidifier  (removes moisture, 35-65% target)
+#
+# Each shows current humidity, a target slider, Auto/Manual mode, and on/off.
+#
+# REQUIREMENTS:
+#   - The ESPHome device must expose these entities (included by default in
+#     the waterfurnace_aurora.yaml package):
+#       sensor:    humidity
+#       number:    humidification_setpoint, dehumidification_setpoint
+#       select:    humidifier_mode, dehumidifier_mode
+#       binary_sensor: humidifier_running, dehumidifier_running
+# =============================================================================
+
+humidifier:
+  # ---------------------------------------------------------------------------
+  # Whole-Home Humidifier
+  # Adds moisture when relative humidity drops below the target.
+  # Target range: 15-50% (matches Aurora Symphony thermostat)
+  # ---------------------------------------------------------------------------
+  - platform: template
+    humidifiers:
+      aurora_humidifier:
+        friendly_name: "Whole-Home Humidifier"
+        device_class: humidifier
+        min_humidity: 15
+        max_humidity: 50
+
+        # Current measured humidity from the Aurora thermostat
+        current_humidity_template: >-
+          {{ states('sensor.waterfurnace_aurora_humidity') | float(0) }}
+
+        # Target humidity from the ESPHome number entity
+        target_humidity_template: >-
+          {{ states('number.waterfurnace_aurora_humidification_setpoint') | float(35) }}
+
+        # On when the humidifier relay is active
+        value_template: >-
+          {{ is_state('binary_sensor.waterfurnace_aurora_humidifier_running', 'on') }}
+
+        # Current mode: Auto or Manual
+        mode_template: >-
+          {{ states('select.waterfurnace_aurora_humidifier_mode') | lower }}
+        available_modes:
+          - "auto"
+          - "manual"
+
+        # --- Actions ---
+
+        set_humidity:
+          - service: number.set_value
+            target:
+              entity_id: number.waterfurnace_aurora_humidification_setpoint
+            data:
+              value: "{{ humidity }}"
+
+        set_mode:
+          - service: select.select_option
+            target:
+              entity_id: select.waterfurnace_aurora_humidifier_mode
+            data:
+              option: >-
+                {% if mode == 'auto' %}Auto{% else %}Manual{% endif %}
+
+        # Turn on = set mode to Auto (the Aurora handles the rest)
+        turn_on:
+          - service: select.select_option
+            target:
+              entity_id: select.waterfurnace_aurora_humidifier_mode
+            data:
+              option: "Auto"
+
+        # Turn off = set mode to Manual (humidifier won't activate automatically)
+        turn_off:
+          - service: select.select_option
+            target:
+              entity_id: select.waterfurnace_aurora_humidifier_mode
+            data:
+              option: "Manual"
+
+  # ---------------------------------------------------------------------------
+  # Whole-Home Dehumidifier
+  # Removes moisture when relative humidity rises above the target.
+  # Target range: 35-65% (matches Aurora Symphony thermostat)
+  # Uses either VS Drive active dehumidification or AXB accessory relay.
+  # ---------------------------------------------------------------------------
+  - platform: template
+    humidifiers:
+      aurora_dehumidifier:
+        friendly_name: "Whole-Home Dehumidifier"
+        device_class: dehumidifier
+        min_humidity: 35
+        max_humidity: 65
+
+        # Current measured humidity from the Aurora thermostat
+        current_humidity_template: >-
+          {{ states('sensor.waterfurnace_aurora_humidity') | float(0) }}
+
+        # Target humidity from the ESPHome number entity
+        target_humidity_template: >-
+          {{ states('number.waterfurnace_aurora_dehumidification_setpoint') | float(50) }}
+
+        # On when active dehumidification or AXB dehumidifier relay is active
+        value_template: >-
+          {{ is_state('binary_sensor.waterfurnace_aurora_dehumidifier_running', 'on') }}
+
+        # Current mode: Auto or Manual
+        mode_template: >-
+          {{ states('select.waterfurnace_aurora_dehumidifier_mode') | lower }}
+        available_modes:
+          - "auto"
+          - "manual"
+
+        # --- Actions ---
+
+        set_humidity:
+          - service: number.set_value
+            target:
+              entity_id: number.waterfurnace_aurora_dehumidification_setpoint
+            data:
+              value: "{{ humidity }}"
+
+        set_mode:
+          - service: select.select_option
+            target:
+              entity_id: select.waterfurnace_aurora_dehumidifier_mode
+            data:
+              option: >-
+                {% if mode == 'auto' %}Auto{% else %}Manual{% endif %}
+
+        # Turn on = set mode to Auto
+        turn_on:
+          - service: select.select_option
+            target:
+              entity_id: select.waterfurnace_aurora_dehumidifier_mode
+            data:
+              option: "Auto"
+
+        # Turn off = set mode to Manual
+        turn_off:
+          - service: select.select_option
+            target:
+              entity_id: select.waterfurnace_aurora_dehumidifier_mode
+            data:
+              option: "Manual"
