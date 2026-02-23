@@ -309,12 +309,6 @@ sensor:
     pump_max_speed:
       name: "Loop Pump Maximum Speed Setting"
     
-    # Humidity setpoints (read-only sensor versions)
-    humidification_target:
-      name: "Humidification Setpoint"
-    dehumidification_target:
-      name: "Dehumidification Setpoint"
-    
     # System status
     line_voltage_setting:
       name: "Line Voltage Setting"
