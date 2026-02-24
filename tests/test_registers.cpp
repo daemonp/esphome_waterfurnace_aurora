@@ -4,71 +4,29 @@
 using namespace esphome::waterfurnace_aurora;
 
 // ============================================================================
-// Register Type Conversions
+// Inline Conversion Functions
 // ============================================================================
 
-TEST_CASE("convert_register", "[registers][conversion]") {
-  SECTION("UNSIGNED") {
-    REQUIRE(convert_register(240, RegisterType::UNSIGNED) == 240.0f);
-    REQUIRE(convert_register(0, RegisterType::UNSIGNED) == 0.0f);
-    REQUIRE(convert_register(65535, RegisterType::UNSIGNED) == 65535.0f);
-  }
+TEST_CASE("to_tenths", "[registers][conversion]") {
+  REQUIRE(to_tenths(700) == Catch::Approx(70.0f));
+  REQUIRE(to_tenths(0) == 0.0f);
+  REQUIRE(to_tenths(1) == Catch::Approx(0.1f));
 
-  SECTION("SIGNED") {
-    REQUIRE(convert_register(100, RegisterType::SIGNED) == 100.0f);
-    // Negative: -100 as uint16 = 0xFF9C = 65436
-    uint16_t neg100 = static_cast<uint16_t>(static_cast<int16_t>(-100));
-    REQUIRE(convert_register(neg100, RegisterType::SIGNED) == -100.0f);
-  }
-
-  SECTION("TENTHS") {
-    REQUIRE(convert_register(700, RegisterType::TENTHS) == Catch::Approx(70.0f));
-    REQUIRE(convert_register(0, RegisterType::TENTHS) == 0.0f);
-
-    SECTION("sentinel 999.9 -> NAN") {
-      REQUIRE(std::isnan(convert_register(0x270F, RegisterType::TENTHS)));
-    }
-  }
-
-  SECTION("SIGNED_TENTHS") {
-    REQUIRE(convert_register(700, RegisterType::SIGNED_TENTHS) == Catch::Approx(70.0f));
-
-    SECTION("negative values") {
-      uint16_t neg = static_cast<uint16_t>(static_cast<int16_t>(-105));
-      REQUIRE(convert_register(neg, RegisterType::SIGNED_TENTHS) == Catch::Approx(-10.5f));
-    }
-
-    SECTION("sentinel -999.9 -> NAN") {
-      REQUIRE(std::isnan(convert_register(0xD8F1, RegisterType::SIGNED_TENTHS)));
-    }
-
-    SECTION("sentinel 999.9 -> NAN") {
-      REQUIRE(std::isnan(convert_register(0x270F, RegisterType::SIGNED_TENTHS)));
-    }
-  }
-
-  SECTION("HUNDREDTHS") {
-    REQUIRE(convert_register(350, RegisterType::HUNDREDTHS) == Catch::Approx(3.5f));
-    REQUIRE(convert_register(100, RegisterType::HUNDREDTHS) == Catch::Approx(1.0f));
-  }
-
-  SECTION("BOOLEAN") {
-    REQUIRE(convert_register(0, RegisterType::BOOLEAN) == 0.0f);
-    REQUIRE(convert_register(1, RegisterType::BOOLEAN) == 1.0f);
-    REQUIRE(convert_register(42, RegisterType::BOOLEAN) == 1.0f);
-    REQUIRE(convert_register(65535, RegisterType::BOOLEAN) == 1.0f);
+  SECTION("sentinel 999.9 -> NAN") {
+    REQUIRE(std::isnan(to_tenths(0x270F)));
   }
 }
-
-// ============================================================================
-// Standalone Conversion Functions
-// ============================================================================
 
 TEST_CASE("to_signed_tenths", "[registers][conversion]") {
   REQUIRE(to_signed_tenths(700) == Catch::Approx(70.0f));
 
-  uint16_t neg = static_cast<uint16_t>(static_cast<int16_t>(-200));
-  REQUIRE(to_signed_tenths(neg) == Catch::Approx(-20.0f));
+  SECTION("negative values") {
+    uint16_t neg = static_cast<uint16_t>(static_cast<int16_t>(-105));
+    REQUIRE(to_signed_tenths(neg) == Catch::Approx(-10.5f));
+  }
+
+  uint16_t neg200 = static_cast<uint16_t>(static_cast<int16_t>(-200));
+  REQUIRE(to_signed_tenths(neg200) == Catch::Approx(-20.0f));
 
   SECTION("sentinel -999.9 -> NAN") {
     REQUIRE(std::isnan(to_signed_tenths(0xD8F1)));
@@ -79,14 +37,9 @@ TEST_CASE("to_signed_tenths", "[registers][conversion]") {
   }
 }
 
-TEST_CASE("to_tenths", "[registers][conversion]") {
-  REQUIRE(to_tenths(700) == Catch::Approx(70.0f));
-  REQUIRE(to_tenths(0) == 0.0f);
-
-  SECTION("sentinel 999.9 -> NAN") {
-    REQUIRE(std::isnan(to_tenths(0x270F)));
-  }
-}
+// ============================================================================
+// 32-bit Assembly Functions
+// ============================================================================
 
 TEST_CASE("32-bit assembly", "[registers][conversion]") {
   SECTION("to_uint32") {
