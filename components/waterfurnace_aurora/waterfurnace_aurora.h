@@ -130,7 +130,7 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   void set_vs_drive_temp_sensor(sensor::Sensor *sensor) { this->vs_drive_temp_sensor_ = sensor; }
   void set_vs_inverter_temp_sensor(sensor::Sensor *sensor) { this->vs_inverter_temp_sensor_ = sensor; }
   
-  // Additional VS Drive sensors (Phase 5 parity)
+  // Additional VS Drive sensors
   void set_vs_fan_speed_sensor(sensor::Sensor *sensor) { this->vs_fan_speed_sensor_ = sensor; }
   void set_vs_ambient_temp_sensor(sensor::Sensor *sensor) { this->vs_ambient_temp_sensor_ = sensor; }
   void set_vs_compressor_watts_sensor(sensor::Sensor *sensor) { this->vs_compressor_watts_sensor_ = sensor; }

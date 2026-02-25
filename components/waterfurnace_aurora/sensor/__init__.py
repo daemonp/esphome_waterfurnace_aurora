@@ -80,7 +80,7 @@ CONF_SUBCOOL_TEMPERATURE = "subcool_temperature"
 CONF_HEAT_OF_EXTRACTION = "heat_of_extraction"
 CONF_HEAT_OF_REJECTION = "heat_of_rejection"
 
-# Additional VS Drive sensors (Phase 5 parity)
+# Additional VS Drive sensors
 CONF_VS_FAN_SPEED = "vs_fan_speed"
 CONF_VS_AMBIENT_TEMPERATURE = "vs_ambient_temperature"
 CONF_VS_COMPRESSOR_WATTS = "vs_compressor_watts"
@@ -284,7 +284,7 @@ CONFIG_SCHEMA = cv.Schema(
             accuracy_decimals=0,
             state_class=STATE_CLASS_MEASUREMENT,
         ),
-        # Additional VS Drive sensors (Phase 5 parity)
+        # Additional VS Drive sensors
         cv.Optional(CONF_VS_FAN_SPEED): sensor.sensor_schema(
             unit_of_measurement=UNIT_PERCENT,
             accuracy_decimals=0,
@@ -592,7 +592,7 @@ async def to_code(config):
         sens = await sensor.new_sensor(config[CONF_HEAT_OF_REJECTION])
         cg.add(parent.set_heat_of_rejection_sensor(sens))
 
-    # Additional VS Drive sensors (Phase 5 parity)
+    # Additional VS Drive sensors
     if CONF_VS_FAN_SPEED in config:
         sens = await sensor.new_sensor(config[CONF_VS_FAN_SPEED])
         cg.add(parent.set_vs_fan_speed_sensor(sens))
