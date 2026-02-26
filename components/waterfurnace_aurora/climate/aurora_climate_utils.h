@@ -1,7 +1,7 @@
 #pragma once
 
-// Shared climate mode mapping functions — used by both AuroraClimate and AuroraIZ2Climate.
-// These eliminate the duplicated switch statements for HeatingMode↔ClimateMode
+// Shared climate utility functions — mode mapping and humidity target helpers.
+// These eliminate duplicated switch statements for HeatingMode↔ClimateMode
 // and FanMode↔ClimateFanMode conversions.
 //
 // Ruby gem equivalent: bidirectional Hash lookups (HEATING_MODE[value] / HEATING_MODE.invert[symbol])
@@ -98,7 +98,7 @@ inline FanMode esphome_to_aurora_fan(climate::ClimateFanMode fan_mode) {
 }
 
 // ============================================================================
-// Humidity target helpers — shared by AuroraClimate and AuroraIZ2Climate
+// Humidity target helpers
 // ============================================================================
 
 // TAG for humidity helper logging — inline constexpr avoids per-TU duplication.

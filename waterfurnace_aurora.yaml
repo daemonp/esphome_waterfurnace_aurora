@@ -69,23 +69,17 @@ waterfurnace_aurora:
 # =============================================================================
 
 climate:
-  # Main thermostat (for non-IZ2 systems only)
-  # IMPORTANT: If you have IntelliZone 2 (IZ2), comment out this main thermostat
-  # and uncomment the zone entries below. On IZ2 systems, the system-wide registers
-  # read by this entity contain IZ2 controller data, not actual temperatures.
+  # Zone 1 auto-detects thermostat vs IZ2 mode at runtime.
+  # On non-IZ2 systems it reads system-wide registers (thermostat mode).
+  # On IZ2 systems it reads per-zone data from the IZ2 controller.
   - platform: waterfurnace_aurora
     id: aurora_thermostat
     name: "Heat Pump"
     aurora_id: aurora
+    # zone: 1  # default; omit for single-zone or non-IZ2 systems
 
   # IZ2 Zone climates (uncomment if you have IntelliZone 2)
-  # Each zone appears as a separate climate entity in Home Assistant
-  # When using IZ2 zones, comment out the main "Heat Pump" thermostat above.
-  # - platform: waterfurnace_aurora
-  #   id: aurora_zone_1
-  #   name: "Zone 1"
-  #   aurora_id: aurora
-  #   zone: 1
+  # Each zone appears as a separate climate entity in Home Assistant.
   # - platform: waterfurnace_aurora
   #   id: aurora_zone_2
   #   name: "Zone 2"
@@ -184,7 +178,7 @@ sensor:
     # Air temperatures
     entering_air_temperature:
       name: "Return Air Temperature"
-    leaving_air_temperature:
+    leaving_air_temperature:  # requires AWL AXB (AXB firmware >= v2.0)
       name: "Supply Air Temperature"
     ambient_temperature:
       name: "Ambient Temperature"

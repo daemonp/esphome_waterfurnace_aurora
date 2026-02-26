@@ -6,11 +6,11 @@ using namespace esphome::waterfurnace_aurora;
 
 // Helper: advance millis and loop to transition past TX_PENDING → WAITING_RESPONSE.
 // After send_request_, the hub is in TX_PENDING; we need to advance time past the
-// calculated TX completion time.  A large frame (e.g. 30+ bytes) at 19200 baud 8E1
-// takes ~20ms, so 25ms margin handles the worst case with room to spare.
+// calculated TX completion time.  A 100-register poll frame (~204 bytes) at 19200 baud
+// 8E1 takes ~120ms, so 150ms margin handles the worst case with room to spare.
 static void complete_tx(WaterFurnaceAurora &hub, uint32_t current_ms) {
-  set_millis(current_ms + 25);  // 25ms covers the largest frames at 19200 baud
-  hub.loop();                   // transitions TX_PENDING → WAITING_RESPONSE
+  set_millis(current_ms + 150);  // 150ms covers the largest frames at 19200 baud
+  hub.loop();                    // transitions TX_PENDING → WAITING_RESPONSE
 }
 
 // Helper: build a valid func 0x42 response frame from address-value pairs
@@ -101,6 +101,19 @@ TEST_CASE("Write queue", "[hub][write]") {
     REQUIRE_FALSE(hub.set_fan_intermittent_off(3));   // Not multiple of 5
     REQUIRE_FALSE(hub.set_fan_intermittent_off(45));  // Too high
     REQUIRE(hub.set_fan_intermittent_off(20));         // Valid
+  }
+
+  SECTION("set_pump_manual_control queues correct writes") {
+    REQUIRE(hub.set_pump_manual_control(true));   // enables manual
+    REQUIRE(hub.set_pump_manual_control(false));  // disables manual (writes 0x7FFF)
+  }
+
+  SECTION("set_line_voltage_setting validates range") {
+    REQUIRE_FALSE(hub.set_line_voltage_setting(89));    // Too low
+    REQUIRE_FALSE(hub.set_line_voltage_setting(636));   // Too high
+    REQUIRE(hub.set_line_voltage_setting(90));            // Min valid
+    REQUIRE(hub.set_line_voltage_setting(635));           // Max valid
+    REQUIRE(hub.set_line_voltage_setting(240));           // Typical US
   }
 
   SECTION("set_humidification_target validates range") {
@@ -289,6 +302,51 @@ TEST_CASE("setup() is non-blocking", "[hub][state]") {
   REQUIRE_FALSE(hub.is_setup_complete());
 }
 
+// Helper: drive a hub through the full setup sequence (ID + detect + VS probe).
+// Returns the hub in IDLE state with setup_complete_ == true.
+// Callers can set overrides before calling this.
+static void drive_setup(WaterFurnaceAurora &hub) {
+  hub.setup();
+
+  // Step 1: ID request (func 0x03)
+  hub.loop();                  // sends ID request → TX_PENDING
+  hub.mock_get_transmitted();  // drain tx buffer
+  complete_tx(hub, 0);         // TX_PENDING → WAITING_RESPONSE
+  std::vector<uint16_t> id_values(18, 0x2020);
+  hub.mock_receive(make_response_03(id_values));
+  set_millis(50);
+  hub.loop();                  // processes ID → SETUP_DETECT_COMPONENTS
+
+  // Step 2: Detect request (func 0x42)
+  hub.loop();                  // sends detect → TX_PENDING
+  auto tx = hub.mock_get_transmitted();
+  size_t num_detect_regs = (tx.size() - 4) / 2;
+  std::vector<std::pair<uint16_t, uint16_t>> detect_vals;
+  for (size_t i = 0; i < num_detect_regs; i++) {
+    uint16_t addr = (tx[2 + i * 2] << 8) | tx[3 + i * 2];
+    uint16_t val = 3;
+    if (addr == registers::THERMOSTAT_VERSION) val = 300;
+    if (addr == registers::BLOWER_TYPE) val = 0;
+    if (addr == registers::ENERGY_MONITOR) val = 0;
+    if (addr == registers::PUMP_TYPE) val = 0;
+    if (addr >= 88 && addr <= 91) val = 0x2020;
+    detect_vals.emplace_back(addr, val);
+  }
+  complete_tx(hub, 50);
+  hub.mock_receive(make_response_42(detect_vals));
+  set_millis(100);
+  hub.loop();  // processes detect → SETUP_DETECT_VS
+
+  // Step 3: VS probe (no VS drive)
+  hub.loop();                  // enters SETUP_DETECT_VS
+  hub.loop();                  // sends VS probe → TX_PENDING
+  hub.mock_get_transmitted();  // drain tx buffer
+  complete_tx(hub, 100);
+  hub.mock_receive(make_response_42({{3001, 0}, {3322, 0}, {3325, 0}}));
+  set_millis(150);
+  hub.loop();                  // processes VS probe → finish setup → IDLE
+}
+
 TEST_CASE("Full setup flow with mock UART", "[hub][state][integration]") {
   WaterFurnaceAurora hub;
   set_millis(0);
@@ -360,4 +418,224 @@ TEST_CASE("Full setup flow with mock UART", "[hub][state][integration]") {
 
   // Setup should now be complete
   REQUIRE(hub.is_setup_complete());
+}
+
+// ============================================================================
+// IZ2 Demand Sensors
+// ============================================================================
+
+TEST_CASE("IZ2 demand sensors", "[hub][iz2][sensors]") {
+  WaterFurnaceAurora hub;
+  sensor::Sensor fan_demand;
+  sensor::Sensor unit_demand;
+  hub.set_iz2_fan_demand_sensor(&fan_demand);
+  hub.set_iz2_unit_demand_sensor(&unit_demand);
+  hub.set_has_iz2_override(true);
+  hub.set_num_iz2_zones_override(2);
+
+  set_millis(0);
+  drive_setup(hub);
+  REQUIRE(hub.is_setup_complete());
+
+  SECTION("register 31005 value 0x0403 → fan=4, unit=3") {
+    // Verify IZ2 is configured
+    REQUIRE(hub.has_iz2());
+    REQUIRE(hub.get_num_iz2_zones() == 2);
+    
+    // Trigger a poll cycle
+    set_millis(200);
+    hub.update();  // starts poll → TX_PENDING
+    auto tx = hub.mock_get_transmitted();
+    REQUIRE(tx.size() > 0);
+    complete_tx(hub, 200);
+
+    // Build response: all registers zero except IZ2_DEMAND = 0x0403
+    size_t num_regs = (tx.size() - 4) / 2;
+    std::vector<std::pair<uint16_t, uint16_t>> resp_vals;
+    for (size_t i = 0; i < num_regs; i++) {
+      uint16_t addr = (tx[2 + i * 2] << 8) | tx[3 + i * 2];
+      uint16_t val = 0;
+      if (addr == registers::IZ2_DEMAND) val = 0x0403;
+      resp_vals.emplace_back(addr, val);
+    }
+    hub.mock_receive(make_response_42(resp_vals));
+    set_millis(400);
+    hub.loop();  // process response → publish sensors
+
+    REQUIRE(fan_demand.has_state_);
+    REQUIRE(fan_demand.state == 4.0f);
+    REQUIRE(unit_demand.has_state_);
+    REQUIRE(unit_demand.state == 3.0f);
+  }
+
+  SECTION("register 31005 value 0x0000 → both zero") {
+    set_millis(200);
+    hub.update();
+    auto tx = hub.mock_get_transmitted();
+    complete_tx(hub, 200);
+
+    size_t num_regs = (tx.size() - 4) / 2;
+    std::vector<std::pair<uint16_t, uint16_t>> resp_vals;
+    for (size_t i = 0; i < num_regs; i++) {
+      uint16_t addr = (tx[2 + i * 2] << 8) | tx[3 + i * 2];
+      uint16_t val = 0;
+      // IZ2_DEMAND stays 0
+      resp_vals.emplace_back(addr, val);
+    }
+    hub.mock_receive(make_response_42(resp_vals));
+    set_millis(250);
+    hub.loop();
+
+    REQUIRE(fan_demand.has_state_);
+    REQUIRE(fan_demand.state == 0.0f);
+    REQUIRE(unit_demand.has_state_);
+    REQUIRE(unit_demand.state == 0.0f);
+  }
+
+  SECTION("dedup: identical values don't re-publish") {
+    // First poll
+    set_millis(200);
+    hub.update();
+    auto tx = hub.mock_get_transmitted();
+    complete_tx(hub, 200);
+
+    size_t num_regs = (tx.size() - 4) / 2;
+    std::vector<std::pair<uint16_t, uint16_t>> resp_vals;
+    for (size_t i = 0; i < num_regs; i++) {
+      uint16_t addr = (tx[2 + i * 2] << 8) | tx[3 + i * 2];
+      uint16_t val = 0;
+      if (addr == registers::IZ2_DEMAND) val = 0x0503;
+      resp_vals.emplace_back(addr, val);
+    }
+    hub.mock_receive(make_response_42(resp_vals));
+    set_millis(250);
+    hub.loop();
+
+    REQUIRE(fan_demand.publish_count_ == 1);
+    REQUIRE(unit_demand.publish_count_ == 1);
+    REQUIRE(fan_demand.state == 5.0f);
+    REQUIRE(unit_demand.state == 3.0f);
+
+    // Second poll with same values
+    set_millis(300);
+    hub.update();
+    tx = hub.mock_get_transmitted();
+    complete_tx(hub, 300);
+
+    // Rebuild response (same values)
+    num_regs = (tx.size() - 4) / 2;
+    resp_vals.clear();
+    for (size_t i = 0; i < num_regs; i++) {
+      uint16_t addr = (tx[2 + i * 2] << 8) | tx[3 + i * 2];
+      uint16_t val = 0;
+      if (addr == registers::IZ2_DEMAND) val = 0x0503;
+      resp_vals.emplace_back(addr, val);
+    }
+    hub.mock_receive(make_response_42(resp_vals));
+    set_millis(350);
+    hub.loop();
+
+    // Should NOT have published again
+    REQUIRE(fan_demand.publish_count_ == 1);
+    REQUIRE(unit_demand.publish_count_ == 1);
+  }
+}
+
+// ============================================================================
+// Leaving Air Temperature Fallback
+// ============================================================================
+
+TEST_CASE("Leaving air temperature on non-AWL systems", "[hub][sensors]") {
+  WaterFurnaceAurora hub;
+  sensor::Sensor leaving_air;
+  hub.set_leaving_air_temperature_sensor(&leaving_air);
+
+  set_millis(0);
+
+  SECTION("non-AWL-AXB publishes NAN after setup") {
+    // drive_setup creates a non-AWL-AXB system by default (AXB absent)
+    drive_setup(hub);
+    REQUIRE(hub.is_setup_complete());
+
+    // finish_setup_() should have published NAN for leaving air
+    REQUIRE(leaving_air.has_state_);
+    REQUIRE(std::isnan(leaving_air.state));
+  }
+
+  SECTION("AWL-AXB does not publish NAN after setup") {
+    // Override to have AXB present — need to set up with AXB detected.
+    // drive_setup defaults to no AXB; we override before calling it.
+    hub.set_has_axb_override(true);
+
+    // Custom drive_setup with AXB v2.00 (awl_axb = true: version >= 2.0)
+    hub.setup();
+
+    // Step 1: ID request
+    hub.loop();
+    hub.mock_get_transmitted();
+    complete_tx(hub, 0);
+    std::vector<uint16_t> id_values(18, 0x2020);
+    hub.mock_receive(make_response_03(id_values));
+    set_millis(50);
+    hub.loop();
+
+    // Step 2: Detect request
+    hub.loop();
+    auto tx = hub.mock_get_transmitted();
+    size_t num_detect_regs = (tx.size() - 4) / 2;
+    std::vector<std::pair<uint16_t, uint16_t>> detect_vals;
+    for (size_t i = 0; i < num_detect_regs; i++) {
+      uint16_t addr = (tx[2 + i * 2] << 8) | tx[3 + i * 2];
+      uint16_t val = 3;
+      if (addr == registers::THERMOSTAT_VERSION) val = 300;
+      if (addr == registers::AXB_VERSION) val = 200;  // AWL AXB v2.00
+      if (addr == registers::BLOWER_TYPE) val = 0;
+      if (addr == registers::ENERGY_MONITOR) val = 0;
+      if (addr == registers::PUMP_TYPE) val = 0;
+      if (addr >= 88 && addr <= 91) val = 0x2020;
+      detect_vals.emplace_back(addr, val);
+    }
+    complete_tx(hub, 50);
+    hub.mock_receive(make_response_42(detect_vals));
+    set_millis(100);
+    hub.loop();
+
+    // Step 3: VS probe
+    hub.loop();
+    hub.loop();
+    hub.mock_get_transmitted();
+    complete_tx(hub, 100);
+    hub.mock_receive(make_response_42({{3001, 0}, {3322, 0}, {3325, 0}}));
+    set_millis(150);
+    hub.loop();
+
+    REQUIRE(hub.is_setup_complete());
+    // AWL AXB detected — leaving air should NOT have been published as NAN
+    REQUIRE_FALSE(leaving_air.has_state_);
+  }
+}
+
+// ============================================================================
+// VS Pump Manual Control
+// ============================================================================
+
+TEST_CASE("VS Pump manual control state tracking", "[hub][pump]") {
+  WaterFurnaceAurora hub;
+  set_millis(0);
+
+  SECTION("initially not in manual control") {
+    REQUIRE_FALSE(hub.is_pump_manual_control());
+  }
+
+  SECTION("set_pump_manual_control(true) sets state") {
+    REQUIRE(hub.set_pump_manual_control(true));
+    REQUIRE(hub.is_pump_manual_control());
+  }
+
+  SECTION("set_pump_manual_control(false) clears state") {
+    hub.set_pump_manual_control(true);
+    REQUIRE(hub.is_pump_manual_control());
+    REQUIRE(hub.set_pump_manual_control(false));
+    REQUIRE_FALSE(hub.is_pump_manual_control());
+  }
 }

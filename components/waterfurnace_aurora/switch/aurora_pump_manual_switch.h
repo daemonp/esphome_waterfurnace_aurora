@@ -1,33 +1,28 @@
 #pragma once
 
 #include "esphome/core/component.h"
-#include "esphome/components/climate/climate.h"
+#include "esphome/components/switch/switch.h"
 #include "../waterfurnace_aurora.h"
 
 namespace esphome {
 namespace waterfurnace_aurora {
 
-class AuroraIZ2Climate : public climate::Climate, public Component {
+class AuroraPumpManualSwitch : public switch_::Switch, public Component {
  public:
   void setup() override;
   void dump_config() override;
-  
+
   float get_setup_priority() const override { return setup_priority::PROCESSOR; }
 
   void set_parent(WaterFurnaceAurora *parent) { this->parent_ = parent; }
-  void set_zone_number(uint8_t zone) { this->zone_number_ = zone; }
-
-  // Climate traits
-  climate::ClimateTraits traits() override;
-
-  // Climate control
-  void control(const climate::ClimateCall &call) override;
 
  protected:
+  void write_state(bool state) override;
   void update_state_();
 
   WaterFurnaceAurora *parent_{nullptr};
-  uint8_t zone_number_{1};
+  bool last_state_{false};
+  bool has_published_{false};
 };
 
 }  // namespace waterfurnace_aurora

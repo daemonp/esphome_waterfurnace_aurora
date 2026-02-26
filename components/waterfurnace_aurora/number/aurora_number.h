@@ -20,6 +20,7 @@ enum class AuroraNumberType : uint8_t {
   FAN_INTERMITTENT_OFF,
   HUMIDIFICATION_TARGET,
   DEHUMIDIFICATION_TARGET,
+  LINE_VOLTAGE_SETTING,
 };
 
 class AuroraDHWNumber : public number::Number, public Component {

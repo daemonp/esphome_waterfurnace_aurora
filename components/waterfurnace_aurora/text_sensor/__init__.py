@@ -8,120 +8,42 @@ from .. import waterfurnace_aurora_ns, WaterFurnaceAurora, CONF_AURORA_ID
 DEPENDENCIES = ["waterfurnace_aurora"]
 CODEOWNERS = ["@daemonp"]
 
-# Text sensor configuration keys
-CONF_CURRENT_MODE = "current_mode"
-CONF_HVAC_MODE = "hvac_mode"
-CONF_FAN_MODE = "fan_mode"
-CONF_FAULT_DESCRIPTION = "fault_description"
-CONF_MODEL_NUMBER = "model_number"
-CONF_SERIAL_NUMBER = "serial_number"
-CONF_FAULT_HISTORY = "fault_history"
-CONF_VS_DERATE = "vs_derate"
-CONF_VS_SAFE_MODE = "vs_safe_mode"
-CONF_VS_ALARM = "vs_alarm"
-CONF_AXB_INPUTS = "axb_inputs"
-CONF_HUMIDIFIER_MODE = "humidifier_mode"
-CONF_DEHUMIDIFIER_MODE = "dehumidifier_mode"
-CONF_PUMP_TYPE = "pump_type"
-CONF_LOCKOUT_FAULT_DESCRIPTION = "lockout_fault_description"
-CONF_OUTPUTS_AT_LOCKOUT = "outputs_at_lockout"
-CONF_INPUTS_AT_LOCKOUT = "inputs_at_lockout"
-
 DIAGNOSTIC_TEXT_SCHEMA = text_sensor.text_sensor_schema(
     entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
 )
 
+# Single dictionary driving both CONFIG_SCHEMA and to_code().
+# Key = YAML config key (also used to derive C++ setter via f"set_{key}_sensor").
+TEXT_SENSORS = {
+    "current_mode": text_sensor.text_sensor_schema(),
+    "hvac_mode": text_sensor.text_sensor_schema(),
+    "fan_mode": text_sensor.text_sensor_schema(),
+    "fault_description": DIAGNOSTIC_TEXT_SCHEMA,
+    "model_number": DIAGNOSTIC_TEXT_SCHEMA,
+    "serial_number": DIAGNOSTIC_TEXT_SCHEMA,
+    "fault_history": DIAGNOSTIC_TEXT_SCHEMA,
+    "vs_derate": DIAGNOSTIC_TEXT_SCHEMA,
+    "vs_safe_mode": DIAGNOSTIC_TEXT_SCHEMA,
+    "vs_alarm": DIAGNOSTIC_TEXT_SCHEMA,
+    "axb_inputs": DIAGNOSTIC_TEXT_SCHEMA,
+    "humidifier_mode": text_sensor.text_sensor_schema(),
+    "dehumidifier_mode": text_sensor.text_sensor_schema(),
+    "pump_type": DIAGNOSTIC_TEXT_SCHEMA,
+    "lockout_fault_description": DIAGNOSTIC_TEXT_SCHEMA,
+    "outputs_at_lockout": DIAGNOSTIC_TEXT_SCHEMA,
+    "inputs_at_lockout": DIAGNOSTIC_TEXT_SCHEMA,
+}
+
 CONFIG_SCHEMA = cv.Schema(
-    {
-        cv.GenerateID(CONF_AURORA_ID): cv.use_id(WaterFurnaceAurora),
-        cv.Optional(CONF_CURRENT_MODE): text_sensor.text_sensor_schema(),
-        cv.Optional(CONF_HVAC_MODE): text_sensor.text_sensor_schema(),
-        cv.Optional(CONF_FAN_MODE): text_sensor.text_sensor_schema(),
-        cv.Optional(CONF_FAULT_DESCRIPTION): DIAGNOSTIC_TEXT_SCHEMA,
-        cv.Optional(CONF_MODEL_NUMBER): DIAGNOSTIC_TEXT_SCHEMA,
-        cv.Optional(CONF_SERIAL_NUMBER): DIAGNOSTIC_TEXT_SCHEMA,
-        cv.Optional(CONF_FAULT_HISTORY): DIAGNOSTIC_TEXT_SCHEMA,
-        cv.Optional(CONF_VS_DERATE): DIAGNOSTIC_TEXT_SCHEMA,
-        cv.Optional(CONF_VS_SAFE_MODE): DIAGNOSTIC_TEXT_SCHEMA,
-        cv.Optional(CONF_VS_ALARM): DIAGNOSTIC_TEXT_SCHEMA,
-        cv.Optional(CONF_AXB_INPUTS): DIAGNOSTIC_TEXT_SCHEMA,
-        cv.Optional(CONF_HUMIDIFIER_MODE): text_sensor.text_sensor_schema(),
-        cv.Optional(CONF_DEHUMIDIFIER_MODE): text_sensor.text_sensor_schema(),
-        cv.Optional(CONF_PUMP_TYPE): DIAGNOSTIC_TEXT_SCHEMA,
-        cv.Optional(CONF_LOCKOUT_FAULT_DESCRIPTION): DIAGNOSTIC_TEXT_SCHEMA,
-        cv.Optional(CONF_OUTPUTS_AT_LOCKOUT): DIAGNOSTIC_TEXT_SCHEMA,
-        cv.Optional(CONF_INPUTS_AT_LOCKOUT): DIAGNOSTIC_TEXT_SCHEMA,
-    }
+    {cv.GenerateID(CONF_AURORA_ID): cv.use_id(WaterFurnaceAurora)}
+).extend(
+    {cv.Optional(key): schema for key, schema in TEXT_SENSORS.items()}
 )
 
 
 async def to_code(config):
     parent = await cg.get_variable(config[CONF_AURORA_ID])
-
-    if CONF_CURRENT_MODE in config:
-        sens = await text_sensor.new_text_sensor(config[CONF_CURRENT_MODE])
-        cg.add(parent.set_current_mode_sensor(sens))
-
-    if CONF_HVAC_MODE in config:
-        sens = await text_sensor.new_text_sensor(config[CONF_HVAC_MODE])
-        cg.add(parent.set_hvac_mode_sensor(sens))
-
-    if CONF_FAN_MODE in config:
-        sens = await text_sensor.new_text_sensor(config[CONF_FAN_MODE])
-        cg.add(parent.set_fan_mode_sensor(sens))
-
-    if CONF_FAULT_DESCRIPTION in config:
-        sens = await text_sensor.new_text_sensor(config[CONF_FAULT_DESCRIPTION])
-        cg.add(parent.set_fault_description_sensor(sens))
-
-    if CONF_MODEL_NUMBER in config:
-        sens = await text_sensor.new_text_sensor(config[CONF_MODEL_NUMBER])
-        cg.add(parent.set_model_number_sensor(sens))
-
-    if CONF_SERIAL_NUMBER in config:
-        sens = await text_sensor.new_text_sensor(config[CONF_SERIAL_NUMBER])
-        cg.add(parent.set_serial_number_sensor(sens))
-
-    if CONF_FAULT_HISTORY in config:
-        sens = await text_sensor.new_text_sensor(config[CONF_FAULT_HISTORY])
-        cg.add(parent.set_fault_history_sensor(sens))
-
-    if CONF_VS_DERATE in config:
-        sens = await text_sensor.new_text_sensor(config[CONF_VS_DERATE])
-        cg.add(parent.set_vs_derate_sensor(sens))
-
-    if CONF_VS_SAFE_MODE in config:
-        sens = await text_sensor.new_text_sensor(config[CONF_VS_SAFE_MODE])
-        cg.add(parent.set_vs_safe_mode_sensor(sens))
-
-    if CONF_VS_ALARM in config:
-        sens = await text_sensor.new_text_sensor(config[CONF_VS_ALARM])
-        cg.add(parent.set_vs_alarm_sensor(sens))
-
-    if CONF_AXB_INPUTS in config:
-        sens = await text_sensor.new_text_sensor(config[CONF_AXB_INPUTS])
-        cg.add(parent.set_axb_inputs_sensor(sens))
-
-    if CONF_HUMIDIFIER_MODE in config:
-        sens = await text_sensor.new_text_sensor(config[CONF_HUMIDIFIER_MODE])
-        cg.add(parent.set_humidifier_mode_sensor(sens))
-
-    if CONF_DEHUMIDIFIER_MODE in config:
-        sens = await text_sensor.new_text_sensor(config[CONF_DEHUMIDIFIER_MODE])
-        cg.add(parent.set_dehumidifier_mode_sensor(sens))
-
-    if CONF_PUMP_TYPE in config:
-        sens = await text_sensor.new_text_sensor(config[CONF_PUMP_TYPE])
-        cg.add(parent.set_pump_type_sensor(sens))
-
-    if CONF_LOCKOUT_FAULT_DESCRIPTION in config:
-        sens = await text_sensor.new_text_sensor(config[CONF_LOCKOUT_FAULT_DESCRIPTION])
-        cg.add(parent.set_lockout_fault_description_sensor(sens))
-
-    if CONF_OUTPUTS_AT_LOCKOUT in config:
-        sens = await text_sensor.new_text_sensor(config[CONF_OUTPUTS_AT_LOCKOUT])
-        cg.add(parent.set_outputs_at_lockout_sensor(sens))
-
-    if CONF_INPUTS_AT_LOCKOUT in config:
-        sens = await text_sensor.new_text_sensor(config[CONF_INPUTS_AT_LOCKOUT])
-        cg.add(parent.set_inputs_at_lockout_sensor(sens))
+    for key in TEXT_SENSORS:
+        if conf := config.get(key):
+            sens = await text_sensor.new_text_sensor(conf)
+            cg.add(getattr(parent, f"set_{key}_sensor")(sens))

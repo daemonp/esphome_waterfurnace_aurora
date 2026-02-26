@@ -121,6 +121,9 @@ void AuroraNumber::update_state_() {
         if (!std::isnan(raw)) value = static_cast<float>(static_cast<uint16_t>(raw) & 0xFF);
       }
       break;
+    case AuroraNumberType::LINE_VOLTAGE_SETTING:
+      value = this->parent_->get_cached_register(registers::LINE_VOLTAGE_SETTING);
+      break;
     default:
       return;
   }
@@ -145,6 +148,7 @@ void AuroraNumber::dump_config() {
     case AuroraNumberType::FAN_INTERMITTENT_OFF: type_name = "Fan Intermittent Off"; break;
     case AuroraNumberType::HUMIDIFICATION_TARGET: type_name = "Humidification Target"; break;
     case AuroraNumberType::DEHUMIDIFICATION_TARGET: type_name = "Dehumidification Target"; break;
+    case AuroraNumberType::LINE_VOLTAGE_SETTING: type_name = "Line Voltage Setting"; break;
     default: break;
   }
   ESP_LOGCONFIG(TAG, "Aurora Number: %s%s", type_name,
@@ -160,6 +164,14 @@ void AuroraNumber::control(float value) {
     return;
   }
   
+  // LINE_VOLTAGE_SETTING needs uint16_t range (90-635), handle before uint8_t clamping
+  if (this->type_ == AuroraNumberType::LINE_VOLTAGE_SETTING) {
+    if (this->parent_->set_line_voltage_setting(static_cast<uint16_t>(value))) {
+      this->publish_state(value);
+    }
+    return;
+  }
+
   bool success = false;
   // Clamp to uint8_t range before truncation — the individual set_* methods
   // perform their own range validation, but this prevents undefined behavior
