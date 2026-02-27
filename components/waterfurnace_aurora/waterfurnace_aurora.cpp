@@ -679,6 +679,16 @@ void WaterFurnaceAurora::finish_setup_() {
     this->pump_type_sensor_->publish_state(get_pump_type_string(this->pump_type_));
   }
   
+  // Leaving air temperature requires AWL AXB (register 900).
+  // No fallback register exists for non-AWL systems — publish NAN so HA shows "Unknown"
+  // rather than silently never updating.
+  if (!this->awl_axb() && this->leaving_air_temperature_sensor_ != nullptr) {
+    ESP_LOGW(TAG, "Leaving air temperature sensor configured but AWL AXB not detected");
+    ESP_LOGW(TAG, "  Register 900 requires AXB firmware >= v2.0; no fallback register exists");
+    ESP_LOGW(TAG, "  Sensor will show 'Unknown' in Home Assistant");
+    this->leaving_air_temperature_sensor_->publish_state(NAN);
+  }
+  
   ESP_LOGI(TAG, "Setup complete:");
   ESP_LOGI(TAG, "  AXB: %s%s (v%.2f)", this->has_axb_ ? "yes" : "no",
            this->axb_override_ ? " (override)" : "", this->axb_version_);
@@ -811,7 +821,7 @@ void WaterFurnaceAurora::build_poll_addresses_() {
     this->addresses_to_read_.push_back(registers::VS_SAT_EVAP_DISCHARGE_TEMP);
     this->addresses_to_read_.push_back(registers::VS_SUPERHEAT_TEMP);
     // VS Drive additional diagnostics — only poll if at least one sensor is configured
-    if (this->vs_entering_water_temp_sensor_ || this->vs_line_voltage_sensor_ ||
+    if (this->vs_entering_water_temperature_sensor_ || this->vs_line_voltage_sensor_ ||
         this->vs_thermo_power_sensor_ || this->vs_supply_voltage_sensor_ ||
         this->vs_udc_voltage_sensor_) {
       this->addresses_to_read_.push_back(registers::VS_ENTERING_WATER_TEMP);
@@ -825,11 +835,14 @@ void WaterFurnaceAurora::build_poll_addresses_() {
   
   if (this->has_axb_ && this->awl_axb()) {
     this->addresses_to_read_.push_back(registers::VS_PUMP_SPEED);
+    if (this->is_vs_pump()) {
+      this->addresses_to_read_.push_back(registers::VS_PUMP_MANUAL);
+    }
   }
   
   // AXB current sensors (amps) — only poll if at least one current sensor is configured
   if (this->has_axb_ && (this->blower_amps_sensor_ || this->aux_amps_sensor_ ||
-                         this->compressor1_amps_sensor_ || this->compressor2_amps_sensor_)) {
+                         this->compressor_1_amps_sensor_ || this->compressor_2_amps_sensor_)) {
     this->addresses_to_read_.push_back(registers::AXB_BLOWER_AMPS);
     this->addresses_to_read_.push_back(registers::AXB_AUX_AMPS);
     this->addresses_to_read_.push_back(registers::AXB_COMPRESSOR1_AMPS);
@@ -1064,8 +1077,8 @@ void WaterFurnaceAurora::publish_fault_sensors_(const RegisterMap &regs) {
     const uint16_t *val = reg_find(regs, registers::LAST_LOCKOUT_FAULT);
     if (val) {
       uint16_t lockout_code = *val & 0x7FFF;
-      if (sensor_value_changed_(this->lockout_fault_sensor_, lockout_code))
-        this->lockout_fault_sensor_->publish_state(lockout_code);
+      if (sensor_value_changed_(this->lockout_fault_code_sensor_, lockout_code))
+        this->lockout_fault_code_sensor_->publish_state(lockout_code);
       this->publish_text_if_changed(this->lockout_fault_description_sensor_,
                                      this->cached_lockout_fault_description_,
                                      get_fault_description(lockout_code));
@@ -1097,11 +1110,11 @@ void WaterFurnaceAurora::publish_system_status_sensors_(const RegisterMap &regs)
     const uint16_t *val = reg_find(regs, registers::SYSTEM_OUTPUTS);
     if (val) {
       this->system_outputs_ = *val;
-      publish_binary_if_changed_(this->compressor_sensor_,
+      publish_binary_if_changed_(this->compressor_running_sensor_,
                                  (this->system_outputs_ & (OUTPUT_CC | OUTPUT_CC2)) != 0);
-      publish_binary_if_changed_(this->blower_sensor_,
+      publish_binary_if_changed_(this->blower_running_sensor_,
                                  (this->system_outputs_ & OUTPUT_BLOWER) != 0);
-      publish_binary_if_changed_(this->aux_heat_sensor_,
+      publish_binary_if_changed_(this->aux_heat_running_sensor_,
                                  (this->system_outputs_ & (OUTPUT_EH1 | OUTPUT_EH2)) != 0);
       {
         float stage = static_cast<float>((this->system_outputs_ & OUTPUT_EH2) ? 2
@@ -1117,8 +1130,8 @@ void WaterFurnaceAurora::publish_system_status_sensors_(const RegisterMap &regs)
     const uint16_t *val = reg_find(regs, registers::SYSTEM_STATUS);
     if (val) {
       uint16_t status = *val;
-      publish_binary_if_changed_(this->lps_sensor_, (status & STATUS_LPS) != 0);
-      publish_binary_if_changed_(this->hps_sensor_, (status & STATUS_HPS) != 0);
+      publish_binary_if_changed_(this->low_pressure_switch_sensor_, (status & STATUS_LPS) != 0);
+      publish_binary_if_changed_(this->high_pressure_switch_sensor_, (status & STATUS_HPS) != 0);
       publish_binary_if_changed_(this->emergency_shutdown_sensor_,
                                  (status & STATUS_EMERGENCY_SHUTDOWN) != 0);
       publish_binary_if_changed_(this->load_shed_sensor_, (status & STATUS_LOAD_SHED) != 0);
@@ -1144,7 +1157,7 @@ void WaterFurnaceAurora::publish_system_status_sensors_(const RegisterMap &regs)
       this->axb_outputs_ = *val;
       publish_binary_if_changed_(this->dhw_running_sensor_,
                                  (this->axb_outputs_ & AXB_OUTPUT_DHW) != 0);
-      publish_binary_if_changed_(this->loop_pump_sensor_,
+      publish_binary_if_changed_(this->loop_pump_running_sensor_,
                                  (this->axb_outputs_ & AXB_OUTPUT_LOOP_PUMP) != 0);
       publish_binary_if_changed_(this->diverting_valve_sensor_,
                                  (this->axb_outputs_ & AXB_OUTPUT_DIVERTING_VALVE) != 0);
@@ -1168,17 +1181,17 @@ void WaterFurnaceAurora::publish_temperature_sensors_(const RegisterMap &regs) {
     const uint16_t *val_amb = reg_find(regs, registers::AMBIENT_TEMP);
     if (val_amb) {
       this->ambient_temp_ = to_signed_tenths(*val_amb);
-      if (sensor_value_changed_(this->ambient_temp_sensor_, this->ambient_temp_))
-        this->ambient_temp_sensor_->publish_state(this->ambient_temp_);
+      if (sensor_value_changed_(this->ambient_temperature_sensor_, this->ambient_temp_))
+        this->ambient_temperature_sensor_->publish_state(this->ambient_temp_);
     }
   }
   
   uint16_t entering_air_reg = this->awl_axb() ? registers::ENTERING_AIR_AWL : registers::ENTERING_AIR;
-  this->publish_sensor_signed_tenths(regs, entering_air_reg, this->entering_air_sensor_);
-  this->publish_sensor_signed_tenths(regs, registers::LEAVING_AIR, this->leaving_air_sensor_);
-  this->publish_sensor_signed_tenths(regs, registers::OUTDOOR_TEMP, this->outdoor_temp_sensor_);
-  this->publish_sensor_signed_tenths(regs, registers::LEAVING_WATER, this->leaving_water_sensor_);
-  this->publish_sensor_signed_tenths(regs, registers::ENTERING_WATER, this->entering_water_sensor_);
+  this->publish_sensor_signed_tenths(regs, entering_air_reg, this->entering_air_temperature_sensor_);
+  this->publish_sensor_signed_tenths(regs, registers::LEAVING_AIR, this->leaving_air_temperature_sensor_);
+  this->publish_sensor_signed_tenths(regs, registers::OUTDOOR_TEMP, this->outdoor_temperature_sensor_);
+  this->publish_sensor_signed_tenths(regs, registers::LEAVING_WATER, this->leaving_water_temperature_sensor_);
+  this->publish_sensor_signed_tenths(regs, registers::ENTERING_WATER, this->entering_water_temperature_sensor_);
   
   // Humidity — update cached value for climate entity current_humidity,
   // and publish to the standalone sensor if configured.
@@ -1224,8 +1237,8 @@ void WaterFurnaceAurora::publish_temperature_sensors_(const RegisterMap &regs) {
     const uint16_t *val_dhwt = reg_find(regs, registers::DHW_TEMP);
     if (val_dhwt) {
       this->dhw_temp_ = to_signed_tenths(*val_dhwt);
-      if (sensor_value_changed_(this->dhw_temp_sensor_, this->dhw_temp_))
-        this->dhw_temp_sensor_->publish_state(this->dhw_temp_);
+      if (sensor_value_changed_(this->dhw_temperature_sensor_, this->dhw_temp_))
+        this->dhw_temperature_sensor_->publish_state(this->dhw_temp_);
     }
   }
 }
@@ -1267,7 +1280,7 @@ void WaterFurnaceAurora::publish_power_loop_sensors_(const RegisterMap &regs) {
   this->publish_sensor_uint32(regs, registers::TOTAL_WATTS, this->total_watts_sensor_);
   this->publish_sensor_uint32(regs, registers::COMPRESSOR_WATTS, this->compressor_watts_sensor_);
   this->publish_sensor_uint32(regs, registers::BLOWER_WATTS, this->blower_watts_sensor_);
-  this->publish_sensor_uint32(regs, registers::AUX_WATTS, this->aux_watts_sensor_);
+  this->publish_sensor_uint32(regs, registers::AUX_WATTS, this->aux_heat_watts_sensor_);
   this->publish_sensor_uint32(regs, registers::PUMP_WATTS, this->pump_watts_sensor_);
   
   // Loop
@@ -1287,20 +1300,20 @@ void WaterFurnaceAurora::publish_vs_drive_sensors_(const RegisterMap &regs) {
   this->publish_sensor(regs, registers::COMPRESSOR_SPEED_ACTUAL, this->compressor_speed_sensor_);
   this->publish_sensor_tenths(regs, registers::VS_DISCHARGE_PRESSURE, this->discharge_pressure_sensor_);
   this->publish_sensor_tenths(regs, registers::VS_SUCTION_PRESSURE, this->suction_pressure_sensor_);
-  this->publish_sensor(regs, registers::VS_EEV_OPEN, this->eev_open_sensor_);
-  this->publish_sensor_signed_tenths(regs, registers::VS_SUPERHEAT_TEMP, this->superheat_sensor_);
+  this->publish_sensor(regs, registers::VS_EEV_OPEN, this->eev_open_percentage_sensor_);
+  this->publish_sensor_signed_tenths(regs, registers::VS_SUPERHEAT_TEMP, this->superheat_temperature_sensor_);
   this->publish_sensor(regs, registers::COMPRESSOR_SPEED_DESIRED, this->compressor_desired_speed_sensor_);
-  this->publish_sensor_signed_tenths(regs, registers::VS_DISCHARGE_TEMP, this->discharge_temp_sensor_);
-  this->publish_sensor_signed_tenths(regs, registers::VS_SUCTION_TEMP, this->suction_temp_sensor_);
-  this->publish_sensor_signed_tenths(regs, registers::VS_DRIVE_TEMP, this->vs_drive_temp_sensor_);
-  this->publish_sensor_signed_tenths(regs, registers::VS_INVERTER_TEMP, this->vs_inverter_temp_sensor_);
+  this->publish_sensor_signed_tenths(regs, registers::VS_DISCHARGE_TEMP, this->discharge_temperature_sensor_);
+  this->publish_sensor_signed_tenths(regs, registers::VS_SUCTION_TEMP, this->suction_temperature_sensor_);
+  this->publish_sensor_signed_tenths(regs, registers::VS_DRIVE_TEMP, this->vs_drive_temperature_sensor_);
+  this->publish_sensor_signed_tenths(regs, registers::VS_INVERTER_TEMP, this->vs_inverter_temperature_sensor_);
   this->publish_sensor(regs, registers::VS_FAN_SPEED, this->vs_fan_speed_sensor_);
-  this->publish_sensor_signed_tenths(regs, registers::VS_AMBIENT_TEMP, this->vs_ambient_temp_sensor_);
+  this->publish_sensor_signed_tenths(regs, registers::VS_AMBIENT_TEMP, this->vs_ambient_temperature_sensor_);
   this->publish_sensor_uint32(regs, registers::VS_COMPRESSOR_WATTS, this->vs_compressor_watts_sensor_);
-  this->publish_sensor_signed_tenths(regs, registers::VS_SAT_EVAP_DISCHARGE_TEMP, this->sat_evap_discharge_temp_sensor_);
+  this->publish_sensor_signed_tenths(regs, registers::VS_SAT_EVAP_DISCHARGE_TEMP, this->saturated_evaporator_discharge_temperature_sensor_);
   
   // VS Drive additional diagnostics
-  this->publish_sensor_signed_tenths(regs, registers::VS_ENTERING_WATER_TEMP, this->vs_entering_water_temp_sensor_);
+  this->publish_sensor_signed_tenths(regs, registers::VS_ENTERING_WATER_TEMP, this->vs_entering_water_temperature_sensor_);
   this->publish_sensor(regs, registers::VS_LINE_VOLTAGE, this->vs_line_voltage_sensor_);
   this->publish_sensor(regs, registers::VS_THERMO_POWER, this->vs_thermo_power_sensor_);
   this->publish_sensor_uint32(regs, registers::VS_SUPPLY_VOLTAGE, this->vs_supply_voltage_sensor_);
@@ -1309,8 +1322,8 @@ void WaterFurnaceAurora::publish_vs_drive_sensors_(const RegisterMap &regs) {
   // AXB current sensors (tenths of amps)
   this->publish_sensor_tenths(regs, registers::AXB_BLOWER_AMPS, this->blower_amps_sensor_);
   this->publish_sensor_tenths(regs, registers::AXB_AUX_AMPS, this->aux_amps_sensor_);
-  this->publish_sensor_tenths(regs, registers::AXB_COMPRESSOR1_AMPS, this->compressor1_amps_sensor_);
-  this->publish_sensor_tenths(regs, registers::AXB_COMPRESSOR2_AMPS, this->compressor2_amps_sensor_);
+  this->publish_sensor_tenths(regs, registers::AXB_COMPRESSOR1_AMPS, this->compressor_1_amps_sensor_);
+  this->publish_sensor_tenths(regs, registers::AXB_COMPRESSOR2_AMPS, this->compressor_2_amps_sensor_);
   
   // VS Drive status strings — guard with raw register comparison to avoid
   // bitmask_to_string() heap allocation when the underlying register is unchanged.
@@ -1345,8 +1358,8 @@ void WaterFurnaceAurora::publish_vs_drive_sensors_(const RegisterMap &regs) {
 
 void WaterFurnaceAurora::publish_equipment_sensors_(const RegisterMap &regs) {
   // FP1/FP2
-  this->publish_sensor_signed_tenths(regs, registers::FP1_TEMP, this->fp1_sensor_);
-  this->publish_sensor_signed_tenths(regs, registers::FP2_TEMP, this->fp2_sensor_);
+  this->publish_sensor_signed_tenths(regs, registers::FP1_TEMP, this->fp1_temperature_sensor_);
+  this->publish_sensor_signed_tenths(regs, registers::FP2_TEMP, this->fp2_temperature_sensor_);
   
   // Line voltage setting and anti-short-cycle
   this->publish_sensor(regs, registers::LINE_VOLTAGE_SETTING, this->line_voltage_setting_sensor_);
@@ -1363,10 +1376,14 @@ void WaterFurnaceAurora::publish_equipment_sensors_(const RegisterMap &regs) {
   this->publish_sensor(regs, registers::VS_PUMP_SPEED, this->pump_speed_sensor_);
   this->publish_sensor(regs, registers::VS_PUMP_MIN, this->pump_min_speed_sensor_);
   this->publish_sensor(regs, registers::VS_PUMP_MAX, this->pump_max_speed_sensor_);
+  {
+    const uint16_t *val = reg_find(regs, registers::VS_PUMP_MANUAL);
+    if (val) this->pump_manual_control_ = (*val != 0x7FFF);
+  }
   
   // Refrigeration
-  this->publish_sensor_signed_tenths(regs, registers::HEATING_LIQUID_LINE_TEMP, this->heating_liquid_line_temp_sensor_);
-  this->publish_sensor_signed_tenths(regs, registers::SATURATED_CONDENSER_TEMP, this->saturated_condenser_temp_sensor_);
+  this->publish_sensor_signed_tenths(regs, registers::HEATING_LIQUID_LINE_TEMP, this->heating_liquid_line_temperature_sensor_);
+  this->publish_sensor_signed_tenths(regs, registers::SATURATED_CONDENSER_TEMP, this->saturated_condenser_temperature_sensor_);
   
   bool is_cooling = (this->system_outputs_ & OUTPUT_RV) != 0;
   uint16_t subcool_reg = is_cooling ? registers::SUBCOOL_COOLING : registers::SUBCOOL_HEATING;
@@ -1374,8 +1391,8 @@ void WaterFurnaceAurora::publish_equipment_sensors_(const RegisterMap &regs) {
     const uint16_t *val = reg_find(regs, subcool_reg);
     if (val) {
       float fval = to_signed_tenths(*val);
-      if (sensor_value_changed_(this->subcool_temp_sensor_, fval))
-        this->subcool_temp_sensor_->publish_state(fval);
+      if (sensor_value_changed_(this->subcool_temperature_sensor_, fval))
+        this->subcool_temperature_sensor_->publish_state(fval);
     }
   }
   
@@ -1474,6 +1491,19 @@ void WaterFurnaceAurora::publish_iz2_zone_sensors_(const RegisterMap &regs) {
     const uint16_t *val = reg_find(regs, registers::IZ2_BLOWER_SPEED_DESIRED);
     if (val && this->iz2_blower_speed_sensor_ != nullptr)
       this->iz2_blower_speed_sensor_->publish_state(iz2_fan_desired(*val));
+  }
+  
+  // IZ2 demand — high byte is fan demand, low byte is unit demand
+  {
+    const uint16_t *val = reg_find(regs, registers::IZ2_DEMAND);
+    if (val) {
+      float fan_demand = static_cast<float>((*val >> 8) & 0xFF);
+      float unit_demand = static_cast<float>(*val & 0xFF);
+      if (sensor_value_changed_(this->iz2_fan_demand_sensor_, fan_demand))
+        this->iz2_fan_demand_sensor_->publish_state(fan_demand);
+      if (sensor_value_changed_(this->iz2_unit_demand_sensor_, unit_demand))
+        this->iz2_unit_demand_sensor_->publish_state(unit_demand);
+    }
   }
 }
 
@@ -1608,6 +1638,21 @@ bool WaterFurnaceAurora::set_pump_speed(uint8_t speed) {
   return true;
 }
 
+bool WaterFurnaceAurora::set_pump_manual_control(bool enabled) {
+  if (enabled) {
+    // When enabling manual control, write the current pump speed.
+    // If pump speed is cached, use it; otherwise default to 50%.
+    const uint16_t *val = reg_find(this->register_cache_, registers::VS_PUMP_SPEED);
+    uint16_t speed = (val && *val > 0 && *val <= 100) ? *val : 50;
+    this->write_register(registers::VS_PUMP_MANUAL, speed);
+  } else {
+    // Write 0x7FFF to return to automatic control
+    this->write_register(registers::VS_PUMP_MANUAL, 0x7FFF);
+  }
+  this->pump_manual_control_ = enabled;
+  return true;
+}
+
 bool WaterFurnaceAurora::set_pump_min_speed(uint8_t speed) {
   if (speed < 1 || speed > 100) { ESP_LOGW(TAG, "Pump min speed %d out of range", speed); return false; }
   this->write_register(registers::VS_PUMP_MIN, speed);
@@ -1617,6 +1662,15 @@ bool WaterFurnaceAurora::set_pump_min_speed(uint8_t speed) {
 bool WaterFurnaceAurora::set_pump_max_speed(uint8_t speed) {
   if (speed < 1 || speed > 100) { ESP_LOGW(TAG, "Pump max speed %d out of range", speed); return false; }
   this->write_register(registers::VS_PUMP_MAX, speed);
+  return true;
+}
+
+bool WaterFurnaceAurora::set_line_voltage_setting(uint16_t voltage) {
+  if (voltage < 90 || voltage > 635) {
+    ESP_LOGW(TAG, "Line voltage setting %d out of range (90-635)", voltage);
+    return false;
+  }
+  this->write_register(registers::LINE_VOLTAGE_SETTING, voltage);
   return true;
 }
 
@@ -1842,7 +1896,7 @@ void WaterFurnaceAurora::publish_derived_sensors(const RegisterMap &regs) {
   }
   
   // Approach temperature
-  if (this->approach_temp_sensor_ != nullptr) {
+  if (this->approach_temperature_sensor_ != nullptr) {
     const uint16_t *val_lw = reg_find(regs, registers::LEAVING_WATER);
     const uint16_t *val_ew = reg_find(regs, registers::ENTERING_WATER);
     const uint16_t *val_sc = reg_find(regs, registers::SATURATED_CONDENSER_TEMP);
@@ -1850,9 +1904,9 @@ void WaterFurnaceAurora::publish_derived_sensors(const RegisterMap &regs) {
       float sat_cond = to_signed_tenths(*val_sc);
       bool cooling = (this->system_outputs_ & OUTPUT_RV) != 0;
       if (cooling && val_ew)
-        this->approach_temp_sensor_->publish_state(sat_cond - to_signed_tenths(*val_ew));
+        this->approach_temperature_sensor_->publish_state(sat_cond - to_signed_tenths(*val_ew));
       else if (!cooling && val_lw)
-        this->approach_temp_sensor_->publish_state(to_signed_tenths(*val_lw) - sat_cond);
+        this->approach_temperature_sensor_->publish_state(to_signed_tenths(*val_lw) - sat_cond);
     }
   }
 }

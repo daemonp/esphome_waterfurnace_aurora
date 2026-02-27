@@ -8,7 +8,10 @@ from esphome.const import (
     CONF_STEP,
     DEVICE_CLASS_TEMPERATURE,
     DEVICE_CLASS_HUMIDITY,
+    DEVICE_CLASS_VOLTAGE,
+    ENTITY_CATEGORY_CONFIG,
     UNIT_PERCENT,
+    UNIT_VOLT,
 )
 
 from .. import waterfurnace_aurora_ns, WaterFurnaceAurora, CONF_AURORA_ID, CONF_ZONE, validate_zone, UNIT_FAHRENHEIT
@@ -29,6 +32,7 @@ CONF_FAN_INTERMITTENT_ON = "fan_intermittent_on"
 CONF_FAN_INTERMITTENT_OFF = "fan_intermittent_off"
 CONF_HUMIDIFICATION_TARGET = "humidification_target"
 CONF_DEHUMIDIFICATION_TARGET = "dehumidification_target"
+CONF_LINE_VOLTAGE_SETTING = "line_voltage_setting"
 
 # C++ classes
 AuroraDHWNumber = waterfurnace_aurora_ns.class_(
@@ -52,6 +56,7 @@ AURORA_NUMBER_TYPES = {
     CONF_FAN_INTERMITTENT_OFF: AuroraNumberType.FAN_INTERMITTENT_OFF,
     CONF_HUMIDIFICATION_TARGET: AuroraNumberType.HUMIDIFICATION_TARGET,
     CONF_DEHUMIDIFICATION_TARGET: AuroraNumberType.DEHUMIDIFICATION_TARGET,
+    CONF_LINE_VOLTAGE_SETTING: AuroraNumberType.LINE_VOLTAGE_SETTING,
 }
 
 # Schema for ECM blower speeds (1-12)
@@ -164,6 +169,20 @@ CONFIG_SCHEMA = cv.Schema(
                 cv.Optional(CONF_STEP, default=1): cv.float_,
             }
         ),
+        # Line voltage setting (energy monitor)
+        cv.Optional(CONF_LINE_VOLTAGE_SETTING): number.number_schema(
+            AuroraNumber,
+            unit_of_measurement=UNIT_VOLT,
+            device_class=DEVICE_CLASS_VOLTAGE,
+            entity_category=ENTITY_CATEGORY_CONFIG,
+            icon="mdi:flash",
+        ).extend(
+            {
+                cv.Optional(CONF_MIN_VALUE, default=90): cv.float_,
+                cv.Optional(CONF_MAX_VALUE, default=635): cv.float_,
+                cv.Optional(CONF_STEP, default=1): cv.float_,
+            }
+        ).extend(cv.COMPONENT_SCHEMA),
     }
 )
 

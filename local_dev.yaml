@@ -103,23 +103,17 @@ waterfurnace_aurora:
 # =============================================================================
 
 climate:
-  # Main thermostat (for non-IZ2 systems only)
-  # IMPORTANT: If you have IntelliZone 2 (IZ2), comment out this main thermostat
-  # and uncomment the zone entries below. On IZ2 systems, the system-wide registers
-  # read by this entity contain IZ2 controller data, not actual temperatures.
+  # Zone 1 auto-detects thermostat vs IZ2 mode at runtime.
+  # On non-IZ2 systems it reads system-wide registers (thermostat mode).
+  # On IZ2 systems it reads per-zone data from the IZ2 controller.
   - platform: waterfurnace_aurora
     id: aurora_thermostat
     name: "Heat Pump"
     aurora_id: aurora
+    # zone: 1  # default; omit for single-zone or non-IZ2 systems
 
   # IZ2 Zone climates (uncomment if you have IntelliZone 2)
-  # Each zone appears as a separate climate entity in Home Assistant
-  # When using IZ2 zones, comment out the main "Heat Pump" thermostat above.
-  # - platform: waterfurnace_aurora
-  #   id: aurora_zone_1
-  #   name: "Zone 1"
-  #   aurora_id: aurora
-  #   zone: 1
+  # Each zone appears as a separate climate entity in Home Assistant.
   # - platform: waterfurnace_aurora
   #   id: aurora_zone_2
   #   name: "Zone 2"
@@ -150,6 +144,10 @@ switch:
     # Uncomment if you prefer separate switch + number controls instead.
     # dhw_enabled:
     #   name: "DHW Enabled"
+    # VS pump manual override (requires variable speed pump)
+    # When enabled, loop pump runs at the current speed; writing 0x7FFF returns to auto.
+    # pump_manual_control:
+    #   name: "Pump Manual Control"
 
 # =============================================================================
 # CONTROLS - NUMBER INPUTS
@@ -186,6 +184,9 @@ number:
       name: "Humidification Setpoint"
     dehumidification_target:
       name: "Dehumidification Setpoint"
+    # Line voltage setting (90-635V, register 112)
+    # line_voltage_setting:
+    #   name: "Line Voltage Setting"
 
 # =============================================================================
 # SENSORS
@@ -198,7 +199,7 @@ sensor:
     # Air temperatures
     entering_air_temperature:
       name: "Return Air Temperature"
-    leaving_air_temperature:
+    leaving_air_temperature:  # requires AWL AXB (AXB firmware >= v2.0)
       name: "Supply Air Temperature"
     ambient_temperature:
       name: "Ambient Temperature"
@@ -337,11 +338,15 @@ sensor:
     fault_code:
       name: "Fault Code"
     
-    # IZ2 desired speed sensors (uncomment if you have IntelliZone 2)
+    # IZ2 sensors (uncomment if you have IntelliZone 2)
     # iz2_compressor_speed:
     #   name: "IZ2 Desired Compressor Speed"
     # iz2_blower_speed:
     #   name: "IZ2 Desired Blower Speed"
+    # iz2_fan_demand:
+    #   name: "IZ2 Fan Demand"
+    # iz2_unit_demand:
+    #   name: "IZ2 Unit Demand"
     
     # Derived sensors (computed on-device)
     cop:

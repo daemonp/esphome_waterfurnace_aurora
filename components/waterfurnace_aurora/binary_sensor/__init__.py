@@ -11,142 +11,69 @@ from .. import waterfurnace_aurora_ns, WaterFurnaceAurora, CONF_AURORA_ID
 DEPENDENCIES = ["waterfurnace_aurora"]
 CODEOWNERS = ["@daemonp"]
 
-# Binary sensor configuration keys
-CONF_COMPRESSOR_RUNNING = "compressor_running"
-CONF_BLOWER_RUNNING = "blower_running"
-CONF_AUX_HEAT_RUNNING = "aux_heat_running"
-CONF_DHW_RUNNING = "dhw_running"
-CONF_LOOP_PUMP_RUNNING = "loop_pump_running"
-CONF_LOCKOUT = "lockout"
-CONF_HUMIDIFIER_RUNNING = "humidifier_running"
-CONF_DEHUMIDIFIER_RUNNING = "dehumidifier_running"
-CONF_LPS = "low_pressure_switch"
-CONF_HPS = "high_pressure_switch"
-CONF_EMERGENCY_SHUTDOWN = "emergency_shutdown"
-CONF_LOAD_SHED = "load_shed"
-CONF_FAN_CALL = "fan_call"
-CONF_DERATED = "derated"
-CONF_SAFE_MODE = "safe_mode"
-CONF_DIVERTING_VALVE = "diverting_valve"
+# Single dictionary driving both CONFIG_SCHEMA and to_code().
+# Key = YAML config key (also used to derive C++ setter via f"set_{key}_binary_sensor").
+BINARY_SENSORS = {
+    "compressor_running": binary_sensor.binary_sensor_schema(
+        device_class=DEVICE_CLASS_RUNNING,
+    ),
+    "blower_running": binary_sensor.binary_sensor_schema(
+        device_class=DEVICE_CLASS_RUNNING,
+    ),
+    "aux_heat_running": binary_sensor.binary_sensor_schema(
+        device_class=DEVICE_CLASS_RUNNING,
+    ),
+    "dhw_running": binary_sensor.binary_sensor_schema(
+        device_class=DEVICE_CLASS_RUNNING,
+    ),
+    "loop_pump_running": binary_sensor.binary_sensor_schema(
+        device_class=DEVICE_CLASS_RUNNING,
+    ),
+    "lockout": binary_sensor.binary_sensor_schema(
+        device_class=DEVICE_CLASS_PROBLEM,
+    ),
+    "humidifier_running": binary_sensor.binary_sensor_schema(
+        device_class=DEVICE_CLASS_RUNNING,
+    ),
+    "dehumidifier_running": binary_sensor.binary_sensor_schema(
+        device_class=DEVICE_CLASS_RUNNING,
+    ),
+    "low_pressure_switch": binary_sensor.binary_sensor_schema(
+        device_class=DEVICE_CLASS_PROBLEM,
+    ),
+    "high_pressure_switch": binary_sensor.binary_sensor_schema(
+        device_class=DEVICE_CLASS_PROBLEM,
+    ),
+    "emergency_shutdown": binary_sensor.binary_sensor_schema(
+        device_class=DEVICE_CLASS_PROBLEM,
+    ),
+    "load_shed": binary_sensor.binary_sensor_schema(
+        device_class=DEVICE_CLASS_RUNNING,
+    ),
+    "fan_call": binary_sensor.binary_sensor_schema(
+        device_class=DEVICE_CLASS_RUNNING,
+    ),
+    "derated": binary_sensor.binary_sensor_schema(
+        device_class=DEVICE_CLASS_PROBLEM,
+    ),
+    "safe_mode": binary_sensor.binary_sensor_schema(
+        device_class=DEVICE_CLASS_PROBLEM,
+    ),
+    "diverting_valve": binary_sensor.binary_sensor_schema(
+        device_class=DEVICE_CLASS_RUNNING,
+    ),
+}
 
 CONFIG_SCHEMA = cv.Schema(
-    {
-        cv.GenerateID(CONF_AURORA_ID): cv.use_id(WaterFurnaceAurora),
-        cv.Optional(CONF_COMPRESSOR_RUNNING): binary_sensor.binary_sensor_schema(
-            device_class=DEVICE_CLASS_RUNNING,
-        ),
-        cv.Optional(CONF_BLOWER_RUNNING): binary_sensor.binary_sensor_schema(
-            device_class=DEVICE_CLASS_RUNNING,
-        ),
-        cv.Optional(CONF_AUX_HEAT_RUNNING): binary_sensor.binary_sensor_schema(
-            device_class=DEVICE_CLASS_RUNNING,
-        ),
-        cv.Optional(CONF_DHW_RUNNING): binary_sensor.binary_sensor_schema(
-            device_class=DEVICE_CLASS_RUNNING,
-        ),
-        cv.Optional(CONF_LOOP_PUMP_RUNNING): binary_sensor.binary_sensor_schema(
-            device_class=DEVICE_CLASS_RUNNING,
-        ),
-        cv.Optional(CONF_LOCKOUT): binary_sensor.binary_sensor_schema(
-            device_class=DEVICE_CLASS_PROBLEM,
-        ),
-        cv.Optional(CONF_HUMIDIFIER_RUNNING): binary_sensor.binary_sensor_schema(
-            device_class=DEVICE_CLASS_RUNNING,
-        ),
-        cv.Optional(CONF_DEHUMIDIFIER_RUNNING): binary_sensor.binary_sensor_schema(
-            device_class=DEVICE_CLASS_RUNNING,
-        ),
-        cv.Optional(CONF_LPS): binary_sensor.binary_sensor_schema(
-            device_class=DEVICE_CLASS_PROBLEM,
-        ),
-        cv.Optional(CONF_HPS): binary_sensor.binary_sensor_schema(
-            device_class=DEVICE_CLASS_PROBLEM,
-        ),
-        cv.Optional(CONF_EMERGENCY_SHUTDOWN): binary_sensor.binary_sensor_schema(
-            device_class=DEVICE_CLASS_PROBLEM,
-        ),
-        cv.Optional(CONF_LOAD_SHED): binary_sensor.binary_sensor_schema(
-            device_class=DEVICE_CLASS_RUNNING,
-        ),
-        cv.Optional(CONF_FAN_CALL): binary_sensor.binary_sensor_schema(
-            device_class=DEVICE_CLASS_RUNNING,
-        ),
-        cv.Optional(CONF_DERATED): binary_sensor.binary_sensor_schema(
-            device_class=DEVICE_CLASS_PROBLEM,
-        ),
-        cv.Optional(CONF_SAFE_MODE): binary_sensor.binary_sensor_schema(
-            device_class=DEVICE_CLASS_PROBLEM,
-        ),
-        cv.Optional(CONF_DIVERTING_VALVE): binary_sensor.binary_sensor_schema(
-            device_class=DEVICE_CLASS_RUNNING,
-        ),
-    }
+    {cv.GenerateID(CONF_AURORA_ID): cv.use_id(WaterFurnaceAurora)}
+).extend(
+    {cv.Optional(key): schema for key, schema in BINARY_SENSORS.items()}
 )
 
 
 async def to_code(config):
     parent = await cg.get_variable(config[CONF_AURORA_ID])
-
-    if CONF_COMPRESSOR_RUNNING in config:
-        sens = await binary_sensor.new_binary_sensor(config[CONF_COMPRESSOR_RUNNING])
-        cg.add(parent.set_compressor_binary_sensor(sens))
-
-    if CONF_BLOWER_RUNNING in config:
-        sens = await binary_sensor.new_binary_sensor(config[CONF_BLOWER_RUNNING])
-        cg.add(parent.set_blower_binary_sensor(sens))
-
-    if CONF_AUX_HEAT_RUNNING in config:
-        sens = await binary_sensor.new_binary_sensor(config[CONF_AUX_HEAT_RUNNING])
-        cg.add(parent.set_aux_heat_binary_sensor(sens))
-
-    if CONF_DHW_RUNNING in config:
-        sens = await binary_sensor.new_binary_sensor(config[CONF_DHW_RUNNING])
-        cg.add(parent.set_dhw_running_binary_sensor(sens))
-
-    if CONF_LOOP_PUMP_RUNNING in config:
-        sens = await binary_sensor.new_binary_sensor(config[CONF_LOOP_PUMP_RUNNING])
-        cg.add(parent.set_loop_pump_binary_sensor(sens))
-
-    if CONF_LOCKOUT in config:
-        sens = await binary_sensor.new_binary_sensor(config[CONF_LOCKOUT])
-        cg.add(parent.set_lockout_binary_sensor(sens))
-
-    if CONF_HUMIDIFIER_RUNNING in config:
-        sens = await binary_sensor.new_binary_sensor(config[CONF_HUMIDIFIER_RUNNING])
-        cg.add(parent.set_humidifier_running_binary_sensor(sens))
-
-    if CONF_DEHUMIDIFIER_RUNNING in config:
-        sens = await binary_sensor.new_binary_sensor(config[CONF_DEHUMIDIFIER_RUNNING])
-        cg.add(parent.set_dehumidifier_running_binary_sensor(sens))
-
-    if CONF_LPS in config:
-        sens = await binary_sensor.new_binary_sensor(config[CONF_LPS])
-        cg.add(parent.set_lps_binary_sensor(sens))
-
-    if CONF_HPS in config:
-        sens = await binary_sensor.new_binary_sensor(config[CONF_HPS])
-        cg.add(parent.set_hps_binary_sensor(sens))
-
-    if CONF_EMERGENCY_SHUTDOWN in config:
-        sens = await binary_sensor.new_binary_sensor(config[CONF_EMERGENCY_SHUTDOWN])
-        cg.add(parent.set_emergency_shutdown_binary_sensor(sens))
-
-    if CONF_LOAD_SHED in config:
-        sens = await binary_sensor.new_binary_sensor(config[CONF_LOAD_SHED])
-        cg.add(parent.set_load_shed_binary_sensor(sens))
-
-    if CONF_FAN_CALL in config:
-        sens = await binary_sensor.new_binary_sensor(config[CONF_FAN_CALL])
-        cg.add(parent.set_fan_call_binary_sensor(sens))
-
-    if CONF_DERATED in config:
-        sens = await binary_sensor.new_binary_sensor(config[CONF_DERATED])
-        cg.add(parent.set_derated_binary_sensor(sens))
-
-    if CONF_SAFE_MODE in config:
-        sens = await binary_sensor.new_binary_sensor(config[CONF_SAFE_MODE])
-        cg.add(parent.set_safe_mode_binary_sensor(sens))
-
-    if CONF_DIVERTING_VALVE in config:
-        sens = await binary_sensor.new_binary_sensor(config[CONF_DIVERTING_VALVE])
-        cg.add(parent.set_diverting_valve_binary_sensor(sens))
+    for key in BINARY_SENSORS:
+        if conf := config.get(key):
+            sens = await binary_sensor.new_binary_sensor(conf)
+            cg.add(getattr(parent, f"set_{key}_binary_sensor")(sens))
