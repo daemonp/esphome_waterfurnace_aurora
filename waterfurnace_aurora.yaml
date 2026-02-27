@@ -130,6 +130,10 @@ switch:
     # Uncomment if you prefer separate switch + number controls instead.
     # dhw_enabled:
     #   name: "DHW Enabled"
+    # VS pump manual override (requires variable speed pump)
+    # When enabled, loop pump runs at the current speed; writing 0x7FFF returns to auto.
+    # pump_manual_control:
+    #   name: "Pump Manual Control"
 
 # =============================================================================
 # CONTROLS - NUMBER INPUTS
@@ -166,6 +170,9 @@ number:
       name: "Humidification Setpoint"
     dehumidification_target:
       name: "Dehumidification Setpoint"
+    # Line voltage setting (90-635V, register 112)
+    # line_voltage_setting:
+    #   name: "Line Voltage Setting"
 
 # =============================================================================
 # SENSORS - TEMPERATURES
@@ -311,11 +318,15 @@ sensor:
     fault_code:
       name: "Fault Code"
     
-    # IZ2 desired speed sensors (uncomment if you have IntelliZone 2)
+    # IZ2 sensors (uncomment if you have IntelliZone 2)
     # iz2_compressor_speed:
     #   name: "IZ2 Desired Compressor Speed"
     # iz2_blower_speed:
     #   name: "IZ2 Desired Blower Speed"
+    # iz2_fan_demand:
+    #   name: "IZ2 Fan Demand"
+    # iz2_unit_demand:
+    #   name: "IZ2 Unit Demand"
     
     # Derived sensors (computed on-device)
     cop:

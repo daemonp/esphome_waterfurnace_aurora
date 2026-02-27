@@ -47,7 +47,7 @@ class AuroraClimate : public climate::Climate, public Component {
   climate::ClimateAction last_action_{climate::CLIMATE_ACTION_OFF};
   optional<climate::ClimateFanMode> last_fan_mode_{};
   const char *last_custom_fan_mode_{nullptr};
-  climate::ClimatePreset last_preset_{climate::CLIMATE_PRESET_NONE};
+  optional<climate::ClimatePreset> last_preset_{};
   bool has_published_{false};
 };
 
