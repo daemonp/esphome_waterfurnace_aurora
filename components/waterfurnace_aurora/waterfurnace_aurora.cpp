@@ -1809,6 +1809,7 @@ bool WaterFurnaceAurora::set_zone_fan_mode(uint8_t zone_number, FanMode mode) {
   if (!this->validate_zone_number(zone_number)) return false;
   uint16_t reg = registers::IZ2_FAN_MODE_WRITE_BASE + ((zone_number - 1) * 9);
   this->write_register(reg, static_cast<uint16_t>(mode));
+  this->iz2_zones_[zone_number - 1].target_fan_mode = mode;  // Optimistic update
   this->last_fan_write_ = millis();
   return true;
 }
