@@ -52,13 +52,13 @@ void WaterFurnaceAurora::transition_(State new_state) {
 }
 
 /// Common send logic — flushes bus, toggles RS-485 to TX, writes frame, sets timing.
-/// Caller must set expected_addresses_ before calling this.
-void WaterFurnaceAurora::send_request_common_(const std::vector<uint8_t> &frame, PendingRequest type) {
+/// Caller must set expected_addresses_/expected_addresses_len_ before calling this.
+void WaterFurnaceAurora::send_request_common_(const uint8_t *frame, size_t frame_len, PendingRequest type) {
   // Clear any stale data on the bus (bounded to prevent spin if junk is streaming)
   for (int i = 0; i < 512 && this->available(); i++) {
     this->read();
   }
-  this->rx_buffer_.clear();
+  this->rx_buffer_len_ = 0;
   
   // Enable TX mode for RS485
   if (this->flow_control_pin_ != nullptr) {
@@ -71,51 +71,54 @@ void WaterFurnaceAurora::send_request_common_(const std::vector<uint8_t> &frame,
   // 200-byte frame at 19200 baud, exceeding the 50ms WARN_IF_BLOCKING threshold.
   // Instead, the RS-485 flow control pin is switched back to RX by a deferred
   // timeout, allowing the main loop to remain non-blocking.
-  this->write_array(frame.data(), frame.size());
+  this->write_array(frame, frame_len);
   
   this->pending_request_ = type;
   this->last_request_time_ = millis();
-  this->tx_complete_time_ = millis() + this->tx_time_ms_(frame.size());
+  this->tx_complete_time_ = millis() + this->tx_time_ms_(frame_len);
   this->transition_(State::TX_PENDING);
 }
 
-void WaterFurnaceAurora::send_request_(const std::vector<uint8_t> &frame, PendingRequest type,
-                                        const std::vector<uint16_t> &expected_addrs) {
-  this->expected_addresses_ = expected_addrs;
-  this->send_request_common_(frame, type);
+void WaterFurnaceAurora::send_request_(const uint8_t *frame, size_t frame_len, PendingRequest type,
+                                        const uint16_t *expected_addrs, size_t expected_count) {
+  size_t copy_count = std::min(expected_count, static_cast<size_t>(protocol::MAX_REGISTERS_PER_REQUEST));
+  std::memcpy(this->expected_addresses_.data(), expected_addrs, copy_count * sizeof(uint16_t));
+  this->expected_addresses_len_ = copy_count;
+  this->send_request_common_(frame, frame_len, type);
 }
 
-void WaterFurnaceAurora::send_request_(const std::vector<uint8_t> &frame, PendingRequest type,
-                                        std::vector<uint16_t> &&expected_addrs) {
-  this->expected_addresses_ = std::move(expected_addrs);
-  this->send_request_common_(frame, type);
+void WaterFurnaceAurora::send_request_(const uint8_t *frame, size_t frame_len, PendingRequest type) {
+  this->expected_addresses_len_ = 0;
+  this->send_request_common_(frame, frame_len, type);
 }
 
-void WaterFurnaceAurora::send_request_(const std::vector<uint8_t> &frame, PendingRequest type) {
-  this->expected_addresses_.clear();
-  this->send_request_common_(frame, type);
-}
-
-bool WaterFurnaceAurora::read_frame_(std::vector<uint8_t> &frame) {
+bool WaterFurnaceAurora::read_frame_() {
   // Drain available bytes into persistent rx_buffer_
-  while (this->available() && this->rx_buffer_.size() < protocol::MAX_FRAME_SIZE) {
-    this->rx_buffer_.push_back(this->read());
+  while (this->available() && this->rx_buffer_len_ < protocol::MAX_FRAME_SIZE) {
+    this->rx_buffer_[this->rx_buffer_len_++] = this->read();
   }
   
-  if (this->rx_buffer_.size() < 2) return false;
+  if (this->rx_buffer_len_ < 2) return false;
   
   // Determine expected frame size from bytes received so far
-  size_t expected = protocol::expected_frame_size(this->rx_buffer_.data(), this->rx_buffer_.size());
+  size_t expected = protocol::expected_frame_size(this->rx_buffer_.data(), this->rx_buffer_len_);
   if (expected == 0) return false;  // Need more bytes
-  if (this->rx_buffer_.size() < expected) return false;
+  if (this->rx_buffer_len_ < expected) return false;
   
-  // We have enough bytes — extract the frame
-  frame.assign(this->rx_buffer_.begin(), this->rx_buffer_.begin() + expected);
-  this->rx_buffer_.erase(this->rx_buffer_.begin(), this->rx_buffer_.begin() + expected);
+  // We have enough bytes — extract the frame into response_frame_
+  std::memcpy(this->response_frame_.data(), this->rx_buffer_.data(), expected);
+  this->response_frame_len_ = expected;
+  
+  // Remove consumed bytes from rx_buffer_ (memmove for overlap-safe shift)
+  size_t remaining = this->rx_buffer_len_ - expected;
+  if (remaining > 0) {
+    std::memmove(this->rx_buffer_.data(), this->rx_buffer_.data() + expected, remaining);
+  }
+  this->rx_buffer_len_ = remaining;
   
   // Validate CRC
-  if (!protocol::validate_frame_crc(frame.data(), frame.size())) {
-    ESP_LOGW(TAG, "CRC mismatch in response (%d bytes)", frame.size());
+  if (!protocol::validate_frame_crc(this->response_frame_.data(), this->response_frame_len_)) {
+    ESP_LOGW(TAG, "CRC mismatch in response (%d bytes)", this->response_frame_len_);
     this->status_set_warning(LOG_STR("CRC mismatch in Modbus response"));
     return false;
   }
@@ -123,9 +126,10 @@ bool WaterFurnaceAurora::read_frame_(std::vector<uint8_t> &frame) {
   return true;
 }
 
-void WaterFurnaceAurora::process_response_(const std::vector<uint8_t> &frame) {
+void WaterFurnaceAurora::process_response_() {
   // Parse frame with expected addresses
-  auto resp = protocol::parse_frame(frame.data(), frame.size(), this->expected_addresses_);
+  auto resp = protocol::parse_frame(this->response_frame_.data(), this->response_frame_len_,
+                                    this->expected_addresses_.data(), this->expected_addresses_len_);
   
   if (resp.is_error) {
     ESP_LOGW(TAG, "Error response (func 0x%02X, code 0x%02X) for request type %d",
@@ -180,8 +184,8 @@ void WaterFurnaceAurora::process_response_(const std::vector<uint8_t> &frame) {
 
 void WaterFurnaceAurora::handle_timeout_() {
   ESP_LOGW(TAG, "Response timeout for request type %d (rx_buf=%d bytes)",
-           static_cast<int>(this->pending_request_), this->rx_buffer_.size());
-  this->rx_buffer_.clear();
+           static_cast<int>(this->pending_request_), this->rx_buffer_len_);
+  this->rx_buffer_len_ = 0;
   
   // During setup, use retry/backoff
   if (this->pending_request_ == PendingRequest::SETUP_ID ||
@@ -246,10 +250,7 @@ void WaterFurnaceAurora::setup() {
     this->flow_control_pin_->digital_write(false);  // Start in RX mode
   }
   
-  this->rx_buffer_.reserve(protocol::MAX_FRAME_SIZE);
-  this->response_frame_.reserve(protocol::MAX_FRAME_SIZE);
-  this->listeners_.reserve(MAX_LISTENERS);
-  this->pending_writes_.reserve(MAX_PENDING_WRITES);
+  // rx_buffer_, response_frame_, listeners_, pending_writes_ are fixed-size arrays — no reserve needed.
   this->register_cache_.reserve(128);  // Typical poll cycle reads 60-100 registers
   this->cached_fault_history_.reserve(256);
   this->last_successful_response_ = millis();
@@ -304,7 +305,7 @@ void WaterFurnaceAurora::loop() {
       
     case State::IDLE:
       // Writes take priority over reads
-      if (!this->pending_writes_.empty()) {
+      if (this->pending_writes_len_ > 0) {
         this->process_pending_writes_();
         return;
       }
@@ -333,9 +334,9 @@ void WaterFurnaceAurora::loop() {
       }
       
       // Try to read a complete frame (reuses pre-allocated member buffer)
-      this->response_frame_.clear();
-      if (this->read_frame_(this->response_frame_)) {
-        this->process_response_(this->response_frame_);
+      this->response_frame_len_ = 0;
+      if (this->read_frame_()) {
+        this->process_response_();
       }
       return;
     }
@@ -450,13 +451,12 @@ void WaterFurnaceAurora::start_setup_read_id_() {
   auto frame = protocol::build_read_holding_request(this->address_, registers::MODEL_NUMBER, 18);
   
   // Expected: regs 92-109 (18 registers)
-  std::vector<uint16_t> expected;
-  expected.reserve(18);
+  uint16_t expected[18];
   for (uint16_t i = 0; i < 18; i++) {
-    expected.push_back(registers::MODEL_NUMBER + i);
+    expected[i] = registers::MODEL_NUMBER + i;
   }
   
-  this->send_request_(frame, PendingRequest::SETUP_ID, expected);
+  this->send_request_(frame, PendingRequest::SETUP_ID, expected, 18);
 }
 
 void WaterFurnaceAurora::process_setup_id_response_(const protocol::ParsedResponse &resp) {
@@ -501,35 +501,35 @@ void WaterFurnaceAurora::process_setup_id_response_(const protocol::ParsedRespon
 void WaterFurnaceAurora::start_setup_detect_() {
   ESP_LOGD(TAG, "Setup: detecting hardware components...");
   
-  std::vector<uint16_t> addrs;
-  addrs.reserve(20);
+  uint16_t addrs[20];
+  size_t addrs_len = 0;
   
-  if (!this->axb_override_) addrs.push_back(registers::AXB_INSTALLED);
-  addrs.push_back(registers::AXB_VERSION);
-  addrs.push_back(registers::THERMOSTAT_INSTALLED);
-  addrs.push_back(registers::THERMOSTAT_VERSION);
-  if (!this->iz2_override_) addrs.push_back(registers::IZ2_INSTALLED);
-  addrs.push_back(registers::IZ2_VERSION);
-  if (!this->iz2_zones_override_) addrs.push_back(registers::IZ2_NUM_ZONES);
-  addrs.push_back(registers::BLOWER_TYPE);
-  addrs.push_back(registers::ENERGY_MONITOR);
-  addrs.push_back(registers::PUMP_TYPE);
+  if (!this->axb_override_) addrs[addrs_len++] = registers::AXB_INSTALLED;
+  addrs[addrs_len++] = registers::AXB_VERSION;
+  addrs[addrs_len++] = registers::THERMOSTAT_INSTALLED;
+  addrs[addrs_len++] = registers::THERMOSTAT_VERSION;
+  if (!this->iz2_override_) addrs[addrs_len++] = registers::IZ2_INSTALLED;
+  addrs[addrs_len++] = registers::IZ2_VERSION;
+  if (!this->iz2_zones_override_) addrs[addrs_len++] = registers::IZ2_NUM_ZONES;
+  addrs[addrs_len++] = registers::BLOWER_TYPE;
+  addrs[addrs_len++] = registers::ENERGY_MONITOR;
+  addrs[addrs_len++] = registers::PUMP_TYPE;
   
   if (!this->vs_drive_override_) {
-    addrs.push_back(registers::ABC_PROGRAM);      // ABC program version (4 regs)
-    addrs.push_back(registers::ABC_PROGRAM + 1);
-    addrs.push_back(registers::ABC_PROGRAM + 2);
-    addrs.push_back(registers::ABC_PROGRAM + 3);
+    addrs[addrs_len++] = registers::ABC_PROGRAM;      // ABC program version (4 regs)
+    addrs[addrs_len++] = registers::ABC_PROGRAM + 1;
+    addrs[addrs_len++] = registers::ABC_PROGRAM + 2;
+    addrs[addrs_len++] = registers::ABC_PROGRAM + 3;
   }
   
-  auto frame = protocol::build_read_registers_request(this->address_, addrs);
+  auto frame = protocol::build_read_registers_request(this->address_, addrs, addrs_len);
   if (frame.empty()) {
     ESP_LOGE(TAG, "Failed to build detect request");
     this->finish_setup_();
     return;
   }
   
-  this->send_request_(frame, PendingRequest::SETUP_DETECT, addrs);
+  this->send_request_(frame, PendingRequest::SETUP_DETECT, addrs, addrs_len);
 }
 
 void WaterFurnaceAurora::process_setup_detect_response_(const protocol::ParsedResponse &resp) {
@@ -642,14 +642,14 @@ void WaterFurnaceAurora::process_setup_detect_response_(const protocol::ParsedRe
 void WaterFurnaceAurora::start_setup_vs_probe_() {
   ESP_LOGD(TAG, "Setup: probing VS drive registers...");
   
-  std::vector<uint16_t> addrs = {3001, 3322, 3325};
-  auto frame = protocol::build_read_registers_request(this->address_, addrs);
+  static constexpr uint16_t addrs[] = {3001, 3322, 3325};
+  auto frame = protocol::build_read_registers_request(this->address_, addrs, 3);
   if (frame.empty()) {
     this->finish_setup_();
     return;
   }
   
-  this->send_request_(frame, PendingRequest::SETUP_VS_PROBE, addrs);
+  this->send_request_(frame, PendingRequest::SETUP_VS_PROBE, addrs, 3);
 }
 
 void WaterFurnaceAurora::process_setup_vs_probe_response_(const protocol::ParsedResponse &resp) {
@@ -703,11 +703,14 @@ void WaterFurnaceAurora::finish_setup_() {
            get_pump_type_string(this->pump_type_), this->energy_monitor_level_);
   
   // Fire deferred setup callbacks
-  for (auto &cb : this->setup_callbacks_) {
-    cb();
+  for (size_t i = 0; i < this->setup_callbacks_len_; i++) {
+    this->setup_callbacks_[i]();
   }
-  this->setup_callbacks_.clear();
-  this->setup_callbacks_.shrink_to_fit();
+  // Release std::function captures — assign empty functions and reset count.
+  for (size_t i = 0; i < this->setup_callbacks_len_; i++) {
+    this->setup_callbacks_[i] = nullptr;
+  }
+  this->setup_callbacks_len_ = 0;
   
   this->transition_(State::IDLE);
 }
@@ -719,155 +722,152 @@ void WaterFurnaceAurora::finish_setup_() {
 void WaterFurnaceAurora::build_poll_addresses_() {
   bool medium_poll = (this->poll_tier_counter_ % 6) == 0;
   
-  this->addresses_to_read_.clear();
-  if (this->addresses_to_read_.capacity() < 100) {
-    this->addresses_to_read_.reserve(100);
-  }
+  this->addresses_to_read_len_ = 0;
   
   // === TIER 0: Fast registers — every cycle (~5s) ===
-  this->addresses_to_read_.push_back(registers::COMPRESSOR_ANTI_SHORT_CYCLE);
-  this->addresses_to_read_.push_back(registers::LAST_FAULT);
-  this->addresses_to_read_.push_back(registers::SYSTEM_OUTPUTS);
-  this->addresses_to_read_.push_back(registers::SYSTEM_STATUS);
+  this->addresses_to_read_[this->addresses_to_read_len_++] = registers::COMPRESSOR_ANTI_SHORT_CYCLE;
+  this->addresses_to_read_[this->addresses_to_read_len_++] = registers::LAST_FAULT;
+  this->addresses_to_read_[this->addresses_to_read_len_++] = registers::SYSTEM_OUTPUTS;
+  this->addresses_to_read_[this->addresses_to_read_len_++] = registers::SYSTEM_STATUS;
   
-  this->addresses_to_read_.push_back(registers::FP1_TEMP);
-  this->addresses_to_read_.push_back(registers::FP2_TEMP);
-  this->addresses_to_read_.push_back(registers::AMBIENT_TEMP);
+  this->addresses_to_read_[this->addresses_to_read_len_++] = registers::FP1_TEMP;
+  this->addresses_to_read_[this->addresses_to_read_len_++] = registers::FP2_TEMP;
+  this->addresses_to_read_[this->addresses_to_read_len_++] = registers::AMBIENT_TEMP;
   
   // Setpoints, mode, and fan config on fast tier — these are writable from HA
   // and must be polled frequently so the write cooldown window (7s) always
   // contains at least one fresh read-back.  Only 4 extra registers per cycle.
-  this->addresses_to_read_.push_back(registers::HEATING_SETPOINT);
-  this->addresses_to_read_.push_back(registers::COOLING_SETPOINT);
-  this->addresses_to_read_.push_back(registers::HEATING_MODE_READ);
-  this->addresses_to_read_.push_back(registers::FAN_CONFIG);
+  this->addresses_to_read_[this->addresses_to_read_len_++] = registers::HEATING_SETPOINT;
+  this->addresses_to_read_[this->addresses_to_read_len_++] = registers::COOLING_SETPOINT;
+  this->addresses_to_read_[this->addresses_to_read_len_++] = registers::HEATING_MODE_READ;
+  this->addresses_to_read_[this->addresses_to_read_len_++] = registers::FAN_CONFIG;
   
   if (this->awl_axb()) {
-    this->addresses_to_read_.push_back(registers::ENTERING_AIR_AWL);
-    this->addresses_to_read_.push_back(registers::LEAVING_AIR);
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::ENTERING_AIR_AWL;
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::LEAVING_AIR;
   } else {
-    this->addresses_to_read_.push_back(registers::ENTERING_AIR);
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::ENTERING_AIR;
   }
   if (this->awl_communicating()) {
-    this->addresses_to_read_.push_back(registers::RELATIVE_HUMIDITY);
-    this->addresses_to_read_.push_back(registers::OUTDOOR_TEMP);
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::RELATIVE_HUMIDITY;
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::OUTDOOR_TEMP;
   }
   if (this->has_axb_) {
-    this->addresses_to_read_.push_back(registers::AXB_OUTPUTS);
-    this->addresses_to_read_.push_back(registers::LEAVING_WATER);
-    this->addresses_to_read_.push_back(registers::ENTERING_WATER);
-    this->addresses_to_read_.push_back(registers::WATERFLOW);
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::AXB_OUTPUTS;
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::LEAVING_WATER;
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::ENTERING_WATER;
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::WATERFLOW;
   }
   
   if (this->refrigeration_monitoring()) {
-    this->addresses_to_read_.push_back(registers::HEATING_LIQUID_LINE_TEMP);
-    this->addresses_to_read_.push_back(registers::SATURATED_CONDENSER_TEMP);
-    this->addresses_to_read_.push_back(registers::SUBCOOL_HEATING);
-    this->addresses_to_read_.push_back(registers::SUBCOOL_COOLING);
-    this->addresses_to_read_.push_back(registers::HEAT_OF_EXTRACTION);
-    this->addresses_to_read_.push_back(registers::HEAT_OF_EXTRACTION + 1);
-    this->addresses_to_read_.push_back(registers::HEAT_OF_REJECTION);
-    this->addresses_to_read_.push_back(registers::HEAT_OF_REJECTION + 1);
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::HEATING_LIQUID_LINE_TEMP;
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::SATURATED_CONDENSER_TEMP;
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::SUBCOOL_HEATING;
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::SUBCOOL_COOLING;
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::HEAT_OF_EXTRACTION;
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::HEAT_OF_EXTRACTION + 1;
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::HEAT_OF_REJECTION;
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::HEAT_OF_REJECTION + 1;
   }
   
   if (this->energy_monitoring()) {
-    this->addresses_to_read_.push_back(registers::LINE_VOLTAGE);
-    this->addresses_to_read_.push_back(registers::COMPRESSOR_WATTS);
-    this->addresses_to_read_.push_back(registers::COMPRESSOR_WATTS + 1);
-    this->addresses_to_read_.push_back(registers::BLOWER_WATTS);
-    this->addresses_to_read_.push_back(registers::BLOWER_WATTS + 1);
-    this->addresses_to_read_.push_back(registers::AUX_WATTS);
-    this->addresses_to_read_.push_back(registers::AUX_WATTS + 1);
-    this->addresses_to_read_.push_back(registers::TOTAL_WATTS);
-    this->addresses_to_read_.push_back(registers::TOTAL_WATTS + 1);
-    this->addresses_to_read_.push_back(registers::PUMP_WATTS);
-    this->addresses_to_read_.push_back(registers::PUMP_WATTS + 1);
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::LINE_VOLTAGE;
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::COMPRESSOR_WATTS;
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::COMPRESSOR_WATTS + 1;
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::BLOWER_WATTS;
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::BLOWER_WATTS + 1;
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::AUX_WATTS;
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::AUX_WATTS + 1;
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::TOTAL_WATTS;
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::TOTAL_WATTS + 1;
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::PUMP_WATTS;
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::PUMP_WATTS + 1;
   }
   
   // COP requires TOTAL_WATTS + heat registers regardless of energy_monitor_level.
   // When those blocks above didn't already add them, add just what COP needs.
   if (this->cop_sensor_ != nullptr) {
     if (!this->energy_monitoring()) {
-      this->addresses_to_read_.push_back(registers::TOTAL_WATTS);
-      this->addresses_to_read_.push_back(registers::TOTAL_WATTS + 1);
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::TOTAL_WATTS;
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::TOTAL_WATTS + 1;
     }
     if (!this->refrigeration_monitoring()) {
-      this->addresses_to_read_.push_back(registers::HEAT_OF_EXTRACTION);
-      this->addresses_to_read_.push_back(registers::HEAT_OF_EXTRACTION + 1);
-      this->addresses_to_read_.push_back(registers::HEAT_OF_REJECTION);
-      this->addresses_to_read_.push_back(registers::HEAT_OF_REJECTION + 1);
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::HEAT_OF_EXTRACTION;
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::HEAT_OF_EXTRACTION + 1;
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::HEAT_OF_REJECTION;
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::HEAT_OF_REJECTION + 1;
     }
   }
   
   if (this->is_ecm_blower() || this->blower_type_ == BlowerType::FIVE_SPEED) {
-    this->addresses_to_read_.push_back(registers::ECM_SPEED);
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::ECM_SPEED;
   }
   
   if (this->has_vs_drive_) {
-    this->addresses_to_read_.push_back(registers::ACTIVE_DEHUMIDIFY);
-    this->addresses_to_read_.push_back(registers::COMPRESSOR_SPEED_DESIRED);
-    this->addresses_to_read_.push_back(registers::COMPRESSOR_SPEED_ACTUAL);
-    this->addresses_to_read_.push_back(registers::VS_DISCHARGE_PRESSURE);
-    this->addresses_to_read_.push_back(registers::VS_SUCTION_PRESSURE);
-    this->addresses_to_read_.push_back(registers::VS_DISCHARGE_TEMP);
-    this->addresses_to_read_.push_back(registers::VS_AMBIENT_TEMP);
-    this->addresses_to_read_.push_back(registers::VS_DRIVE_TEMP);
-    this->addresses_to_read_.push_back(registers::VS_INVERTER_TEMP);
-    this->addresses_to_read_.push_back(registers::VS_COMPRESSOR_WATTS);
-    this->addresses_to_read_.push_back(registers::VS_COMPRESSOR_WATTS + 1);
-    this->addresses_to_read_.push_back(registers::VS_FAN_SPEED);
-    this->addresses_to_read_.push_back(registers::VS_EEV_OPEN);
-    this->addresses_to_read_.push_back(registers::VS_SUCTION_TEMP);
-    this->addresses_to_read_.push_back(registers::VS_SAT_EVAP_DISCHARGE_TEMP);
-    this->addresses_to_read_.push_back(registers::VS_SUPERHEAT_TEMP);
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::ACTIVE_DEHUMIDIFY;
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::COMPRESSOR_SPEED_DESIRED;
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::COMPRESSOR_SPEED_ACTUAL;
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::VS_DISCHARGE_PRESSURE;
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::VS_SUCTION_PRESSURE;
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::VS_DISCHARGE_TEMP;
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::VS_AMBIENT_TEMP;
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::VS_DRIVE_TEMP;
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::VS_INVERTER_TEMP;
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::VS_COMPRESSOR_WATTS;
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::VS_COMPRESSOR_WATTS + 1;
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::VS_FAN_SPEED;
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::VS_EEV_OPEN;
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::VS_SUCTION_TEMP;
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::VS_SAT_EVAP_DISCHARGE_TEMP;
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::VS_SUPERHEAT_TEMP;
     // VS Drive additional diagnostics — only poll if at least one sensor is configured
     if (this->vs_entering_water_temperature_sensor_ || this->vs_line_voltage_sensor_ ||
         this->vs_thermo_power_sensor_ || this->vs_supply_voltage_sensor_ ||
         this->vs_udc_voltage_sensor_) {
-      this->addresses_to_read_.push_back(registers::VS_ENTERING_WATER_TEMP);
-      this->addresses_to_read_.push_back(registers::VS_LINE_VOLTAGE);
-      this->addresses_to_read_.push_back(registers::VS_THERMO_POWER);
-      this->addresses_to_read_.push_back(registers::VS_SUPPLY_VOLTAGE);
-      this->addresses_to_read_.push_back(registers::VS_SUPPLY_VOLTAGE + 1);  // uint32 low word
-      this->addresses_to_read_.push_back(registers::VS_UDC_VOLTAGE);
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::VS_ENTERING_WATER_TEMP;
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::VS_LINE_VOLTAGE;
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::VS_THERMO_POWER;
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::VS_SUPPLY_VOLTAGE;
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::VS_SUPPLY_VOLTAGE + 1;  // uint32 low word
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::VS_UDC_VOLTAGE;
     }
   }
   
   if (this->has_axb_ && this->awl_axb()) {
-    this->addresses_to_read_.push_back(registers::VS_PUMP_SPEED);
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::VS_PUMP_SPEED;
     if (this->is_vs_pump()) {
-      this->addresses_to_read_.push_back(registers::VS_PUMP_MANUAL);
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::VS_PUMP_MANUAL;
     }
   }
   
   // AXB current sensors (amps) — only poll if at least one current sensor is configured
   if (this->has_axb_ && (this->blower_amps_sensor_ || this->aux_amps_sensor_ ||
                          this->compressor_1_amps_sensor_ || this->compressor_2_amps_sensor_)) {
-    this->addresses_to_read_.push_back(registers::AXB_BLOWER_AMPS);
-    this->addresses_to_read_.push_back(registers::AXB_AUX_AMPS);
-    this->addresses_to_read_.push_back(registers::AXB_COMPRESSOR1_AMPS);
-    this->addresses_to_read_.push_back(registers::AXB_COMPRESSOR2_AMPS);
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::AXB_BLOWER_AMPS;
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::AXB_AUX_AMPS;
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::AXB_COMPRESSOR1_AMPS;
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::AXB_COMPRESSOR2_AMPS;
   }
 
   // DHW writable registers on fast tier — ensures the 7s write cooldown window
   // always contains at least one fresh read-back (same reason climate setpoints
   // were moved to fast tier).  DHW_TEMP stays on medium tier since it's read-only.
   if (this->has_axb_) {
-    this->addresses_to_read_.push_back(registers::DHW_ENABLED);
-    this->addresses_to_read_.push_back(registers::DHW_SETPOINT);
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::DHW_ENABLED;
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::DHW_SETPOINT;
   }
   
   if (this->has_iz2_ && this->num_iz2_zones_ > 0) {
-    this->addresses_to_read_.push_back(registers::IZ2_OUTDOOR_TEMP);
-    this->addresses_to_read_.push_back(registers::IZ2_DEMAND);
-    this->addresses_to_read_.push_back(registers::IZ2_COMPRESSOR_SPEED_DESIRED);
-    this->addresses_to_read_.push_back(registers::IZ2_BLOWER_SPEED_DESIRED);
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::IZ2_OUTDOOR_TEMP;
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::IZ2_DEMAND;
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::IZ2_COMPRESSOR_SPEED_DESIRED;
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::IZ2_BLOWER_SPEED_DESIRED;
     
     for (uint8_t zone = 1; zone <= this->num_iz2_zones_; zone++) {
-      this->addresses_to_read_.push_back(registers::IZ2_AMBIENT_BASE + ((zone - 1) * 3));
-      this->addresses_to_read_.push_back(registers::IZ2_CONFIG1_BASE + ((zone - 1) * 3));
-      this->addresses_to_read_.push_back(registers::IZ2_CONFIG2_BASE + ((zone - 1) * 3));
-      this->addresses_to_read_.push_back(registers::IZ2_CONFIG3_BASE + ((zone - 1) * 3));
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::IZ2_AMBIENT_BASE + ((zone - 1) * 3);
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::IZ2_CONFIG1_BASE + ((zone - 1) * 3);
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::IZ2_CONFIG2_BASE + ((zone - 1) * 3);
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::IZ2_CONFIG3_BASE + ((zone - 1) * 3);
     }
   }
   
@@ -876,45 +876,45 @@ void WaterFurnaceAurora::build_poll_addresses_() {
   // were moved to fast tier to ensure the write cooldown window always contains
   // at least one fresh read-back from the device.
   if (medium_poll) {
-    this->addresses_to_read_.push_back(registers::LAST_LOCKOUT_FAULT);
-    this->addresses_to_read_.push_back(registers::OUTPUTS_AT_LOCKOUT);
-    this->addresses_to_read_.push_back(registers::INPUTS_AT_LOCKOUT);
-    this->addresses_to_read_.push_back(registers::LINE_VOLTAGE_SETTING);
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::LAST_LOCKOUT_FAULT;
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::OUTPUTS_AT_LOCKOUT;
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::INPUTS_AT_LOCKOUT;
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::LINE_VOLTAGE_SETTING;
     
     if (this->has_axb_) {
       // Note: DHW_ENABLED and DHW_SETPOINT moved to fast tier (writable registers
       // need fresh read-back within the 7s cooldown window).
-      this->addresses_to_read_.push_back(registers::DHW_TEMP);
-      this->addresses_to_read_.push_back(registers::LOOP_PRESSURE);
-      this->addresses_to_read_.push_back(registers::AXB_INPUTS);
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::DHW_TEMP;
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::LOOP_PRESSURE;
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::AXB_INPUTS;
     }
     
     if (this->is_ecm_blower()) {
-      this->addresses_to_read_.push_back(registers::BLOWER_ONLY_SPEED);
-      this->addresses_to_read_.push_back(registers::LO_COMPRESSOR_ECM_SPEED);
-      this->addresses_to_read_.push_back(registers::HI_COMPRESSOR_ECM_SPEED);
-      this->addresses_to_read_.push_back(registers::AUX_HEAT_ECM_SPEED);
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::BLOWER_ONLY_SPEED;
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::LO_COMPRESSOR_ECM_SPEED;
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::HI_COMPRESSOR_ECM_SPEED;
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::AUX_HEAT_ECM_SPEED;
     }
     
     if (this->has_axb_) {
-      this->addresses_to_read_.push_back(registers::VS_PUMP_MIN);
-      this->addresses_to_read_.push_back(registers::VS_PUMP_MAX);
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::VS_PUMP_MIN;
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::VS_PUMP_MAX;
     }
     
     if (this->has_vs_drive_) {
-      this->addresses_to_read_.push_back(registers::VS_DERATE);
-      this->addresses_to_read_.push_back(registers::VS_SAFE_MODE);
-      this->addresses_to_read_.push_back(registers::VS_ALARM1);
-      this->addresses_to_read_.push_back(registers::VS_ALARM2);
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::VS_DERATE;
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::VS_SAFE_MODE;
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::VS_ALARM1;
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::VS_ALARM2;
     }
     
     if (this->has_iz2_ && this->awl_communicating()) {
-      this->addresses_to_read_.push_back(registers::IZ2_HUMIDISTAT_SETTINGS);
-      this->addresses_to_read_.push_back(registers::IZ2_HUMIDISTAT_MODE);
-      this->addresses_to_read_.push_back(registers::IZ2_HUMIDISTAT_TARGETS);
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::IZ2_HUMIDISTAT_SETTINGS;
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::IZ2_HUMIDISTAT_MODE;
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::IZ2_HUMIDISTAT_TARGETS;
     } else {
-      this->addresses_to_read_.push_back(registers::HUMIDISTAT_SETTINGS);
-      this->addresses_to_read_.push_back(registers::HUMIDISTAT_TARGETS);
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::HUMIDISTAT_SETTINGS;
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::HUMIDISTAT_TARGETS;
     }
   }
 }
@@ -923,20 +923,22 @@ void WaterFurnaceAurora::start_poll_cycle_() {
   // Build address list based on tier
   this->build_poll_addresses_();
   
-  if (this->addresses_to_read_.empty()) {
+  if (this->addresses_to_read_len_ == 0) {
     ESP_LOGD(TAG, "No registers to poll");
     return;
   }
   
-  auto frame = protocol::build_read_registers_request(this->address_, this->addresses_to_read_);
+  auto frame = protocol::build_read_registers_request(
+      this->address_, this->addresses_to_read_.data(), this->addresses_to_read_len_);
   if (frame.empty()) {
     ESP_LOGW(TAG, "Failed to build poll request (%d registers — max is %d)",
-             this->addresses_to_read_.size(), protocol::MAX_REGISTERS_PER_REQUEST);
+             this->addresses_to_read_len_, protocol::MAX_REGISTERS_PER_REQUEST);
     return;
   }
   
-  // Move addresses into expected_addresses_ to avoid copy (poll addresses rebuilt each cycle)
-  this->send_request_(frame, PendingRequest::POLL_REGISTERS, std::move(this->addresses_to_read_));
+  // Copy addresses into expected_addresses_ (fixed-size arrays, no heap)
+  this->send_request_(frame, PendingRequest::POLL_REGISTERS,
+                      this->addresses_to_read_.data(), this->addresses_to_read_len_);
 }
 
 void WaterFurnaceAurora::process_poll_response_(const protocol::ParsedResponse &resp) {
@@ -967,16 +969,16 @@ void WaterFurnaceAurora::start_fault_history_read_() {
   
   // Build fault history address list once (static local, persists across calls).
   // Thread-safe: ESPHome main loop is single-threaded; no concurrent access.
-  // send_request_ takes const ref, so no heap copy is needed.
-  static std::vector<uint16_t> fault_history_addrs;
-  if (fault_history_addrs.empty()) {
-    fault_history_addrs.reserve(99);
+  static uint16_t fault_history_addrs[99];
+  static bool fault_history_addrs_init = false;
+  if (!fault_history_addrs_init) {
     for (uint16_t i = 0; i < 99; i++) {
-      fault_history_addrs.push_back(registers::FAULT_HISTORY_START + i);
+      fault_history_addrs[i] = registers::FAULT_HISTORY_START + i;
     }
+    fault_history_addrs_init = true;
   }
   
-  this->send_request_(frame, PendingRequest::POLL_FAULT_HISTORY, fault_history_addrs);
+  this->send_request_(frame, PendingRequest::POLL_FAULT_HISTORY, fault_history_addrs, 99);
 }
 
 void WaterFurnaceAurora::process_fault_history_response_(const protocol::ParsedResponse &resp) {
@@ -1044,8 +1046,8 @@ void WaterFurnaceAurora::publish_all_sensors_() {
   this->publish_derived_sensors(regs);
   
   // Notify listeners
-  for (auto &listener : this->listeners_) {
-    listener();
+  for (size_t i = 0; i < this->listeners_len_; i++) {
+    this->listeners_[i]();
   }
 }
 
@@ -1513,33 +1515,35 @@ void WaterFurnaceAurora::publish_iz2_zone_sensors_(const RegisterMap &regs) {
 
 void WaterFurnaceAurora::write_register(uint16_t addr, uint16_t value) {
   // Check if there's already a pending write for this address and update it
-  for (auto &pw : this->pending_writes_) {
-    if (pw.first == addr) {
-      pw.second = value;
+  for (size_t i = 0; i < this->pending_writes_len_; i++) {
+    if (this->pending_writes_[i].first == addr) {
+      this->pending_writes_[i].second = value;
       return;
     }
   }
-  if (this->pending_writes_.size() >= MAX_PENDING_WRITES) {
+  if (this->pending_writes_len_ >= MAX_PENDING_WRITES) {
     ESP_LOGW(TAG, "Write queue full (%d), dropping write to reg %d", MAX_PENDING_WRITES, addr);
     return;
   }
-  this->pending_writes_.emplace_back(addr, value);
+  this->pending_writes_[this->pending_writes_len_++] = {addr, value};
 }
 
 void WaterFurnaceAurora::process_pending_writes_() {
-  if (this->pending_writes_.empty()) return;
+  if (this->pending_writes_len_ == 0) return;
   
   // Always write one register at a time using func 0x06.
   // The Aurora firmware rejects batch writes (func 0x43) with error 0x02
   // "Illegal Data Address" when multiple registers are written together.
   // Pop the first pending write and send it; remaining writes will be
   // dispatched in subsequent loop() iterations.
-  auto w = this->pending_writes_.front();
-  // O(n) shift, but n <= MAX_PENDING_WRITES (16) — at most 15 x 4-byte moves,
-  // cheaper than the overhead of std::deque's chunked allocation on embedded.
-  this->pending_writes_.erase(this->pending_writes_.begin());
+  auto w = this->pending_writes_[0];
+  // O(n) shift, but n <= MAX_PENDING_WRITES (16) — at most 15 x 4-byte moves.
+  this->pending_writes_len_--;
+  for (size_t i = 0; i < this->pending_writes_len_; i++) {
+    this->pending_writes_[i] = this->pending_writes_[i + 1];
+  }
   ESP_LOGD(TAG, "Writing register %d = %d (%d remaining)", w.first, w.second,
-           this->pending_writes_.size());
+           this->pending_writes_len_);
   auto frame = protocol::build_write_single_request(this->address_, w.first, w.second);
   this->send_request_(frame, PendingRequest::WRITE_SINGLE);
 }

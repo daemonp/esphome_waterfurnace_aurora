@@ -79,10 +79,17 @@ std::vector<uint8_t> build_read_ranges_request(
     const std::vector<std::pair<uint16_t, uint16_t>> &ranges);
 
 /// Build func 0x42 request: read individual discontiguous registers.
-/// Returns empty vector if addresses is empty or addresses.size() > MAX_REGISTERS_PER_REQUEST.
+/// Returns empty vector if addresses is empty or count > MAX_REGISTERS_PER_REQUEST.
 std::vector<uint8_t> build_read_registers_request(
     uint8_t slave_addr,
-    const std::vector<uint16_t> &addresses);
+    const uint16_t *addresses, size_t count);
+
+/// Convenience overload for std::vector.
+inline std::vector<uint8_t> build_read_registers_request(
+    uint8_t slave_addr,
+    const std::vector<uint16_t> &addresses) {
+  return build_read_registers_request(slave_addr, addresses.data(), addresses.size());
+}
 
 /// Build func 0x03 request: standard read holding registers.
 std::vector<uint8_t> build_read_holding_request(
@@ -133,7 +140,14 @@ size_t expected_frame_size(const uint8_t *data, size_t available);
 /// Our version takes the expected addresses and returns RegisterValue pairs.
 ParsedResponse parse_frame(
     const uint8_t *frame, size_t frame_len,
-    const std::vector<uint16_t> &expected_addresses = {});
+    const uint16_t *expected_addresses = nullptr, size_t expected_count = 0);
+
+/// Convenience overload for std::vector.
+inline ParsedResponse parse_frame(
+    const uint8_t *frame, size_t frame_len,
+    const std::vector<uint16_t> &expected_addresses) {
+  return parse_frame(frame, frame_len, expected_addresses.data(), expected_addresses.size());
+}
 
 // --- Breakpoint-aware helpers ---
 

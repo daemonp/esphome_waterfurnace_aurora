@@ -60,18 +60,18 @@ std::vector<uint8_t> build_read_ranges_request(
 
 std::vector<uint8_t> build_read_registers_request(
     uint8_t slave_addr,
-    const std::vector<uint16_t> &addresses) {
-  if (addresses.empty() || addresses.size() > MAX_REGISTERS_PER_REQUEST) return {};
+    const uint16_t *addresses, size_t count) {
+  if (addresses == nullptr || count == 0 || count > MAX_REGISTERS_PER_REQUEST) return {};
 
   std::vector<uint8_t> frame;
-  frame.reserve(2 + addresses.size() * 2 + 2);
+  frame.reserve(2 + count * 2 + 2);
 
   frame.push_back(slave_addr);
   frame.push_back(FUNC_READ_REGISTERS);
 
-  for (uint16_t addr : addresses) {
-    frame.push_back(addr >> 8);
-    frame.push_back(addr & 0xFF);
+  for (size_t i = 0; i < count; i++) {
+    frame.push_back(addresses[i] >> 8);
+    frame.push_back(addresses[i] & 0xFF);
   }
 
   append_crc(frame);
@@ -180,7 +180,7 @@ size_t expected_frame_size(const uint8_t *data, size_t available) {
 
 ParsedResponse parse_frame(
     const uint8_t *frame, size_t frame_len,
-    const std::vector<uint16_t> &expected_addresses) {
+    const uint16_t *expected_addresses, size_t expected_count) {
   ParsedResponse resp;
 
   if (frame == nullptr || frame_len < MIN_FRAME_SIZE) {
@@ -234,9 +234,9 @@ ParsedResponse parse_frame(
 
     resp.registers.reserve(num_values);
 
-    if (!expected_addresses.empty()) {
+    if (expected_addresses != nullptr && expected_count > 0) {
       // Map values back to expected addresses (for func 0x42, 0x41, 0x03)
-      size_t count = std::min(num_values, expected_addresses.size());
+      size_t count = std::min(num_values, expected_count);
       for (size_t i = 0; i < count; i++) {
         uint16_t value = (static_cast<uint16_t>(frame[data_start + i * 2]) << 8) |
                          frame[data_start + i * 2 + 1];
