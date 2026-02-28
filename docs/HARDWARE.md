@@ -22,47 +22,7 @@ When building your cable, you need to know how pin numbers map to wire positions
 
 The first picture on this link gives a good visual (https://www.thetechmentor.com/posts/easy-rj45-wiring-with-rj45-pinout-pic/) has a good visual 
 
-```
-                 RJ45 Plug
-  (clip on bottom, contacts away from you)
-
-  +------------------------------------------+
-  |                                          |
-  |  +----+----+----+----+----+----+----+----+
-  |  | 1  | 2  | 3  | 4  | 5  | 6  | 7  | 8  |
-  |  |W/Or| Or |W/Gn| Bl |W/Bl| Gn |W/Br| Br |
-  |  +----+----+----+----+----+----+----+----+
-  |                                          |
-  +--------------+-----------+---------------+
-                 |   clip    |
-                 +-----------+
-                       |
-                    to cable
-
-  T568B wire order (left to right):
-  1: White/Orange  2: Orange      3: White/Green  4: Blue
-  5: White/Blue    6: Green       7: White/Brown  8: Brown
-```
-
-### Heat Pump AID Tool Port
-
-Looking at the RJ45 **jack** on the heat pump (the port you plug into), the pin order is **mirrored** — pin 1 is on the right:
-
-```
-  Heat Pump AID Tool Port (looking at the jack), the clip area is on top
-
-  +------------------------------------------+
-  |                                          |
-  |  +----+----+----+----+----+----+----+----+
-  |  | 8  | 7  | 6  | 5  | 4  | 3  | 2  | 1  |
-  |  +----+----+----+----+----+----+----+----+
-  |                                          |
-  |             +=============+              |
-  |             |  AID Tool   |              |
-  +-------------+=============+--------------+
-```
-
-When you plug in, pin 1 on the plug mates with pin 1 on the jack — the mirroring is handled by the connector geometry. Just make sure you have the right wires on the right pins of the plug.
+<img width="600" height="300" alt="image" src="https://github.com/user-attachments/assets/6f0b67b6-e0eb-49c7-b8e0-48ca1689c62c" />
 
 ### Pin Assignment
 
