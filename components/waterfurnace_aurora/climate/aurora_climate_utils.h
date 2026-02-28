@@ -6,6 +6,7 @@
 //
 // Ruby gem equivalent: bidirectional Hash lookups (HEATING_MODE[value] / HEATING_MODE.invert[symbol])
 
+#include "climate_math.h"
 #include "esphome/components/climate/climate.h"
 #include "../waterfurnace_aurora.h"
 

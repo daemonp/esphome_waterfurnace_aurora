@@ -30,7 +30,7 @@ MOCK_HEADERS = $(wildcard mocks/esphome/core/*.h mocks/esphome/components/*/*.h)
 
 all: test
 
-test: test_protocol test_registers test_hub
+test: test_protocol test_registers test_hub test_climate_math
 	@echo "=== Running protocol tests ==="
 	./test_protocol
 	@echo ""
@@ -39,6 +39,9 @@ test: test_protocol test_registers test_hub
 	@echo ""
 	@echo "=== Running hub tests ==="
 	./test_hub
+	@echo ""
+	@echo "=== Running climate math tests ==="
+	./test_climate_math
 	@echo ""
 	@echo "All tests passed!"
 
@@ -59,5 +62,8 @@ test_hub: test_hub.cpp mock_impl.cpp $(COMPONENT_DIR)/waterfurnace_aurora.cpp $(
 		$(COMPONENT_DIR)/registers.cpp \
 		catch_amalgamated.cpp
 
+test_climate_math: test_climate_math.cpp $(COMPONENT_DIR)/climate/climate_math.h catch_amalgamated.cpp catch_amalgamated.hpp
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ test_climate_math.cpp catch_amalgamated.cpp
+
 clean:
-	rm -f test_protocol test_registers test_hub
+	rm -f test_protocol test_registers test_hub test_climate_math

@@ -1,5 +1,6 @@
 #include "aurora_climate.h"
 #include "aurora_climate_utils.h"
+#include "climate_math.h"
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"  // for fahrenheit_to_celsius / celsius_to_fahrenheit
 
@@ -219,9 +220,12 @@ void AuroraClimate::update_state_() {
 
     const IZ2ZoneData& zone = this->parent_->get_zone_data(this->zone_);
 
-    // Update current temperature (hardware reports °F, climate entity uses °C)
+    // Update current temperature (hardware reports °F, climate entity uses °C).
+    // EMA smoothing suppresses ±0.1°F ADC jitter from IZ2 thermostats so the
+    // HA climate card's current-temperature indicator doesn't visibly bounce.
     if (!std::isnan(zone.ambient_temperature)) {
-      this->current_temperature = fahrenheit_to_celsius(zone.ambient_temperature);
+      float raw_c = fahrenheit_to_celsius(zone.ambient_temperature);
+      this->current_temperature = apply_ema(raw_c, this->temp_ema_, EMA_ALPHA);
     }
 
     // Update setpoints (hardware reports °F, climate entity uses °C)
@@ -286,10 +290,12 @@ void AuroraClimate::update_state_() {
   } else {
     // === Thermostat path: read from system-wide registers ===
 
-    // Update current temperature (hardware reports °F, climate entity uses °C)
+    // Update current temperature (hardware reports °F, climate entity uses °C).
+    // EMA smoothing applied here too — the main thermostat sensor can also jitter.
     float ambient = this->parent_->get_ambient_temperature();
     if (!std::isnan(ambient)) {
-      this->current_temperature = fahrenheit_to_celsius(ambient);
+      float raw_c = fahrenheit_to_celsius(ambient);
+      this->current_temperature = apply_ema(raw_c, this->temp_ema_, EMA_ALPHA);
     }
 
     // Update setpoints (hardware reports °F, climate entity uses °C)
@@ -379,22 +385,19 @@ void AuroraClimate::update_state_() {
 }
 
 void AuroraClimate::publish_state_if_changed_() {
-  // NaN-aware float comparison: NaN==NaN → unchanged, NaN↔real → changed.
-  auto temp_changed = [](float a, float b) -> bool {
-    if (std::isnan(a) && std::isnan(b))
-      return false;
-    if (std::isnan(a) || std::isnan(b))
-      return true;
-    return a != b;
-  };
+  // Dead-band epsilons — suppress ADC jitter without masking real changes.
+  //   Temperature: 0.05 °C ≈ 0.09 °F — absorbs 0.1 °F LSB noise.
+  //   Humidity:    0.5 %RH — absorbs ±1 count jitter from the sensor.
+  static constexpr float TEMP_EPSILON = 0.05f;
+  static constexpr float HUMIDITY_EPSILON = 0.5f;
 
   if (this->has_published_) {
     bool changed = false;
-    changed = changed || temp_changed(this->current_temperature, this->last_current_temp_);
-    changed = changed || temp_changed(this->current_humidity, this->last_current_humidity_);
-    changed = changed || temp_changed(this->target_temperature_low, this->last_target_low_);
-    changed = changed || temp_changed(this->target_temperature_high, this->last_target_high_);
-    changed = changed || temp_changed(this->target_humidity, this->last_target_humidity_);
+    changed = changed || float_changed(this->current_temperature, this->last_current_temp_, TEMP_EPSILON);
+    changed = changed || float_changed(this->current_humidity, this->last_current_humidity_, HUMIDITY_EPSILON);
+    changed = changed || float_changed(this->target_temperature_low, this->last_target_low_, TEMP_EPSILON);
+    changed = changed || float_changed(this->target_temperature_high, this->last_target_high_, TEMP_EPSILON);
+    changed = changed || float_changed(this->target_humidity, this->last_target_humidity_, HUMIDITY_EPSILON);
     changed = changed || (this->mode != this->last_mode_);
     changed = changed || (this->action != this->last_action_);
     changed = changed || (this->fan_mode != this->last_fan_mode_);

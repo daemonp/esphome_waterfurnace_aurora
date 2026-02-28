@@ -37,6 +37,13 @@ class AuroraClimate : public climate::Climate, public Component {
   WaterFurnaceAurora *parent_{nullptr};
   uint8_t zone_{1};
 
+  // EMA state for current_temperature smoothing.
+  // Suppresses ADC jitter (±0.1°F) from IZ2 zone thermostats so the HA
+  // climate card's current-temperature indicator doesn't visibly bounce.
+  // Alpha=0.3 with 5 s polling gives a ~12 s time constant.
+  static constexpr float EMA_ALPHA = 0.3f;
+  float temp_ema_{NAN};
+
   // Dedup tracking — prevents redundant publish_state() calls when nothing changed.
   float last_current_temp_{NAN};
   float last_current_humidity_{NAN};
