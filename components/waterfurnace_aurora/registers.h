@@ -62,6 +62,40 @@ enum class PumpType : uint8_t {
   OTHER = 255
 };
 
+// DIP Switch accessory relay settings (from registers.rb ACCESSORY_RELAY_SETTINGS)
+enum class AccessoryRelay : uint8_t {
+  COMPRESSOR = 0,
+  SLOW_OPENING_WATER_VALVE = 1,
+  HUMIDIFIER = 2,
+  BLOWER = 3
+};
+
+// AXB accessory relay 2 mode (from registers.rb axb_inputs bits 7-8)
+enum class AxbAccessoryRelay2 : uint8_t {
+  DEHUMIDIFIER = 0,        // Neither bit 7 nor bit 8 set
+  HIGH_CAPACITY_COMPRESSOR = 1,  // Bit 7 only
+  LOW_CAPACITY_COMPRESSOR = 2,   // Bit 8 only
+  BLOWER = 3               // Both bits 7 and 8 set
+};
+
+// DIP Switch reversing valve type
+enum class ReversingValveType : uint8_t {
+  B_TYPE = 0,  // Energize to heat
+  O_TYPE = 1   // Energize to cool
+};
+
+// DIP Switch lockout behavior
+enum class LockoutType : uint8_t {
+  PULSE = 0,
+  CONTINUOUS = 1
+};
+
+// DIP Switch dehumidifier/reheat setting
+enum class DehumidifierReheat : uint8_t {
+  REHEAT = 0,
+  DEHUMIDIFIER = 1
+};
+
 // IZ2 Zone current mode/call (from registers.rb CALLS hash)
 enum class ZoneCall : uint8_t {
   STANDBY = 0,
@@ -111,6 +145,7 @@ namespace registers {
   static constexpr uint16_t INPUTS_AT_LOCKOUT = 28;      // Bitmask: system status/inputs when lockout occurred
   static constexpr uint16_t SYSTEM_OUTPUTS = 30;
   static constexpr uint16_t SYSTEM_STATUS = 31;
+  static constexpr uint16_t DIP_SWITCH_STATUS = 33;  // ABC DIP switch bitmask
   static constexpr uint16_t ABC_PROGRAM = 88;         // 4 registers (88-91) — program version string
   static constexpr uint16_t MODEL_NUMBER = 92;        // 12 registers (92-103)
   static constexpr uint16_t SERIAL_NUMBER = 105;      // 5 registers (105-109)
@@ -398,6 +433,52 @@ std::string get_outputs_string(uint16_t value);
 
 /// Get system inputs/status string from bitmask (for lockout diagnostics).
 std::string get_inputs_string(uint16_t value);
+
+// ============================================================================
+// DIP Switch Parsing (register 33 — from registers.rb dipswitch_settings)
+// ============================================================================
+
+/// Parsed DIP switch settings from register 33.
+/// Special case: when raw value is 0x7FFF, the system is in manual DIP switch mode.
+struct DipSwitchSettings {
+  bool manual{false};                                    ///< 0x7FFF = manual mode
+  uint8_t fp1{15};                                       ///< Freeze protection 1 delta: 15 or 30
+  uint8_t fp2{0};                                        ///< Freeze protection 2 delta: 30, or 0 = off
+  ReversingValveType reversing_valve{ReversingValveType::B_TYPE};
+  AccessoryRelay accessory_relay{AccessoryRelay::COMPRESSOR};
+  uint8_t compressor_stages{2};                          ///< 1 = single stage, 2 = dual stage
+  LockoutType lockout{LockoutType::PULSE};
+  DehumidifierReheat dehumidifier_reheat{DehumidifierReheat::REHEAT};
+};
+
+/// Parse register 33 (or 4) DIP switch bitmask into structured settings.
+/// Matches Ruby gem registers.rb:211-223 dipswitch_settings().
+inline DipSwitchSettings parse_dip_switches(uint16_t value) {
+  DipSwitchSettings ds;
+  if (value == 0x7FFF) {
+    ds.manual = true;
+    return ds;
+  }
+  ds.fp1 = (value & 0x01) ? 30 : 15;
+  ds.fp2 = (value & 0x02) ? 30 : 0;  // 0 = off
+  ds.reversing_valve = (value & 0x04) ? ReversingValveType::O_TYPE : ReversingValveType::B_TYPE;
+  ds.accessory_relay = static_cast<AccessoryRelay>((value >> 3) & 0x03);
+  ds.compressor_stages = (value & 0x20) ? 1 : 2;
+  ds.lockout = (value & 0x40) ? LockoutType::CONTINUOUS : LockoutType::PULSE;
+  ds.dehumidifier_reheat = (value & 0x80) ? DehumidifierReheat::DEHUMIDIFIER : DehumidifierReheat::REHEAT;
+  return ds;
+}
+
+/// Extract AXB accessory relay 2 mode from AXB inputs register 1103.
+/// Matches Ruby gem registers.rb:322-330 axb_inputs().
+inline AxbAccessoryRelay2 axb_extract_accessory_relay2(uint16_t axb_inputs) {
+  bool bit7 = (axb_inputs & 0x080) != 0;
+  bool bit8 = (axb_inputs & 0x100) != 0;
+  if (bit7 && bit8) return AxbAccessoryRelay2::BLOWER;
+  if (bit8) return AxbAccessoryRelay2::LOW_CAPACITY_COMPRESSOR;
+  if (bit7) return AxbAccessoryRelay2::HIGH_CAPACITY_COMPRESSOR;
+  return AxbAccessoryRelay2::DEHUMIDIFIER;
+}
 
 // ============================================================================
 // IZ2 Zone Extraction Helpers

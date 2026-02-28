@@ -256,12 +256,13 @@ void AuroraClimate::update_state_() {
       }
     }
 
-    // Update action based on zone damper and call state
-    // XXX: Dehumidifier detection needs testing during summer cooling season.
-    // See waterfurnace_aurora.cpp for full explanation of the reversing valve gate.
+    // Update action based on zone damper and call state.
+    // Dehumidifier detection: VS active dehumidify is gated on reversing valve (cooling
+    // mode only); AXB dehumidifier relay is gated on has_dehumidifier() (DIP switch).
     bool cooling = (this->parent_->get_system_outputs() & OUTPUT_RV) != 0;
     bool dehumidifying = (this->parent_->is_active_dehumidify() && cooling)
-                         || ((this->parent_->get_axb_outputs() & AXB_OUTPUT_DEHUMIDIFIER) != 0);
+                         || (this->parent_->has_dehumidifier()
+                             && (this->parent_->get_axb_outputs() & AXB_OUTPUT_DEHUMIDIFIER) != 0);
     if (!zone.damper_open) {
       // Zone damper closed — show DRYING only for standalone dehumidifier (AXB relay)
       this->action = dehumidifying ? climate::CLIMATE_ACTION_DRYING : climate::CLIMATE_ACTION_IDLE;
@@ -335,10 +336,11 @@ void AuroraClimate::update_state_() {
     bool cooling = (outputs & OUTPUT_RV) != 0;
     bool aux_heat = (outputs & (OUTPUT_EH1 | OUTPUT_EH2)) != 0;
     bool blower = (outputs & OUTPUT_BLOWER) != 0;
-    // XXX: Dehumidifier detection needs testing during summer cooling season.
-    // See waterfurnace_aurora.cpp for full explanation of the reversing valve gate.
+    // Dehumidifier detection: VS active dehumidify is gated on reversing valve (cooling
+    // mode only); AXB dehumidifier relay is gated on has_dehumidifier() (DIP switch).
     bool dehumidifying = (this->parent_->is_active_dehumidify() && cooling)
-                         || ((this->parent_->get_axb_outputs() & AXB_OUTPUT_DEHUMIDIFIER) != 0);
+                         || (this->parent_->has_dehumidifier()
+                             && (this->parent_->get_axb_outputs() & AXB_OUTPUT_DEHUMIDIFIER) != 0);
     
     if (this->parent_->is_locked_out()) {
       this->action = climate::CLIMATE_ACTION_OFF;

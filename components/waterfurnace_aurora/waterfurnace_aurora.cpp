@@ -405,6 +405,17 @@ void WaterFurnaceAurora::dump_config() {
     ESP_LOGCONFIG(TAG, "  IZ2 Zones: %d%s", this->num_iz2_zones_,
                   this->iz2_zones_override_ ? " (override)" : "");
   }
+  ESP_LOGCONFIG(TAG, "  DIP Switches: fp1=%d fp2=%d rv=%s acc=%d stages=%d lockout=%s dh_rh=%s%s",
+                this->dip_switches_.fp1, this->dip_switches_.fp2,
+                this->dip_switches_.reversing_valve == ReversingValveType::O_TYPE ? "O" : "B",
+                static_cast<int>(this->dip_switches_.accessory_relay),
+                this->dip_switches_.compressor_stages,
+                this->dip_switches_.lockout == LockoutType::CONTINUOUS ? "continuous" : "pulse",
+                this->dip_switches_.dehumidifier_reheat == DehumidifierReheat::DEHUMIDIFIER ? "dehumidifier" : "reheat",
+                this->dip_switches_.manual ? " (MANUAL)" : "");
+  ESP_LOGCONFIG(TAG, "  Humidifier: %s, Dehumidifier: %s",
+                this->has_humidifier_ ? "yes" : "no",
+                this->has_dehumidifier_ ? "yes" : "no");
   ESP_LOGCONFIG(TAG, "  Blower: %s", this->blower_type_ == BlowerType::PSC ? "PSC" :
                 this->blower_type_ == BlowerType::FIVE_SPEED ? "5-Speed" : "ECM");
   ESP_LOGCONFIG(TAG, "  Pump: %s", get_pump_type_string(this->pump_type_));
@@ -511,9 +522,11 @@ void WaterFurnaceAurora::start_setup_detect_() {
   if (!this->iz2_override_) addrs[addrs_len++] = registers::IZ2_INSTALLED;
   addrs[addrs_len++] = registers::IZ2_VERSION;
   if (!this->iz2_zones_override_) addrs[addrs_len++] = registers::IZ2_NUM_ZONES;
+  addrs[addrs_len++] = registers::DIP_SWITCH_STATUS;
   addrs[addrs_len++] = registers::BLOWER_TYPE;
   addrs[addrs_len++] = registers::ENERGY_MONITOR;
   addrs[addrs_len++] = registers::PUMP_TYPE;
+  addrs[addrs_len++] = registers::AXB_INPUTS;  // For AXB accessory relay 2 detection
   
   if (!this->vs_drive_override_) {
     addrs[addrs_len++] = registers::ABC_PROGRAM;      // ABC program version (4 regs)
@@ -583,6 +596,23 @@ void WaterFurnaceAurora::process_setup_detect_response_(const protocol::ParsedRe
   const uint16_t *val_iver = reg_find(result, registers::IZ2_VERSION);
   if (val_iver) this->iz2_version_ = static_cast<float>(*val_iver) / 100.0f;
   
+  // DIP Switch settings (register 33) — used for compressor stages, humidifier detection
+  // Matches Ruby gem abc_client.rb:179 — @abc_dipswitches = registers[33]
+  {
+    const uint16_t *val_dip = reg_find(result, registers::DIP_SWITCH_STATUS);
+    if (val_dip) {
+      this->dip_switches_ = parse_dip_switches(*val_dip);
+      ESP_LOGD(TAG, "DIP switches: fp1=%d, fp2=%d, rv=%s, acc=%d, comp_stages=%d, lockout=%s, dh_rh=%s%s",
+               this->dip_switches_.fp1, this->dip_switches_.fp2,
+               this->dip_switches_.reversing_valve == ReversingValveType::O_TYPE ? "O" : "B",
+               static_cast<int>(this->dip_switches_.accessory_relay),
+               this->dip_switches_.compressor_stages,
+               this->dip_switches_.lockout == LockoutType::CONTINUOUS ? "continuous" : "pulse",
+               this->dip_switches_.dehumidifier_reheat == DehumidifierReheat::DEHUMIDIFIER ? "dehumidifier" : "reheat",
+               this->dip_switches_.manual ? " (MANUAL)" : "");
+    }
+  }
+
   // Blower type
   const uint16_t *val_blower = reg_find(result, registers::BLOWER_TYPE);
   if (val_blower) {
@@ -609,6 +639,20 @@ void WaterFurnaceAurora::process_setup_detect_response_(const protocol::ParsedRe
     this->pump_type_ = (pval <= 7) ? static_cast<PumpType>(pval) : PumpType::OTHER;
   }
   
+  // Humidistat presence detection — matches Ruby gem abc_client.rb:201-204.
+  // Humidifier: ABC DIP switch accessory_relay == HUMIDIFIER
+  // Dehumidifier: AXB present AND AXB inputs accessory_relay2 == DEHUMIDIFIER
+  this->has_humidifier_ = (this->dip_switches_.accessory_relay == AccessoryRelay::HUMIDIFIER);
+  if (this->has_axb_) {
+    const uint16_t *val_axb_in = reg_find(result, registers::AXB_INPUTS);
+    if (val_axb_in) {
+      this->has_dehumidifier_ = (axb_extract_accessory_relay2(*val_axb_in) == AxbAccessoryRelay2::DEHUMIDIFIER);
+    }
+  }
+  ESP_LOGD(TAG, "Humidistat: humidifier=%s, dehumidifier=%s",
+           this->has_humidifier_ ? "yes" : "no",
+           this->has_dehumidifier_ ? "yes" : "no");
+
   // VS Drive detection via ABC program
   bool vs_detected_from_program = false;
   if (!this->vs_drive_override_) {
@@ -701,6 +745,9 @@ void WaterFurnaceAurora::finish_setup_() {
            this->blower_type_ == BlowerType::PSC ? "PSC" :
            this->blower_type_ == BlowerType::FIVE_SPEED ? "5-Speed" : "ECM",
            get_pump_type_string(this->pump_type_), this->energy_monitor_level_);
+  ESP_LOGI(TAG, "  Humidifier: %s, Dehumidifier: %s",
+           this->has_humidifier_ ? "yes" : "no",
+           this->has_dehumidifier_ ? "yes" : "no");
   
   // Fire deferred setup callbacks
   for (size_t i = 0; i < this->setup_callbacks_len_; i++) {
@@ -1298,8 +1345,22 @@ void WaterFurnaceAurora::publish_power_loop_sensors_(const RegisterMap &regs) {
 }
 
 void WaterFurnaceAurora::publish_vs_drive_sensors_(const RegisterMap &regs) {
-  // VS Drive
-  this->publish_sensor(regs, registers::COMPRESSOR_SPEED_ACTUAL, this->compressor_speed_sensor_);
+  // Compressor speed — source depends on whether VS drive is present.
+  // VS Drive: read directly from register 3001 (actual speed, 0-12 Hz).
+  // Non-VS (Generic): derive from system outputs register 30, per Ruby gem
+  // compressor.rb:36-44 — CC2 → 2, CC → 1, else 0.
+  if (this->has_vs_drive_) {
+    this->publish_sensor(regs, registers::COMPRESSOR_SPEED_ACTUAL, this->compressor_speed_sensor_);
+  } else if (this->compressor_speed_sensor_ != nullptr) {
+    float speed = 0.0f;
+    if (this->system_outputs_ & OUTPUT_CC2) {
+      speed = 2.0f;
+    } else if (this->system_outputs_ & OUTPUT_CC) {
+      speed = 1.0f;
+    }
+    if (sensor_value_changed_(this->compressor_speed_sensor_, speed))
+      this->compressor_speed_sensor_->publish_state(speed);
+  }
   this->publish_sensor_tenths(regs, registers::VS_DISCHARGE_PRESSURE, this->discharge_pressure_sensor_);
   this->publish_sensor_tenths(regs, registers::VS_SUCTION_PRESSURE, this->suction_pressure_sensor_);
   this->publish_sensor(regs, registers::VS_EEV_OPEN, this->eev_open_percentage_sensor_);
@@ -1367,8 +1428,27 @@ void WaterFurnaceAurora::publish_equipment_sensors_(const RegisterMap &regs) {
   this->publish_sensor(regs, registers::LINE_VOLTAGE_SETTING, this->line_voltage_setting_sensor_);
   this->publish_sensor(regs, registers::COMPRESSOR_ANTI_SHORT_CYCLE, this->anti_short_cycle_sensor_);
   
-  // Blower/ECM
-  this->publish_sensor(regs, registers::ECM_SPEED, this->blower_speed_sensor_);
+  // Blower speed — source depends on blower type.
+  // ECM: read directly from register 344 (actual ECM speed, 0-12).
+  // FiveSpeed: derive from system outputs register 30, per Ruby gem
+  // blower.rb:37-50 — EH1/EH2 → 4, CC2 → 3, CC → 2, BLOWER → 1, else 0.
+  // PSC: no speed register available.
+  if (this->blower_type_ == BlowerType::FIVE_SPEED && this->blower_speed_sensor_ != nullptr) {
+    float speed = 0.0f;
+    if (this->system_outputs_ & (OUTPUT_EH1 | OUTPUT_EH2)) {
+      speed = 4.0f;
+    } else if (this->system_outputs_ & OUTPUT_CC2) {
+      speed = 3.0f;
+    } else if (this->system_outputs_ & OUTPUT_CC) {
+      speed = 2.0f;
+    } else if (this->system_outputs_ & OUTPUT_BLOWER) {
+      speed = 1.0f;
+    }
+    if (sensor_value_changed_(this->blower_speed_sensor_, speed))
+      this->blower_speed_sensor_->publish_state(speed);
+  } else {
+    this->publish_sensor(regs, registers::ECM_SPEED, this->blower_speed_sensor_);
+  }
   this->publish_sensor(regs, registers::BLOWER_ONLY_SPEED, this->blower_only_speed_sensor_);
   this->publish_sensor(regs, registers::LO_COMPRESSOR_ECM_SPEED, this->lo_compressor_speed_sensor_);
   this->publish_sensor(regs, registers::HI_COMPRESSOR_ECM_SPEED, this->hi_compressor_speed_sensor_);
@@ -1403,19 +1483,22 @@ void WaterFurnaceAurora::publish_equipment_sensors_(const RegisterMap &regs) {
 }
 
 void WaterFurnaceAurora::publish_humidity_control_sensors_(const RegisterMap &regs) {
-  // Humidifier/Dehumidifier running
+  // Humidifier running — OUTPUT_ACCESSORY (0x200) is the accessory relay on register 30.
+  // Per Ruby gem abc_client.rb:201-202, this relay is a humidifier only when the ABC
+  // DIP switch accessory_relay setting is HUMIDIFIER.  We gate on has_humidifier_ so
+  // systems wired for compressor/blower/water valve don't show false humidifier runs.
   publish_binary_if_changed_(this->humidifier_running_sensor_,
-                             (this->system_outputs_ & OUTPUT_ACCESSORY) != 0);
-  // XXX: Dehumidifier detection needs testing during summer cooling season.
-  // Register 362 ("Active Dehumidify") was observed non-zero during heating and idle,
-  // causing false "Drying" action and dehumidifier_running=ON. Gating on the reversing
-  // valve (OUTPUT_RV) is physically correct — VS Drive active dehumidification only
-  // happens during cooling. The AXB dehumidifier relay (0x10) is left ungated as it's
-  // a physical relay output. Verify both signals during actual cooling+dehumidification.
+                             this->has_humidifier_ && (this->system_outputs_ & OUTPUT_ACCESSORY) != 0);
+  // Dehumidifier running — two independent sources:
+  // 1. VS Drive active dehumidification (register 362, gated on reversing valve because
+  //    register 362 can be non-zero during heating/idle — VS dehumidification only
+  //    occurs during cooling when the reversing valve is energized).
+  // 2. AXB dehumidifier relay (0x10 on register 1104) — physical relay output, always
+  //    valid when AXB has dehumidifier installed per axb_extract_accessory_relay2().
   bool cooling_rv = (this->system_outputs_ & OUTPUT_RV) != 0;
   publish_binary_if_changed_(this->dehumidifier_running_sensor_,
                               (this->active_dehumidify_ && cooling_rv)
-                              || ((this->axb_outputs_ & AXB_OUTPUT_DEHUMIDIFIER) != 0));
+                              || (this->has_dehumidifier_ && (this->axb_outputs_ & AXB_OUTPUT_DEHUMIDIFIER) != 0));
   
   // Humidistat
   {

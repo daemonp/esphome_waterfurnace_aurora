@@ -295,6 +295,9 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   bool get_humidifier_auto() const { return this->humidifier_auto_; }
   bool get_dehumidifier_auto() const { return this->dehumidifier_auto_; }
   bool awl_communicating() const { return this->awl_thermostat() || this->awl_iz2(); }
+  bool has_humidifier() const { return this->has_humidifier_; }
+  bool has_dehumidifier() const { return this->has_dehumidifier_; }
+  const DipSwitchSettings &get_dip_switches() const { return this->dip_switches_; }
   
   /// Look up a raw register value from the cache. Returns NAN if not found.
   /// Used by AuroraNumber entities to get current read-back values.
@@ -610,6 +613,9 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   BlowerType blower_type_{BlowerType::PSC};
   PumpType pump_type_{PumpType::OTHER};
   uint8_t energy_monitor_level_{0};
+  DipSwitchSettings dip_switches_;    // Parsed DIP switch settings (register 33)
+  bool has_humidifier_{false};         // DIP accessory_relay == HUMIDIFIER
+  bool has_dehumidifier_{false};       // AXB present && accessory_relay2 == DEHUMIDIFIER
   
   // IZ2 Zone data
   IZ2ZoneData iz2_zones_[MAX_IZ2_ZONES];
