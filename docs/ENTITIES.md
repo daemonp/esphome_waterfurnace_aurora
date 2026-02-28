@@ -72,17 +72,22 @@ Complete reference of all Home Assistant entities created by this component.
 | `aux_amps` | A | AXB aux heat current draw | 1106 |
 | `compressor_1_amps` | A | AXB compressor 1 current draw | 1107 |
 | `compressor_2_amps` | A | AXB compressor 2 current draw | 1108 |
+| `lockout_fault_code` | - | Last lockout fault code (numeric) | 26 |
+| `iz2_compressor_speed` | - | IZ2 desired compressor speed | 564 |
+| `iz2_blower_speed` | % | IZ2 desired blower speed | 565 |
+| `iz2_fan_demand` | - | IZ2 fan demand (high byte) | 31005 |
+| `iz2_unit_demand` | - | IZ2 unit demand (low byte) | 31005 |
 
 ### Derived Sensor Details
 
-**COP (Coefficient of Performance)** — Computed on-device each cycle:
+**COP (Coefficient of Performance)**: computed on-device each cycle:
 - **Heating mode**: `Heat_of_Rejection / (Total_Watts * 3.412)`
 - **Cooling mode**: `Heat_of_Extraction / (Total_Watts * 3.412)`
 - Returns `0.0` when the compressor is off. Values are clamped to the 0.5-15.0 range; outliers are rejected as sensor noise.
 
-**Subcool Temperature** — Automatically selects the correct register based on the current operating mode: register 1135 during heating, register 1136 during cooling (based on reversing valve state).
+**Subcool Temperature**: automatically selects the correct register based on the current operating mode (register 1135 during heating, register 1136 during cooling, based on reversing valve state).
 
-**Approach Temperature** — Heat exchanger approach:
+**Approach Temperature**: heat exchanger approach:
 - **Heating mode**: `Leaving Water - Saturated Condenser`
 - **Cooling mode**: `Saturated Condenser - Entering Water`
 
@@ -122,9 +127,10 @@ Complete reference of all Home Assistant entities created by this component.
 | `vs_safe_mode` | VS Drive safe mode status flags (5/7-Series) |
 | `vs_alarm` | VS Drive alarm codes (5/7-Series) |
 | `axb_inputs` | AXB DIP switch input states |
-| `humidifier_mode` | Humidifier mode (Auto or Manual) |
-| `dehumidifier_mode` | Dehumidifier mode (Auto or Manual) |
 | `pump_type` | Detected pump type (e.g., "VS Pump", "FC1", "Open Loop") |
+| `lockout_fault_description` | Human-readable description of last lockout fault (register 26) |
+| `outputs_at_lockout` | System outputs bitmask at time of lockout (register 27) |
+| `inputs_at_lockout` | System inputs bitmask at time of lockout (register 28) |
 
 ### `current_mode` Values
 
@@ -144,7 +150,6 @@ Complete reference of all Home Assistant entities created by this component.
 
 | Control | Range | Description |
 | :--- | :--- | :--- |
-| `dhw_setpoint` | 100-140°F | DHW temperature setpoint |
 | `blower_only_speed` | 1-12 | Indoor blower ECM speed for fan-only mode |
 | `lo_compressor_speed` | 1-12 | Indoor blower ECM speed for low compressor |
 | `hi_compressor_speed` | 1-12 | Indoor blower ECM speed for high compressor |
@@ -153,14 +158,25 @@ Complete reference of all Home Assistant entities created by this component.
 | `pump_max_speed` | 1-100% | Loop pump maximum speed |
 | `fan_intermittent_on` | 0-25 min | Fan on time (intermittent mode) |
 | `fan_intermittent_off` | 5-40 min | Fan off time (intermittent mode) |
-| `humidification_target` | 15-50% | Humidification setpoint (Symphony: Hum Setpoint) |
-| `dehumidification_target` | 35-65% | Dehumidification setpoint (Symphony: Hum Setpoint) |
+| `pump_speed` | 1-100% | Loop pump speed override (requires VS pump) |
+| `humidification_target` | 15-50% | Humidification setpoint (see [Humidity Control](#humidity-control)) |
+| `dehumidification_target` | 35-65% | Dehumidification setpoint (see [Humidity Control](#humidity-control)) |
+| `line_voltage_setting` | 90-635 V | Configured line voltage (register 112) |
+| `dhw_setpoint` | 100-140 F | DHW temperature setpoint (legacy; superseded by water_heater entity) |
+
+## Selects
+
+| Select | Options | Description |
+| :--- | :--- | :--- |
+| `humidifier_mode` | Auto, Manual | Humidifier operating mode |
+| `dehumidifier_mode` | Auto, Manual | Dehumidifier operating mode |
 
 ## Switches
 
 | Switch | Description |
 | :--- | :--- |
-| `dhw_enabled` | Enable/disable domestic hot water |
+| `dhw_enabled` | Enable/disable domestic hot water (legacy; superseded by water_heater entity) |
+| `pump_manual_control` | VS pump manual override (writes current speed or auto to register 323) |
 
 ## Buttons
 
@@ -172,24 +188,28 @@ Complete reference of all Home Assistant entities created by this component.
 
 The component creates climate entities for thermostat control:
 
-- **Main thermostat** — Full HVAC control (heat, cool, auto, emergency heat) with dual setpoints, fan modes, and humidity target
-- **IZ2 Zone thermostats** (zones 1-6) — Per-zone climate entities with independent temperature, setpoints, mode, fan, and humidity target controls
+- **Main thermostat**: full HVAC control (heat, cool, auto, emergency heat) with dual setpoints, fan modes, and humidity target
+- **IZ2 Zone thermostats** (zones 1-6): per-zone climate entities with independent temperature, setpoints, mode, fan, and humidity target controls
+
+The climate entity reports the current **action** in real time: Idle, Heating, Cooling, Drying (active dehumidification), or Fan. The Drying action appears when the VS drive is actively dehumidifying with the reversing valve engaged, or when the AXB dehumidifier relay is active.
 
 ### Mode-Aware Humidity Slider (`target_humidity`)
 
-The climate card includes a humidity slider that **automatically controls the correct humidistat target** based on the current HVAC mode:
+The Aurora has two independent humidity targets (humidification to add moisture, dehumidification to remove it) packed as two bytes in a single 16-bit register. Rather than exposing two separate sliders, the climate entity's single humidity slider **automatically routes to the correct target based on the current HVAC mode**:
 
-| HVAC Mode | Slider Controls | Valid Range |
+| HVAC Mode | Slider Controls | Clamp Range |
 | :--- | :--- | :--- |
-| Heat, Emergency Heat (Boost), Auto | Humidification target | 15–50% |
-| Cool | Dehumidification target | 35–65% |
-| Off | No-op (value preserved) | — |
+| Heat, Emergency Heat (Boost), Auto | Humidification target (high byte) | 15–50% |
+| Cool | Dehumidification target (low byte) | 35–65% |
+| Off | Disabled (write ignored, value preserved) | n/a |
 
-When you switch modes, the slider value updates to reflect the newly relevant target. The two targets are independent values stored in different bytes of the same register — adjusting one does not affect the other.
+**What this means in practice**: in winter (Heat/Auto mode), the slider sets how dry your house can get before the humidifier kicks in. In summer (Cool mode), the same slider sets how humid it can get before the system dehumidifies. You never need to think about which target you're adjusting; the firmware handles it based on what your system is actually doing.
 
-The slider range is 15–65% (the union of both sub-ranges). Out-of-range values are clamped automatically with a log warning.
+When you switch modes, the slider value updates to reflect the newly relevant target. The two targets are stored independently (different bytes of the same register), so adjusting one never affects the other. Out-of-range values are clamped automatically with a log warning.
 
-On IZ2 systems, all zones share the same system-wide humidistat targets, but each zone's slider routes based on *that zone's* mode. Zone 1 in Heat shows the humidification target while Zone 2 in Cool shows the dehumidification target.
+The advertised slider range is 15–65% (the union of both sub-ranges) because Home Assistant caches visual limits at connection time and cannot change them per-mode.
+
+**IZ2 systems**: All zones share the same system-wide humidistat targets, but each zone's slider routes based on *that zone's* mode. Zone 1 in Heat shows the humidification target while Zone 2 in Cool shows the dehumidification target simultaneously.
 
 > **Note**: On IZ2 systems, disable the main thermostat entity and use zone-specific entities instead. See [IZ2 Zone Configuration](../README.md#iz2-zone-configuration) in the README.
 
@@ -197,36 +217,43 @@ On IZ2 systems, all zones share the same system-wide humidistat targets, but eac
 
 The component creates a water heater entity for DHW (Domestic Hot Water) control:
 
-- **Domestic Hot Water** — Current water temperature, target setpoint (100-140°F), and mode (Off / Heat Pump)
+- **Domestic Hot Water**: current water temperature, target setpoint (100-140 F), and mode (Off / Heat Pump)
 
-## Humidistat (Humidifier / Dehumidifier)
+## Humidity Control
 
-The Aurora has a built-in humidistat with **two independent targets**: a humidification target (15-50%) for adding moisture and a dehumidification target (35-65%) for removing moisture.
+The Aurora has a built-in humidistat with **two independent targets**: a humidification target (15-50%) for adding moisture and a dehumidification target (35-65%) for removing moisture. Both targets are packed as a high/low byte pair in a single 16-bit register.
 
-### Climate Card Integration
+### Climate Card (Recommended)
 
-The **simplest way** to control humidity is through the climate card's built-in humidity slider. The slider automatically controls the correct target based on the current HVAC mode (see [Mode-Aware Humidity Slider](#mode-aware-humidity-slider-target_humidity) above). No additional HA configuration is needed.
+The **simplest way** to control humidity is through the climate card's built-in humidity slider (no extra HA configuration required). The slider automatically routes to the correct target based on the current HVAC mode:
 
-### Individual Entities (Advanced)
+- **Heat / Auto / Emergency Heat** → slider controls the **humidification** target (15-50%)
+- **Cool** → slider controls the **dehumidification** target (35-65%)
 
-For power users, automation backing, or users who prefer separate humidifier domain cards, the component also exposes humidistat controls as individual entities:
+See [Mode-Aware Humidity Slider](#mode-aware-humidity-slider-target_humidity) above for full details.
+
+### Individual Entities
+
+The component also exposes each humidistat control as a standalone entity. These are useful for HA automations, dashboards that show both targets at once, or as the building blocks for template humidifier cards.
 
 | Entity | Platform | Purpose |
 | :--- | :--- | :--- |
-| `humidity` | sensor | Current relative humidity (%) |
-| `humidification_setpoint` | number | Humidification target (15-50%, writable) |
-| `dehumidification_setpoint` | number | Dehumidification target (35-65%, writable) |
-| `humidifier_mode` | select | Humidifier mode (Auto/Manual, writable) |
-| `dehumidifier_mode` | select | Dehumidifier mode (Auto/Manual, writable) |
-| `humidifier_running` | binary_sensor | Humidifier relay active |
-| `dehumidifier_running` | binary_sensor | Active dehumidification or AXB relay active |
+| `humidity` | sensor | Current relative humidity (%) (register 741) |
+| `humidification_target` | number | Humidification setpoint (15-50%, writable) (high byte of register 12310 / 31110) |
+| `dehumidification_target` | number | Dehumidification setpoint (35-65%, writable) (low byte of register 12310 / 31110) |
+| `humidifier_mode` | select | Humidifier mode: Auto or Manual (bit 15 of register 12309 / 31109) |
+| `dehumidifier_mode` | select | Dehumidifier mode: Auto or Manual (bit 14 of register 12309 / 31109) |
+| `humidifier_running` | binary_sensor | Humidifier relay active (ACCESSORY bit of register 30) |
+| `dehumidifier_running` | binary_sensor | Active dehumidification (VS drive) or AXB dehumidifier relay (register 362 / 1104) |
 
-Both the climate slider and the individual entities write through the same hub methods, so there is no risk of desynchronization.
+Both the climate slider and the individual entities write through the same hub methods, so they stay in sync automatically.
+
+**IZ2 register differences**: IZ2 systems read targets from register 31110 and write to 21115 (separate read/write addresses). Non-IZ2 systems use register 12310 for both. The component handles this transparently.
 
 ### Template Humidifier Cards (Optional)
 
-For users who prefer full humidifier/dehumidifier domain cards (with target slider, mode selector, and on/off toggle), a ready-to-paste HA template configuration is provided in **[`docs/ha_humidifier_templates.yaml`](ha_humidifier_templates.yaml)**. Copy it into your HA `configuration.yaml` and replace `waterfurnace_aurora` with your ESPHome device name.
+For users who prefer full humidifier/dehumidifier domain cards in Lovelace (with target slider, mode selector, and on/off toggle), a ready-to-paste HA template is provided in **[`docs/ha_humidifier_templates.yaml`](ha_humidifier_templates.yaml)**. Copy it into your HA `configuration.yaml` and replace `waterfurnace_aurora` with your ESPHome device name.
 
-This creates two entities:
-- `humidifier.aurora_humidifier` — proper humidifier card (device_class: humidifier)
-- `humidifier.aurora_dehumidifier` — proper dehumidifier card (device_class: dehumidifier)
+This creates two entities that compose the individual entities above into proper humidifier cards:
+- `humidifier.aurora_humidifier` (device_class: humidifier, adds moisture)
+- `humidifier.aurora_dehumidifier` (device_class: dehumidifier, removes moisture)

@@ -14,6 +14,7 @@
 #include "registers.h"
 #include "protocol.h"
 
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <functional>
@@ -310,11 +311,11 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   
   // Observer pattern: sub-entities register a callback to be notified when data updates.
   void register_listener(std::function<void()> callback) {
-    if (this->listeners_.size() >= MAX_LISTENERS) {
+    if (this->listeners_len_ >= MAX_LISTENERS) {
       // Bounded by YAML config; if we hit this, the YAML has more sub-entities than expected.
       return;
     }
-    this->listeners_.push_back(std::move(callback));
+    this->listeners_[this->listeners_len_++] = std::move(callback);
   }
 
   // Deferred setup callbacks — fired when hardware detection completes.
@@ -322,8 +323,8 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   void register_setup_callback(std::function<void()> callback) {
     if (this->setup_complete_) {
       callback();
-    } else {
-      this->setup_callbacks_.push_back(std::move(callback));
+    } else if (this->setup_callbacks_len_ < MAX_SETUP_CALLBACKS) {
+      this->setup_callbacks_[this->setup_callbacks_len_++] = std::move(callback);
     }
   }
 
@@ -336,17 +337,22 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   // --- State machine operations ---
   void transition_(State new_state);
   /// Common send logic — flushes bus, toggles RS-485, writes frame, sets timing.
-  void send_request_common_(const std::vector<uint8_t> &frame, PendingRequest type);
+  void send_request_common_(const uint8_t *frame, size_t frame_len, PendingRequest type);
   /// Send a Modbus request frame and transition to WAITING_RESPONSE.
-  /// expected_addrs is copied into the member; use the move overload when possible.
-  void send_request_(const std::vector<uint8_t> &frame, PendingRequest type,
-                     const std::vector<uint16_t> &expected_addrs);
-  void send_request_(const std::vector<uint8_t> &frame, PendingRequest type,
-                     std::vector<uint16_t> &&expected_addrs);
+  void send_request_(const uint8_t *frame, size_t frame_len, PendingRequest type,
+                     const uint16_t *expected_addrs, size_t expected_count);
   /// Overload with no expected addresses (for writes).
-  void send_request_(const std::vector<uint8_t> &frame, PendingRequest type);
-  bool read_frame_(std::vector<uint8_t> &frame);
-  void process_response_(const std::vector<uint8_t> &frame);
+  void send_request_(const uint8_t *frame, size_t frame_len, PendingRequest type);
+  /// Convenience overloads accepting std::vector (for protocol:: return values).
+  void send_request_(const std::vector<uint8_t> &frame, PendingRequest type,
+                     const uint16_t *expected_addrs, size_t expected_count) {
+    this->send_request_(frame.data(), frame.size(), type, expected_addrs, expected_count);
+  }
+  void send_request_(const std::vector<uint8_t> &frame, PendingRequest type) {
+    this->send_request_(frame.data(), frame.size(), type);
+  }
+  bool read_frame_();
+  void process_response_();
   void handle_timeout_();
   
   // --- Setup steps (called from loop() state machine) ---
@@ -517,14 +523,20 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   uint8_t poll_retry_count_{0};     // Retry counter for normal poll-cycle timeouts
   static constexpr uint8_t MAX_SETUP_RETRIES = 5;
   
-  // RX buffer — persists across loop() calls for incremental frame reading
-  std::vector<uint8_t> rx_buffer_;
+  // RX buffer — persists across loop() calls for incremental frame reading.
+  // Fixed-size array eliminates heap allocation; bounded by MAX_FRAME_SIZE.
+  std::array<uint8_t, protocol::MAX_FRAME_SIZE> rx_buffer_;
+  size_t rx_buffer_len_{0};
   
-  // Response frame buffer — reused across loop() calls to avoid heap allocation
-  std::vector<uint8_t> response_frame_;
+  // Response frame buffer — reused across loop() calls to avoid heap allocation.
+  // Fixed-size array; frame data lives in [0, response_frame_len_).
+  std::array<uint8_t, protocol::MAX_FRAME_SIZE> response_frame_;
+  size_t response_frame_len_{0};
   
-  // Expected addresses for the current in-flight request
-  std::vector<uint16_t> expected_addresses_;
+  // Expected addresses for the current in-flight request.
+  // Fixed-size array; up to MAX_REGISTERS_PER_REQUEST addresses.
+  std::array<uint16_t, protocol::MAX_REGISTERS_PER_REQUEST> expected_addresses_;
+  size_t expected_addresses_len_{0};
   
   // Timing
   uint32_t last_request_time_{0};
@@ -538,9 +550,10 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   bool connected_{false};
   
   // Write queue — writes are queued and dispatched non-blockingly from IDLE.
-  // Capped at MAX_PENDING_WRITES to prevent unbounded heap growth.
+  // Fixed-size array eliminates heap allocation; capped at MAX_PENDING_WRITES.
   static constexpr size_t MAX_PENDING_WRITES = 16;
-  std::vector<std::pair<uint16_t, uint16_t>> pending_writes_;
+  std::array<std::pair<uint16_t, uint16_t>, MAX_PENDING_WRITES> pending_writes_;
+  size_t pending_writes_len_{0};
   
   // Write cooldowns — prevent stale read-backs from reverting optimistic UI updates.
   // Initialized to ensure cooldown is INACTIVE at boot (unsigned wraparound arithmetic:
@@ -552,14 +565,18 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   uint32_t last_dhw_write_{COOLDOWN_BOOT_INIT};
   uint32_t last_humidity_target_write_{COOLDOWN_BOOT_INIT};
   
-  // Setup callbacks — fired once when hardware detection completes
-  std::vector<std::function<void()>> setup_callbacks_;
+  // Setup callbacks — fired once when hardware detection completes.
+  // Fixed-size array; bounded by the number of sub-entities in YAML.
+  static constexpr size_t MAX_SETUP_CALLBACKS = 16;
+  std::array<std::function<void()>, MAX_SETUP_CALLBACKS> setup_callbacks_;
+  size_t setup_callbacks_len_{0};
   
   // Cached register values — flat sorted vector
   RegisterMap register_cache_;
   
-  // Pre-allocated vector for register addresses
-  std::vector<uint16_t> addresses_to_read_;
+  // Pre-allocated array for register addresses (built each poll cycle).
+  std::array<uint16_t, protocol::MAX_REGISTERS_PER_REQUEST> addresses_to_read_;
+  size_t addresses_to_read_len_{0};
   
   // --- Heat pump state ---
   float ambient_temp_{NAN};
@@ -747,7 +764,9 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   
   // Observer callbacks — bounded at init time by the number of sub-entities
   // configured in YAML; no runtime growth path exists.
-  std::vector<std::function<void()>> listeners_;
+  // Fixed-size array eliminates the vector's heap allocation.
+  std::array<std::function<void()>, MAX_LISTENERS> listeners_;
+  size_t listeners_len_{0};
   
   // Cached text sensor values for publish-on-change.
   // Bitmask-derived strings also cache the raw register value to avoid

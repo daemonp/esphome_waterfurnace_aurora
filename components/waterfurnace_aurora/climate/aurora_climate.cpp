@@ -31,6 +31,13 @@ void AuroraClimate::register_listeners_() {
 void AuroraClimate::dump_config() {
   ESP_LOGCONFIG(TAG, "Aurora Climate (zone %d):", this->zone_);
   ESP_LOGCONFIG(TAG, "  Parent: %s", this->parent_ != nullptr ? "configured" : "NOT SET");
+  if (this->parent_ != nullptr && this->parent_->is_setup_complete()) {
+    ESP_LOGCONFIG(TAG, "  Mode: %s", this->is_iz2_mode_() ? "IZ2" : "thermostat");
+    if (this->is_iz2_mode_()) {
+      ESP_LOGCONFIG(TAG, "  IZ2 zones: %d", this->parent_->get_num_iz2_zones());
+    }
+  }
+  ESP_LOGCONFIG(TAG, "  EMA alpha: %.2f", EMA_ALPHA);
 }
 
 climate::ClimateTraits AuroraClimate::traits() {

@@ -1,7 +1,7 @@
 CXX ?= g++
 
 # Base flags with debug info for meaningful stack traces
-BASE_FLAGS = -std=c++17 -Wall -Wextra -Wpedantic -g -O0
+BASE_FLAGS = -std=gnu++20 -Wall -Wextra -Wpedantic -g -O0
 
 # Enable sanitizers when available (disable with SANITIZE=0)
 SANITIZE ?= 1
