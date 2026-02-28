@@ -179,6 +179,25 @@ TEST_CASE("IZ2 zone validation", "[hub][iz2]") {
     REQUIRE(hub.set_zone_fan_mode(2, FanMode::CONTINUOUS));
   }
 
+  SECTION("set_zone_fan_mode optimistically updates zone data") {
+    // Default should be AUTO
+    REQUIRE(hub.get_zone_data(1).target_fan_mode == FanMode::AUTO);
+
+    REQUIRE(hub.set_zone_fan_mode(1, FanMode::CONTINUOUS));
+    REQUIRE(hub.get_zone_data(1).target_fan_mode == FanMode::CONTINUOUS);
+
+    REQUIRE(hub.set_zone_fan_mode(1, FanMode::INTERMITTENT));
+    REQUIRE(hub.get_zone_data(1).target_fan_mode == FanMode::INTERMITTENT);
+
+    REQUIRE(hub.set_zone_fan_mode(1, FanMode::AUTO));
+    REQUIRE(hub.get_zone_data(1).target_fan_mode == FanMode::AUTO);
+
+    // Verify it works for different zones independently
+    REQUIRE(hub.set_zone_fan_mode(2, FanMode::INTERMITTENT));
+    REQUIRE(hub.get_zone_data(2).target_fan_mode == FanMode::INTERMITTENT);
+    REQUIRE(hub.get_zone_data(1).target_fan_mode == FanMode::AUTO);  // zone 1 unchanged
+  }
+
   SECTION("zone fan timing validates") {
     REQUIRE(hub.set_zone_fan_intermittent_on(1, 10));
     REQUIRE_FALSE(hub.set_zone_fan_intermittent_on(1, 7));  // Not mult of 5

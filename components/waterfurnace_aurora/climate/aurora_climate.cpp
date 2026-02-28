@@ -150,6 +150,8 @@ void AuroraClimate::control(const climate::ClimateCall &call) {
   }
 
   // Handle fan mode (built-in: Auto/On, or custom: Intermittent)
+  // Use set_fan_mode_() / set_custom_fan_mode_() to ensure mutual exclusion —
+  // set_fan_mode_() clears custom_fan_mode, set_custom_fan_mode_() clears fan_mode.
   if (call.get_fan_mode().has_value()) {
     // Built-in fan mode selected (Auto or On/Continuous)
     FanMode aurora_fan = esphome_to_aurora_fan(*call.get_fan_mode());
@@ -157,7 +159,7 @@ void AuroraClimate::control(const climate::ClimateCall &call) {
                   ? this->parent_->set_zone_fan_mode(this->zone_, aurora_fan)
                   : this->parent_->set_fan_mode(aurora_fan);
     if (ok) {
-      this->fan_mode = *call.get_fan_mode();
+      this->set_fan_mode_(*call.get_fan_mode());
     }
   } else if (call.has_custom_fan_mode()) {
     // Custom fan mode selected (Intermittent)
@@ -271,13 +273,13 @@ void AuroraClimate::update_state_() {
     }
 
     // Update fan mode (skip during fan cooldown)
-    // Built-in modes (Auto/On) set fan_mode; Intermittent uses custom_fan_mode.
+    // Use set_fan_mode_() / set_custom_fan_mode_() to ensure mutual exclusion —
+    // set_fan_mode_() clears custom_fan_mode, set_custom_fan_mode_() clears fan_mode.
     if (!this->parent_->fan_cooldown_active()) {
       auto builtin = aurora_to_esphome_fan(zone.target_fan_mode);
       if (builtin.has_value()) {
-        this->fan_mode = *builtin;
+        this->set_fan_mode_(*builtin);
       } else {
-        // Intermittent — set via protected custom fan mode API
         this->set_custom_fan_mode_(CUSTOM_FAN_MODE_INTERMITTENT);
       }
     }
@@ -342,14 +344,14 @@ void AuroraClimate::update_state_() {
     }
 
     // Update fan mode (skip during fan cooldown)
-    // Built-in modes (Auto/On) set fan_mode; Intermittent uses custom_fan_mode.
+    // Use set_fan_mode_() / set_custom_fan_mode_() to ensure mutual exclusion —
+    // set_fan_mode_() clears custom_fan_mode, set_custom_fan_mode_() clears fan_mode.
     if (!this->parent_->fan_cooldown_active()) {
       FanMode aurora_fan = this->parent_->get_fan_mode();
       auto builtin = aurora_to_esphome_fan(aurora_fan);
       if (builtin.has_value()) {
-        this->fan_mode = *builtin;
+        this->set_fan_mode_(*builtin);
       } else {
-        // Intermittent — set via protected custom fan mode API
         this->set_custom_fan_mode_(CUSTOM_FAN_MODE_INTERMITTENT);
       }
     }
