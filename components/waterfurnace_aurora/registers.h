@@ -164,6 +164,9 @@ namespace registers {
   static constexpr uint16_t EEV_SUCTION_TEMP = 283;
   static constexpr uint16_t EEV_SATURATED_SUCTION_TEMP = 284;
 
+  // Condensate monitoring (gap 13)
+  static constexpr uint16_t CONDENSATE = 21;
+
   // Blower / ECM
   static constexpr uint16_t VS_PUMP_MIN = 321;
   static constexpr uint16_t VS_PUMP_MAX = 322;
@@ -173,6 +176,7 @@ namespace registers {
   static constexpr uint16_t LO_COMPRESSOR_ECM_SPEED = 341;
   static constexpr uint16_t HI_COMPRESSOR_ECM_SPEED = 342;
   static constexpr uint16_t ECM_SPEED = 344;
+  static constexpr uint16_t COOLING_AIRFLOW_ADJUSTMENT = 346;  // Signed, writable (gap 12)
   static constexpr uint16_t AUX_HEAT_ECM_SPEED = 347;
   static constexpr uint16_t ACTIVE_DEHUMIDIFY = 362;
 
@@ -180,10 +184,25 @@ namespace registers {
   static constexpr uint16_t DHW_ENABLED = 400;
   static constexpr uint16_t DHW_SETPOINT = 401;
 
+  // Configuration/settings registers (gap 11)
+  static constexpr uint16_t BRINE_TYPE_REG = 402;
+  static constexpr uint16_t FLOW_METER_TYPE_REG = 403;
+
   // Hardware detection
   static constexpr uint16_t BLOWER_TYPE = 404;
+  static constexpr uint16_t SMARTGRID_TRIGGER = 405;
+  static constexpr uint16_t SMARTGRID_ACTION_REG = 406;
+  static constexpr uint16_t OFF_TIME_LENGTH = 407;
+  static constexpr uint16_t HA_ALARM1_TRIGGER = 408;
+  static constexpr uint16_t HA_ALARM1_ACTION = 409;
+  static constexpr uint16_t HA_ALARM2_TRIGGER = 410;
+  static constexpr uint16_t HA_ALARM2_ACTION = 411;
   static constexpr uint16_t ENERGY_MONITOR = 412;
   static constexpr uint16_t PUMP_TYPE = 413;
+  static constexpr uint16_t ENERGY_PHASE_TYPE_REG = 416;
+  static constexpr uint16_t POWER_ADJ_FACTOR_L = 417;
+  static constexpr uint16_t POWER_ADJ_FACTOR_H = 418;
+  static constexpr uint16_t LOOP_PRESSURE_TRIP = 419;  // Writable, TO_TENTHS
 
   // IZ2 system registers
   static constexpr uint16_t IZ2_NUM_ZONES = 483;
@@ -261,6 +280,15 @@ namespace registers {
   static constexpr uint16_t VS_INVERTER_TEMP = 3522;
   static constexpr uint16_t VS_UDC_VOLTAGE = 3523;
   static constexpr uint16_t VS_FAN_SPEED = 3524;
+  // VS Drive 3200-range duplicates (gap 14) — same bitmasks as 200-range
+  static constexpr uint16_t VS_DRIVE_DERATE_ALT = 3223;
+  static constexpr uint16_t VS_DRIVE_SAFE_MODE_ALT = 3225;
+  static constexpr uint16_t VS_DRIVE_ALARM1_ALT = 3226;
+  static constexpr uint16_t VS_DRIVE_ALARM2_ALT = 3227;
+
+  // VS Drive EEV2 Ctl duplicate (gap 15) — same bitmask as EEV2_CTL (280)
+  static constexpr uint16_t VS_DRIVE_EEV2_CTL = 3804;
+
   static constexpr uint16_t VS_EEV_OPEN = 3808;
   static constexpr uint16_t VS_SUCTION_TEMP = 3903;
   static constexpr uint16_t VS_SAT_EVAP_DISCHARGE_TEMP = 3905;
@@ -311,6 +339,16 @@ namespace registers {
   static constexpr uint16_t IZ2_CONFIG1_BASE = 31008;
   static constexpr uint16_t IZ2_CONFIG2_BASE = 31009;
   static constexpr uint16_t IZ2_CONFIG3_BASE = 31200;
+
+  // Dealer information (gap 19) — multi-register ASCII strings
+  static constexpr uint16_t DEALER_NAME = 31400;         // 13 registers (26 chars)
+  static constexpr uint16_t DEALER_PHONE = 31413;        // 8 registers (16 chars)
+  static constexpr uint16_t DEALER_ADDRESS1 = 31421;     // 13 registers (26 chars)
+  static constexpr uint16_t DEALER_ADDRESS2 = 31434;     // 13 registers (26 chars)
+  static constexpr uint16_t DEALER_EMAIL = 31447;        // 13 registers (26 chars)
+  static constexpr uint16_t DEALER_WEBSITE = 31460;      // 13 registers (26 chars)
+  static constexpr uint16_t DEALER_INFO_START = 31400;
+  static constexpr uint16_t DEALER_INFO_COUNT = 73;      // 31400-31472
 }  // namespace registers
 
 // ============================================================================
@@ -410,6 +448,11 @@ inline float to_tenths(uint16_t value) {
   return value / 10.0f;
 }
 
+/// Convert raw unsigned hundredths (uint16 / 100.0). For power adjustment factors.
+inline float to_hundredths(uint16_t value) {
+  return value / 100.0f;
+}
+
 /// Assemble two consecutive 16-bit registers into uint32 (high word first).
 inline uint32_t to_uint32(uint16_t high, uint16_t low) {
   return (static_cast<uint32_t>(high) << 16) | low;
@@ -455,6 +498,21 @@ std::string get_vs_alarm_string(uint16_t alarm1, uint16_t alarm2);
 
 /// Get EEV2 control status string from bitmask.
 std::string get_eev2_ctl_string(uint16_t value);
+
+/// Get brine type string (register 402). Ruby: BRINE_TYPE enum.
+const char *get_brine_type_string(uint16_t value);
+
+/// Get flow meter type string (register 403). Ruby: FLOW_METER_TYPE enum.
+const char *get_flow_meter_type_string(uint16_t value);
+
+/// Get SmartGrid action string (register 406). Ruby: SMARTGRID_ACTION enum.
+const char *get_smartgrid_action_string(uint16_t value);
+
+/// Get HA alarm action string (registers 409, 411). Ruby: HA_ALARM enum.
+const char *get_ha_alarm_action_string(uint16_t value);
+
+/// Get energy phase type string (register 416). Ruby: PHASE_TYPE enum.
+const char *get_energy_phase_type_string(uint16_t value);
 
 /// Get AXB inputs string from bitmask.
 std::string get_axb_inputs_string(uint16_t value);

@@ -21,6 +21,8 @@ enum class AuroraNumberType : uint8_t {
   HUMIDIFICATION_TARGET,
   DEHUMIDIFICATION_TARGET,
   LINE_VOLTAGE_SETTING,
+  COOLING_AIRFLOW_ADJUSTMENT,
+  LOOP_PRESSURE_TRIP,
 };
 
 class AuroraDHWNumber : public number::Number, public Component {

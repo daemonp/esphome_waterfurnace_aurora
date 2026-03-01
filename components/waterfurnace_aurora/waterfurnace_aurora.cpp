@@ -170,6 +170,9 @@ void WaterFurnaceAurora::process_response_() {
     case PendingRequest::POLL_FAULT_HISTORY:
       this->process_fault_history_response_(resp);
       break;
+    case PendingRequest::POLL_DEALER_INFO:
+      this->process_dealer_info_response_(resp);
+      break;
     case PendingRequest::WRITE_SINGLE:
       ESP_LOGD(TAG, "Write acknowledged");
       this->transition_(State::IDLE);
@@ -202,6 +205,11 @@ void WaterFurnaceAurora::handle_timeout_() {
     }
     this->error_backoff_until_ = millis() + ERROR_BACKOFF_MS;
     this->transition_(State::ERROR_BACKOFF);
+  } else if (this->pending_request_ == PendingRequest::POLL_DEALER_INFO) {
+    // Dealer info read failure — not critical, skip
+    ESP_LOGD(TAG, "Dealer info read timed out");
+    this->dealer_info_read_ = true;  // Don't retry
+    this->transition_(State::IDLE);
   } else if (this->pending_request_ == PendingRequest::SETUP_VS_PROBE) {
     // VS probe failure just means no VS drive — continue setup
     ESP_LOGD(TAG, "VS Drive probe timed out — no VS drive");
@@ -975,6 +983,48 @@ void WaterFurnaceAurora::build_poll_addresses_() {
       this->addresses_to_read_[this->addresses_to_read_len_++] = registers::VAPOR_INJECTOR_OPEN;
     }
     
+    // Configuration/settings registers (gap 11) — only poll if at least one is configured
+    if (this->brine_type_sensor_ || this->flow_meter_type_sensor_ || this->smartgrid_action_sensor_ ||
+        this->ha_alarm_1_action_sensor_ || this->ha_alarm_2_action_sensor_ || this->energy_phase_type_sensor_ ||
+        this->off_time_length_sensor_ || this->power_adj_factor_l_sensor_ || this->power_adj_factor_h_sensor_ ||
+        this->smartgrid_trigger_sensor_ || this->ha_alarm_1_trigger_sensor_ || this->ha_alarm_2_trigger_sensor_) {
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::BRINE_TYPE_REG;
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::FLOW_METER_TYPE_REG;
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::SMARTGRID_TRIGGER;
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::SMARTGRID_ACTION_REG;
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::OFF_TIME_LENGTH;
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::HA_ALARM1_TRIGGER;
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::HA_ALARM1_ACTION;
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::HA_ALARM2_TRIGGER;
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::HA_ALARM2_ACTION;
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::ENERGY_PHASE_TYPE_REG;
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::POWER_ADJ_FACTOR_L;
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::POWER_ADJ_FACTOR_H;
+    }
+
+    // Loop pressure trip and cooling airflow adjustment — poll for number entity read-back
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::LOOP_PRESSURE_TRIP;
+    this->addresses_to_read_[this->addresses_to_read_len_++] = registers::COOLING_AIRFLOW_ADJUSTMENT;
+
+    // Condensate monitoring (gap 13)
+    if (this->condensate_sensor_) {
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::CONDENSATE;
+    }
+
+    // VS Drive 3200-range duplicates (gap 14) — only poll if any alt sensor is configured
+    if (this->has_vs_drive_ && (this->vs_drive_derate_alt_sensor_ || this->vs_drive_safe_mode_alt_sensor_ ||
+                                 this->vs_drive_alarm_alt_sensor_)) {
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::VS_DRIVE_DERATE_ALT;
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::VS_DRIVE_SAFE_MODE_ALT;
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::VS_DRIVE_ALARM1_ALT;
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::VS_DRIVE_ALARM2_ALT;
+    }
+
+    // VS Drive EEV2 Ctl (gap 15) — only poll if sensor is configured
+    if (this->has_vs_drive_ && this->vs_drive_eev2_ctl_sensor_) {
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::VS_DRIVE_EEV2_CTL;
+    }
+
     // EEV2 diagnostic sensors — only poll if at least one is configured
     if (this->eev_superheat_sensor_ || this->eev_open_sensor_ || this->eev_suction_temperature_sensor_ ||
         this->eev_saturated_suction_temperature_sensor_ || this->eev2_ctl_sensor_) {
@@ -1029,6 +1079,12 @@ void WaterFurnaceAurora::process_poll_response_(const protocol::ParsedResponse &
     return;
   }
   
+  // Dealer info one-shot — if no fault history sensor configured, chain here instead
+  if (!this->dealer_info_read_ && this->has_any_dealer_sensor_()) {
+    this->start_dealer_info_read_();
+    return;
+  }
+
   this->transition_(State::IDLE);
 }
 
@@ -1105,6 +1161,12 @@ void WaterFurnaceAurora::process_fault_history_response_(const protocol::ParsedR
     this->fault_history_sensor_->publish_state(this->cached_fault_history_);
   }
   
+  // Chain dealer info read if any dealer sensor is configured and not yet read
+  if (!this->dealer_info_read_ && this->has_any_dealer_sensor_()) {
+    this->start_dealer_info_read_();
+    return;
+  }
+
   this->transition_(State::IDLE);
 }
 
@@ -1122,6 +1184,7 @@ void WaterFurnaceAurora::publish_all_sensors_() {
   this->publish_power_loop_sensors_(regs);
   this->publish_vs_drive_sensors_(regs);
   this->publish_equipment_sensors_(regs);
+  this->publish_config_sensors_(regs);
   this->publish_humidity_control_sensors_(regs);
   this->publish_iz2_zone_sensors_(regs);
   
@@ -1453,6 +1516,35 @@ void WaterFurnaceAurora::publish_vs_drive_sensors_(const RegisterMap &regs) {
                                       get_vs_alarm_string(*val_a1, *val_a2));
     }
   }
+
+  // VS Drive 3200-range duplicate status strings (gap 14)
+  {
+    const uint16_t *val = reg_find(regs, registers::VS_DRIVE_DERATE_ALT);
+    if (val && *val != this->cached_vs_drive_derate_alt_raw_) {
+      this->cached_vs_drive_derate_alt_raw_ = *val;
+      this->publish_text_if_changed(this->vs_drive_derate_alt_sensor_, this->cached_vs_drive_derate_alt_,
+                                      get_vs_derate_string(*val));
+    }
+  }
+  {
+    const uint16_t *val = reg_find(regs, registers::VS_DRIVE_SAFE_MODE_ALT);
+    if (val && *val != this->cached_vs_drive_safe_mode_alt_raw_) {
+      this->cached_vs_drive_safe_mode_alt_raw_ = *val;
+      this->publish_text_if_changed(this->vs_drive_safe_mode_alt_sensor_, this->cached_vs_drive_safe_mode_alt_,
+                                      get_vs_safe_mode_string(*val));
+    }
+  }
+  {
+    const uint16_t *val_a1 = reg_find(regs, registers::VS_DRIVE_ALARM1_ALT);
+    const uint16_t *val_a2 = reg_find(regs, registers::VS_DRIVE_ALARM2_ALT);
+    if (val_a1 && val_a2 &&
+        (*val_a1 != this->cached_vs_drive_alarm1_alt_raw_ || *val_a2 != this->cached_vs_drive_alarm2_alt_raw_)) {
+      this->cached_vs_drive_alarm1_alt_raw_ = *val_a1;
+      this->cached_vs_drive_alarm2_alt_raw_ = *val_a2;
+      this->publish_text_if_changed(this->vs_drive_alarm_alt_sensor_, this->cached_vs_drive_alarm_alt_,
+                                      get_vs_alarm_string(*val_a1, *val_a2));
+    }
+  }
 }
 
 void WaterFurnaceAurora::publish_equipment_sensors_(const RegisterMap &regs) {
@@ -1536,6 +1628,86 @@ void WaterFurnaceAurora::publish_equipment_sensors_(const RegisterMap &regs) {
       this->publish_text_if_changed(this->eev2_ctl_sensor_, this->cached_eev2_ctl_,
                                       get_eev2_ctl_string(*val));
     }
+  }
+
+  // VS Drive EEV2 Ctl (gap 15) — same bitmask as register 280
+  {
+    const uint16_t *val = reg_find(regs, registers::VS_DRIVE_EEV2_CTL);
+    if (val && *val != this->cached_vs_drive_eev2_ctl_raw_) {
+      this->cached_vs_drive_eev2_ctl_raw_ = *val;
+      this->publish_text_if_changed(this->vs_drive_eev2_ctl_sensor_, this->cached_vs_drive_eev2_ctl_,
+                                      get_eev2_ctl_string(*val));
+    }
+  }
+
+  // Condensate monitoring (gap 13)
+  this->publish_sensor(regs, registers::CONDENSATE, this->condensate_sensor_);
+}
+
+void WaterFurnaceAurora::publish_config_sensors_(const RegisterMap &regs) {
+  // Configuration text sensors (gap 11) — look up each register once
+  {
+    const uint16_t *val = reg_find(regs, registers::BRINE_TYPE_REG);
+    if (val) this->publish_text_if_changed(this->brine_type_sensor_, this->cached_brine_type_,
+                                            get_brine_type_string(*val));
+  }
+  {
+    const uint16_t *val = reg_find(regs, registers::FLOW_METER_TYPE_REG);
+    if (val) this->publish_text_if_changed(this->flow_meter_type_sensor_, this->cached_flow_meter_type_,
+                                            get_flow_meter_type_string(*val));
+  }
+  {
+    const uint16_t *val = reg_find(regs, registers::SMARTGRID_ACTION_REG);
+    if (val) this->publish_text_if_changed(this->smartgrid_action_sensor_, this->cached_smartgrid_action_,
+                                            get_smartgrid_action_string(*val));
+  }
+  {
+    const uint16_t *val = reg_find(regs, registers::HA_ALARM1_ACTION);
+    if (val) this->publish_text_if_changed(this->ha_alarm_1_action_sensor_, this->cached_ha_alarm_1_action_,
+                                            get_ha_alarm_action_string(*val));
+  }
+  {
+    const uint16_t *val = reg_find(regs, registers::HA_ALARM2_ACTION);
+    if (val) this->publish_text_if_changed(this->ha_alarm_2_action_sensor_, this->cached_ha_alarm_2_action_,
+                                            get_ha_alarm_action_string(*val));
+  }
+  {
+    const uint16_t *val = reg_find(regs, registers::ENERGY_PHASE_TYPE_REG);
+    if (val) this->publish_text_if_changed(this->energy_phase_type_sensor_, this->cached_energy_phase_type_,
+                                            get_energy_phase_type_string(*val));
+  }
+
+  // Configuration numeric sensors
+  this->publish_sensor(regs, registers::OFF_TIME_LENGTH, this->off_time_length_sensor_);
+  {
+    const uint16_t *val = reg_find(regs, registers::POWER_ADJ_FACTOR_L);
+    if (val && this->power_adj_factor_l_sensor_ != nullptr) {
+      float fval = to_hundredths(*val);
+      if (sensor_value_changed_(this->power_adj_factor_l_sensor_, fval))
+        this->power_adj_factor_l_sensor_->publish_state(fval);
+    }
+  }
+  {
+    const uint16_t *val = reg_find(regs, registers::POWER_ADJ_FACTOR_H);
+    if (val && this->power_adj_factor_h_sensor_ != nullptr) {
+      float fval = to_hundredths(*val);
+      if (sensor_value_changed_(this->power_adj_factor_h_sensor_, fval))
+        this->power_adj_factor_h_sensor_->publish_state(fval);
+    }
+  }
+
+  // Configuration binary sensors (open/closed triggers)
+  {
+    const uint16_t *val = reg_find(regs, registers::SMARTGRID_TRIGGER);
+    if (val) publish_binary_if_changed_(this->smartgrid_trigger_sensor_, *val != 0);
+  }
+  {
+    const uint16_t *val = reg_find(regs, registers::HA_ALARM1_TRIGGER);
+    if (val) publish_binary_if_changed_(this->ha_alarm_1_trigger_sensor_, *val != 0);
+  }
+  {
+    const uint16_t *val = reg_find(regs, registers::HA_ALARM2_TRIGGER);
+    if (val) publish_binary_if_changed_(this->ha_alarm_2_trigger_sensor_, *val != 0);
   }
 }
 
@@ -1954,6 +2126,22 @@ bool WaterFurnaceAurora::set_test_mode(bool enabled) {
   return true;
 }
 
+bool WaterFurnaceAurora::set_cooling_airflow_adjustment(int16_t value) {
+  // NEGATABLE encoding: negative values stored as 0x10000 + value (two's complement)
+  uint16_t raw = static_cast<uint16_t>(value);
+  ESP_LOGD(TAG, "Setting cooling airflow adjustment to %d (raw 0x%04X)", value, raw);
+  this->write_register(registers::COOLING_AIRFLOW_ADJUSTMENT, raw);
+  return true;
+}
+
+bool WaterFurnaceAurora::set_loop_pressure_trip(float value) {
+  // Register stores value * 10 (inverse of TO_TENTHS)
+  uint16_t raw = static_cast<uint16_t>(value * 10);
+  ESP_LOGD(TAG, "Setting loop pressure trip to %.1f psi (raw %d)", value, raw);
+  this->write_register(registers::LOOP_PRESSURE_TRIP, raw);
+  return true;
+}
+
 bool WaterFurnaceAurora::clear_fault_history() {
   ESP_LOGI(TAG, "Clearing fault history");
   this->write_register(registers::CLEAR_FAULT_HISTORY, registers::CLEAR_FAULT_MAGIC);
@@ -2092,6 +2280,74 @@ void WaterFurnaceAurora::publish_derived_sensors(const RegisterMap &regs) {
         this->approach_temperature_sensor_->publish_state(to_signed_tenths(*val_lw) - sat_cond);
     }
   }
+}
+
+// ============================================================================
+// Dealer Information (gap 19) — one-shot read via func 0x03
+// ============================================================================
+
+void WaterFurnaceAurora::start_dealer_info_read_() {
+  ESP_LOGD(TAG, "Reading dealer information (registers %d-%d)",
+           registers::DEALER_INFO_START,
+           registers::DEALER_INFO_START + registers::DEALER_INFO_COUNT - 1);
+  auto frame = protocol::build_read_holding_request(
+      this->address_, registers::DEALER_INFO_START, registers::DEALER_INFO_COUNT);
+
+  // Build expected address list
+  static uint16_t dealer_addrs[registers::DEALER_INFO_COUNT];
+  static bool dealer_addrs_init = false;
+  if (!dealer_addrs_init) {
+    for (uint16_t i = 0; i < registers::DEALER_INFO_COUNT; i++) {
+      dealer_addrs[i] = registers::DEALER_INFO_START + i;
+    }
+    dealer_addrs_init = true;
+  }
+
+  this->send_request_(frame, PendingRequest::POLL_DEALER_INFO,
+                      dealer_addrs, registers::DEALER_INFO_COUNT);
+}
+
+void WaterFurnaceAurora::process_dealer_info_response_(const protocol::ParsedResponse &resp) {
+  // Extract multi-register strings from response.
+  // Each string field starts at a known register and spans N registers.
+  struct DealerField {
+    uint16_t start;
+    uint16_t count;
+    text_sensor::TextSensor *sensor;
+    std::string *cached;
+  };
+  DealerField fields[] = {
+    {registers::DEALER_NAME, 13, this->dealer_name_sensor_, &this->cached_dealer_name_},
+    {registers::DEALER_PHONE, 8, this->dealer_phone_sensor_, &this->cached_dealer_phone_},
+    {registers::DEALER_ADDRESS1, 13, this->dealer_address_1_sensor_, &this->cached_dealer_address_1_},
+    {registers::DEALER_ADDRESS2, 13, this->dealer_address_2_sensor_, &this->cached_dealer_address_2_},
+    {registers::DEALER_EMAIL, 13, this->dealer_email_sensor_, &this->cached_dealer_email_},
+    {registers::DEALER_WEBSITE, 13, this->dealer_website_sensor_, &this->cached_dealer_website_},
+  };
+
+  for (auto &field : fields) {
+    if (field.sensor == nullptr) continue;
+    // Collect consecutive register values into a stack buffer
+    uint16_t buf[13];  // Max field length
+    size_t buf_count = 0;
+    for (uint16_t i = 0; i < field.count && i < 13; i++) {
+      // Search response registers for this address
+      for (const auto &rv : resp.registers) {
+        if (rv.address == field.start + i) {
+          buf[buf_count++] = rv.value;
+          break;
+        }
+      }
+    }
+    if (buf_count > 0) {
+      std::string str = registers_to_string(buf, buf_count);
+      this->publish_text_if_changed(field.sensor, *field.cached, str);
+    }
+  }
+
+  this->dealer_info_read_ = true;
+  ESP_LOGD(TAG, "Dealer info read complete");
+  this->transition_(State::IDLE);
 }
 
 // ============================================================================

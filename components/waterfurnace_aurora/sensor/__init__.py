@@ -244,6 +244,29 @@ SENSORS = {
         state_class=STATE_CLASS_MEASUREMENT,
         entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
     ),
+    # Configuration sensors (gap 11)
+    "off_time_length": sensor.sensor_schema(
+        unit_of_measurement="s",
+        accuracy_decimals=0,
+        state_class=STATE_CLASS_MEASUREMENT,
+        entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+    ),
+    "power_adj_factor_l": sensor.sensor_schema(
+        accuracy_decimals=2,
+        state_class=STATE_CLASS_MEASUREMENT,
+        entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+    ),
+    "power_adj_factor_h": sensor.sensor_schema(
+        accuracy_decimals=2,
+        state_class=STATE_CLASS_MEASUREMENT,
+        entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+    ),
+    # Condensate monitoring (gap 13)
+    "condensate": sensor.sensor_schema(
+        accuracy_decimals=0,
+        state_class=STATE_CLASS_MEASUREMENT,
+        entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+    ),
     # Derived sensors (computed on-device)
     "cop": sensor.sensor_schema(
         accuracy_decimals=2,

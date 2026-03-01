@@ -33,6 +33,26 @@ TEXT_SENSORS = {
     "outputs_at_lockout": DIAGNOSTIC_TEXT_SCHEMA,
     "inputs_at_lockout": DIAGNOSTIC_TEXT_SCHEMA,
     "eev2_ctl": DIAGNOSTIC_TEXT_SCHEMA,
+    # Configuration text sensors (gap 11)
+    "brine_type": DIAGNOSTIC_TEXT_SCHEMA,
+    "flow_meter_type": DIAGNOSTIC_TEXT_SCHEMA,
+    "smartgrid_action": DIAGNOSTIC_TEXT_SCHEMA,
+    "ha_alarm_1_action": DIAGNOSTIC_TEXT_SCHEMA,
+    "ha_alarm_2_action": DIAGNOSTIC_TEXT_SCHEMA,
+    "energy_phase_type": DIAGNOSTIC_TEXT_SCHEMA,
+    # VS Drive 3200-range duplicates (gap 14)
+    "vs_drive_derate_alt": DIAGNOSTIC_TEXT_SCHEMA,
+    "vs_drive_safe_mode_alt": DIAGNOSTIC_TEXT_SCHEMA,
+    "vs_drive_alarm_alt": DIAGNOSTIC_TEXT_SCHEMA,
+    # VS Drive EEV2 Ctl (gap 15)
+    "vs_drive_eev2_ctl": DIAGNOSTIC_TEXT_SCHEMA,
+    # Dealer information (gap 19)
+    "dealer_name": DIAGNOSTIC_TEXT_SCHEMA,
+    "dealer_phone": DIAGNOSTIC_TEXT_SCHEMA,
+    "dealer_address_1": DIAGNOSTIC_TEXT_SCHEMA,
+    "dealer_address_2": DIAGNOSTIC_TEXT_SCHEMA,
+    "dealer_email": DIAGNOSTIC_TEXT_SCHEMA,
+    "dealer_website": DIAGNOSTIC_TEXT_SCHEMA,
 }
 
 CONFIG_SCHEMA = cv.Schema(

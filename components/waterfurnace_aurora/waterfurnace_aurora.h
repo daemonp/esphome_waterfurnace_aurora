@@ -46,6 +46,7 @@ enum class PendingRequest : uint8_t {
   SETUP_VS_PROBE,    // func 0x42 read for VS drive probing
   POLL_REGISTERS,    // func 0x42 read for normal polling
   POLL_FAULT_HISTORY,// func 0x03 read for fault history
+  POLL_DEALER_INFO,  // func 0x03 read for dealer information
   WRITE_SINGLE,      // func 0x06 write
   // Note: func 0x43 (batch write) is supported by the protocol layer but NOT used
   // by the hub. The Aurora firmware rejects 0x43 with error 0x02. All writes use
@@ -195,6 +196,39 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   void set_eev_saturated_suction_temperature_sensor(sensor::Sensor *sensor) { this->eev_saturated_suction_temperature_sensor_ = sensor; }
   void set_eev2_ctl_sensor(text_sensor::TextSensor *sensor) { this->eev2_ctl_sensor_ = sensor; }
 
+  // Configuration/settings sensors (gap 11)
+  void set_brine_type_sensor(text_sensor::TextSensor *sensor) { this->brine_type_sensor_ = sensor; }
+  void set_flow_meter_type_sensor(text_sensor::TextSensor *sensor) { this->flow_meter_type_sensor_ = sensor; }
+  void set_smartgrid_action_sensor(text_sensor::TextSensor *sensor) { this->smartgrid_action_sensor_ = sensor; }
+  void set_ha_alarm_1_action_sensor(text_sensor::TextSensor *sensor) { this->ha_alarm_1_action_sensor_ = sensor; }
+  void set_ha_alarm_2_action_sensor(text_sensor::TextSensor *sensor) { this->ha_alarm_2_action_sensor_ = sensor; }
+  void set_energy_phase_type_sensor(text_sensor::TextSensor *sensor) { this->energy_phase_type_sensor_ = sensor; }
+  void set_off_time_length_sensor(sensor::Sensor *sensor) { this->off_time_length_sensor_ = sensor; }
+  void set_power_adj_factor_l_sensor(sensor::Sensor *sensor) { this->power_adj_factor_l_sensor_ = sensor; }
+  void set_power_adj_factor_h_sensor(sensor::Sensor *sensor) { this->power_adj_factor_h_sensor_ = sensor; }
+  void set_smartgrid_trigger_binary_sensor(binary_sensor::BinarySensor *sensor) { this->smartgrid_trigger_sensor_ = sensor; }
+  void set_ha_alarm_1_trigger_binary_sensor(binary_sensor::BinarySensor *sensor) { this->ha_alarm_1_trigger_sensor_ = sensor; }
+  void set_ha_alarm_2_trigger_binary_sensor(binary_sensor::BinarySensor *sensor) { this->ha_alarm_2_trigger_sensor_ = sensor; }
+
+  // Condensate sensor (gap 13)
+  void set_condensate_sensor(sensor::Sensor *sensor) { this->condensate_sensor_ = sensor; }
+
+  // VS Drive 3200-range duplicates (gap 14)
+  void set_vs_drive_derate_alt_sensor(text_sensor::TextSensor *sensor) { this->vs_drive_derate_alt_sensor_ = sensor; }
+  void set_vs_drive_safe_mode_alt_sensor(text_sensor::TextSensor *sensor) { this->vs_drive_safe_mode_alt_sensor_ = sensor; }
+  void set_vs_drive_alarm_alt_sensor(text_sensor::TextSensor *sensor) { this->vs_drive_alarm_alt_sensor_ = sensor; }
+
+  // VS Drive EEV2 Ctl (gap 15)
+  void set_vs_drive_eev2_ctl_sensor(text_sensor::TextSensor *sensor) { this->vs_drive_eev2_ctl_sensor_ = sensor; }
+
+  // Dealer information (gap 19)
+  void set_dealer_name_sensor(text_sensor::TextSensor *sensor) { this->dealer_name_sensor_ = sensor; }
+  void set_dealer_phone_sensor(text_sensor::TextSensor *sensor) { this->dealer_phone_sensor_ = sensor; }
+  void set_dealer_address_1_sensor(text_sensor::TextSensor *sensor) { this->dealer_address_1_sensor_ = sensor; }
+  void set_dealer_address_2_sensor(text_sensor::TextSensor *sensor) { this->dealer_address_2_sensor_ = sensor; }
+  void set_dealer_email_sensor(text_sensor::TextSensor *sensor) { this->dealer_email_sensor_ = sensor; }
+  void set_dealer_website_sensor(text_sensor::TextSensor *sensor) { this->dealer_website_sensor_ = sensor; }
+
   // Humidifier sensors
   void set_humidification_target_sensor(sensor::Sensor *sensor) { this->humidification_target_sensor_ = sensor; }
   void set_dehumidification_target_sensor(sensor::Sensor *sensor) { this->dehumidification_target_sensor_ = sensor; }
@@ -294,6 +328,10 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   /// Enable/disable test mode (register 45: 1=enable, 0=disable).
   bool set_test_mode(bool enabled);
 
+  // Configuration controls (gap 11, 12)
+  bool set_cooling_airflow_adjustment(int16_t value);
+  bool set_loop_pressure_trip(float value);
+
   // System controls
   bool clear_fault_history();
   
@@ -345,6 +383,18 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   float get_cached_register_tenths(uint16_t addr) const {
     const uint16_t *val = reg_find(this->register_cache_, addr);
     return val ? to_tenths(*val) : NAN;
+  }
+
+  /// Look up a register and return it as a signed integer (NEGATABLE). Returns NAN if not found.
+  float get_cached_register_signed(uint16_t addr) const {
+    const uint16_t *val = reg_find(this->register_cache_, addr);
+    return val ? static_cast<float>(static_cast<int16_t>(*val)) : NAN;
+  }
+
+  /// Look up a register value and return it divided by 100. Returns NAN if not found.
+  float get_cached_register_hundredths(uint16_t addr) const {
+    const uint16_t *val = reg_find(this->register_cache_, addr);
+    return val ? to_hundredths(*val) : NAN;
   }
   
   // Observer pattern: sub-entities register a callback to be notified when data updates.
@@ -407,6 +457,14 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   void start_fault_history_read_();
   void process_poll_response_(const protocol::ParsedResponse &resp);
   void process_fault_history_response_(const protocol::ParsedResponse &resp);
+  void start_dealer_info_read_();
+  void process_dealer_info_response_(const protocol::ParsedResponse &resp);
+  /// Returns true if any dealer info text sensor is configured.
+  bool has_any_dealer_sensor_() const {
+    return this->dealer_name_sensor_ || this->dealer_phone_sensor_ ||
+           this->dealer_address_1_sensor_ || this->dealer_address_2_sensor_ ||
+           this->dealer_email_sensor_ || this->dealer_website_sensor_;
+  }
   void publish_all_sensors_();
   void publish_fault_sensors_(const RegisterMap &regs);
   void publish_system_status_sensors_(const RegisterMap &regs);
@@ -415,6 +473,7 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   void publish_power_loop_sensors_(const RegisterMap &regs);
   void publish_vs_drive_sensors_(const RegisterMap &regs);
   void publish_equipment_sensors_(const RegisterMap &regs);
+  void publish_config_sensors_(const RegisterMap &regs);
   void publish_humidity_control_sensors_(const RegisterMap &regs);
   void publish_iz2_zone_sensors_(const RegisterMap &regs);
   
@@ -763,6 +822,14 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   std::array<sensor::Sensor *, FAULT_COUNTER_COUNT> fault_counter_sensors_{};
   bool has_any_fault_counter_sensor_{false};
 
+  // --- Configuration/settings sensors (gap 11) ---
+  sensor::Sensor *off_time_length_sensor_{nullptr};
+  sensor::Sensor *power_adj_factor_l_sensor_{nullptr};
+  sensor::Sensor *power_adj_factor_h_sensor_{nullptr};
+
+  // --- Condensate sensor (gap 13) ---
+  sensor::Sensor *condensate_sensor_{nullptr};
+
   // --- Derived / computed sensors ---
   sensor::Sensor *cop_sensor_{nullptr};
   sensor::Sensor *water_delta_t_sensor_{nullptr};
@@ -796,6 +863,11 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   binary_sensor::BinarySensor *humidifier_running_sensor_{nullptr};
   binary_sensor::BinarySensor *dehumidifier_running_sensor_{nullptr};
 
+  // --- Configuration triggers (gap 11) ---
+  binary_sensor::BinarySensor *smartgrid_trigger_sensor_{nullptr};
+  binary_sensor::BinarySensor *ha_alarm_1_trigger_sensor_{nullptr};
+  binary_sensor::BinarySensor *ha_alarm_2_trigger_sensor_{nullptr};
+
   // =========================================================================
   // Text sensors
   // =========================================================================
@@ -814,7 +886,31 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   text_sensor::TextSensor *dehumidifier_mode_sensor_{nullptr};
   text_sensor::TextSensor *pump_type_sensor_{nullptr};
   text_sensor::TextSensor *eev2_ctl_sensor_{nullptr};
-  
+
+  // --- Configuration text sensors (gap 11) ---
+  text_sensor::TextSensor *brine_type_sensor_{nullptr};
+  text_sensor::TextSensor *flow_meter_type_sensor_{nullptr};
+  text_sensor::TextSensor *smartgrid_action_sensor_{nullptr};
+  text_sensor::TextSensor *ha_alarm_1_action_sensor_{nullptr};
+  text_sensor::TextSensor *ha_alarm_2_action_sensor_{nullptr};
+  text_sensor::TextSensor *energy_phase_type_sensor_{nullptr};
+
+  // --- VS Drive 3200-range duplicates (gap 14) ---
+  text_sensor::TextSensor *vs_drive_derate_alt_sensor_{nullptr};
+  text_sensor::TextSensor *vs_drive_safe_mode_alt_sensor_{nullptr};
+  text_sensor::TextSensor *vs_drive_alarm_alt_sensor_{nullptr};
+
+  // --- VS Drive EEV2 Ctl (gap 15) ---
+  text_sensor::TextSensor *vs_drive_eev2_ctl_sensor_{nullptr};
+
+  // --- Dealer information (gap 19) ---
+  text_sensor::TextSensor *dealer_name_sensor_{nullptr};
+  text_sensor::TextSensor *dealer_phone_sensor_{nullptr};
+  text_sensor::TextSensor *dealer_address_1_sensor_{nullptr};
+  text_sensor::TextSensor *dealer_address_2_sensor_{nullptr};
+  text_sensor::TextSensor *dealer_email_sensor_{nullptr};
+  text_sensor::TextSensor *dealer_website_sensor_{nullptr};
+
   // --- Lockout diagnostic sensors ---
   sensor::Sensor *lockout_fault_code_sensor_{nullptr};
   text_sensor::TextSensor *lockout_fault_description_sensor_{nullptr};
@@ -847,6 +943,32 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   std::string cached_dehumidifier_mode_;
   std::string cached_eev2_ctl_;
   uint16_t cached_eev2_ctl_raw_{0xFFFF};
+  // Config register text sensor caches (gap 11)
+  std::string cached_brine_type_;
+  std::string cached_flow_meter_type_;
+  std::string cached_smartgrid_action_;
+  std::string cached_ha_alarm_1_action_;
+  std::string cached_ha_alarm_2_action_;
+  std::string cached_energy_phase_type_;
+  // VS Drive alt text sensor caches (gap 14)
+  std::string cached_vs_drive_derate_alt_;
+  uint16_t cached_vs_drive_derate_alt_raw_{0xFFFF};
+  std::string cached_vs_drive_safe_mode_alt_;
+  uint16_t cached_vs_drive_safe_mode_alt_raw_{0xFFFF};
+  std::string cached_vs_drive_alarm_alt_;
+  uint16_t cached_vs_drive_alarm1_alt_raw_{0xFFFF};
+  uint16_t cached_vs_drive_alarm2_alt_raw_{0xFFFF};
+  // VS Drive EEV2 Ctl cache (gap 15)
+  std::string cached_vs_drive_eev2_ctl_;
+  uint16_t cached_vs_drive_eev2_ctl_raw_{0xFFFF};
+  // Dealer info caches (gap 19)
+  std::string cached_dealer_name_;
+  std::string cached_dealer_phone_;
+  std::string cached_dealer_address_1_;
+  std::string cached_dealer_address_2_;
+  std::string cached_dealer_email_;
+  std::string cached_dealer_website_;
+  bool dealer_info_read_{false};
   std::string cached_lockout_fault_description_;
   std::string cached_outputs_at_lockout_;
   uint16_t cached_outputs_at_lockout_raw_{0xFFFF};
