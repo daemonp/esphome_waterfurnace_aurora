@@ -38,6 +38,9 @@ void AuroraClimate::dump_config() {
     }
   }
   ESP_LOGCONFIG(TAG, "  EMA alpha: %.2f", EMA_ALPHA);
+  if (this->zone_priority_sensor_) ESP_LOGCONFIG(TAG, "  Zone priority sensor: configured");
+  if (this->zone_size_sensor_) ESP_LOGCONFIG(TAG, "  Zone size sensor: configured");
+  if (this->zone_normalized_size_sensor_) ESP_LOGCONFIG(TAG, "  Zone normalized size sensor: configured");
 }
 
 climate::ClimateTraits AuroraClimate::traits() {
@@ -390,7 +393,52 @@ void AuroraClimate::update_state_() {
     }
   }
 
+  // Publish per-zone IZ2 diagnostic sensors
+  if (this->is_iz2_mode_()) {
+    this->publish_zone_diagnostics_();
+  }
+
   this->publish_state_if_changed_();
+}
+
+void AuroraClimate::publish_zone_diagnostics_() {
+  if (this->zone_ > this->parent_->get_num_iz2_zones()) return;
+  
+  const IZ2ZoneData &zone = this->parent_->get_zone_data(this->zone_);
+  
+  // Priority (text: "Comfort" or "Economy")
+  if (this->zone_priority_sensor_ != nullptr) {
+    const char *priority_str = (zone.priority == ZonePriority::ECONOMY) ? "Economy" : "Comfort";
+    if (this->cached_zone_priority_.empty() || strcmp(this->cached_zone_priority_.c_str(), priority_str) != 0) {
+      this->cached_zone_priority_ = priority_str;
+      this->zone_priority_sensor_->publish_state(this->cached_zone_priority_);
+    }
+  }
+  
+  // Size (text: "0", "25", "45", "70" — from Ruby gem ZONE_SIZES)
+  if (this->zone_size_sensor_ != nullptr) {
+    const char *size_str;
+    switch (zone.size) {
+      case ZoneSize::QUARTER: size_str = "0"; break;
+      case ZoneSize::HALF: size_str = "25"; break;
+      case ZoneSize::THREE_QUARTER: size_str = "45"; break;
+      case ZoneSize::FULL: size_str = "70"; break;
+      default: size_str = "Unknown"; break;
+    }
+    if (this->cached_zone_size_.empty() || strcmp(this->cached_zone_size_.c_str(), size_str) != 0) {
+      this->cached_zone_size_ = size_str;
+      this->zone_size_sensor_->publish_state(this->cached_zone_size_);
+    }
+  }
+  
+  // Normalized size (0-100%)
+  if (this->zone_normalized_size_sensor_ != nullptr) {
+    float norm_size = static_cast<float>(zone.normalized_size);
+    if (!this->zone_normalized_size_sensor_->has_state() ||
+        this->zone_normalized_size_sensor_->raw_state != norm_size) {
+      this->zone_normalized_size_sensor_->publish_state(norm_size);
+    }
+  }
 }
 
 void AuroraClimate::publish_state_if_changed_() {

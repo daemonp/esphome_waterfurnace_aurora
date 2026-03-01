@@ -209,6 +209,27 @@ SENSORS = {
         device_class=DEVICE_CLASS_HUMIDITY,
         state_class=STATE_CLASS_MEASUREMENT,
     ),
+    # AXB diagnostic sensors
+    "axb_leaving_air_temperature": TEMPERATURE_SENSOR_SCHEMA,
+    "axb_suction_temperature": TEMPERATURE_SENSOR_SCHEMA,
+    "saturated_evaporator_temperature": TEMPERATURE_SENSOR_SCHEMA,
+    "axb_superheat": TEMPERATURE_SENSOR_SCHEMA,
+    "vapor_injector_open": sensor.sensor_schema(
+        unit_of_measurement=UNIT_PERCENT,
+        accuracy_decimals=0,
+        state_class=STATE_CLASS_MEASUREMENT,
+        entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+    ),
+    # EEV2 diagnostic sensors
+    "eev_superheat": TEMPERATURE_SENSOR_SCHEMA,
+    "eev_open": sensor.sensor_schema(
+        unit_of_measurement=UNIT_PERCENT,
+        accuracy_decimals=0,
+        state_class=STATE_CLASS_MEASUREMENT,
+        entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+    ),
+    "eev_suction_temperature": TEMPERATURE_SENSOR_SCHEMA,
+    "eev_saturated_suction_temperature": TEMPERATURE_SENSOR_SCHEMA,
     # IZ2 desired speed sensors
     "iz2_compressor_speed": SPEED_SENSOR_SCHEMA,
     "iz2_blower_speed": PERCENT_SENSOR_SCHEMA,
@@ -230,10 +251,22 @@ SENSORS = {
     ),
 }
 
+# Fault history counter schema — state_class: total_increasing per Ruby gem
+FAULT_COUNTER_SCHEMA = sensor.sensor_schema(
+    accuracy_decimals=0,
+    state_class="total_increasing",
+    entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+)
+
+# Generate E1-E99 fault counter sensor keys
+FAULT_COUNTERS = {f"fault_e{i}": FAULT_COUNTER_SCHEMA for i in range(1, 100)}
+
 CONFIG_SCHEMA = cv.Schema(
     {cv.GenerateID(CONF_AURORA_ID): cv.use_id(WaterFurnaceAurora)}
 ).extend(
     {cv.Optional(key): schema for key, schema in SENSORS.items()}
+).extend(
+    {cv.Optional(key): schema for key, schema in FAULT_COUNTERS.items()}
 )
 
 
@@ -243,3 +276,10 @@ async def to_code(config):
         if conf := config.get(key):
             sens = await sensor.new_sensor(conf)
             cg.add(getattr(parent, f"set_{key}_sensor")(sens))
+    # Fault history counters — use set_fault_counter_sensor(index, sensor)
+    for i in range(1, 100):
+        key = f"fault_e{i}"
+        if conf := config.get(key):
+            sens = await sensor.new_sensor(conf)
+            cg.add(parent.set_fault_counter_sensor(i - 1, sens))
+            cg.add(parent.set_has_any_fault_counter_sensor())

@@ -437,9 +437,9 @@ void WaterFurnaceAurora::dump_config() {
 const IZ2ZoneData& WaterFurnaceAurora::get_zone_data(uint8_t zone_number) const {
   if (zone_number < 1 || zone_number > MAX_IZ2_ZONES) {
     ESP_LOGW(TAG, "Invalid zone_number %d in get_zone_data (expected 1-%d)", zone_number, MAX_IZ2_ZONES);
-    return iz2_zones_[0];
+    return this->iz2_zones_[0];
   }
-  return iz2_zones_[zone_number - 1];
+  return this->iz2_zones_[zone_number - 1];
 }
 
 bool WaterFurnaceAurora::validate_zone_number(uint8_t zone_number) const {
@@ -963,6 +963,27 @@ void WaterFurnaceAurora::build_poll_addresses_() {
       this->addresses_to_read_[this->addresses_to_read_len_++] = registers::HUMIDISTAT_SETTINGS;
       this->addresses_to_read_[this->addresses_to_read_len_++] = registers::HUMIDISTAT_TARGETS;
     }
+    
+    // AXB diagnostic sensors — only poll if at least one is configured
+    if (this->has_axb_ && (this->axb_leaving_air_temperature_sensor_ || this->axb_suction_temperature_sensor_ ||
+                           this->saturated_evaporator_temperature_sensor_ || this->axb_superheat_sensor_ ||
+                           this->vapor_injector_open_sensor_)) {
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::AXB_LEAVING_AIR_TEMP;
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::AXB_SUCTION_TEMP;
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::SATURATED_EVAPORATOR_TEMP;
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::AXB_SUPERHEAT;
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::VAPOR_INJECTOR_OPEN;
+    }
+    
+    // EEV2 diagnostic sensors — only poll if at least one is configured
+    if (this->eev_superheat_sensor_ || this->eev_open_sensor_ || this->eev_suction_temperature_sensor_ ||
+        this->eev_saturated_suction_temperature_sensor_ || this->eev2_ctl_sensor_) {
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::EEV2_CTL;
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::EEV_SUPERHEAT;
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::EEV_OPEN;
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::EEV_SUCTION_TEMP;
+      this->addresses_to_read_[this->addresses_to_read_len_++] = registers::EEV_SATURATED_SUCTION_TEMP;
+    }
   }
 }
 
@@ -1003,7 +1024,7 @@ void WaterFurnaceAurora::process_poll_response_(const protocol::ParsedResponse &
   
   // Check if we need fault history this cycle
   bool slow_poll = (this->poll_tier_counter_ % 60) == 0;
-  if (slow_poll && this->fault_history_sensor_ != nullptr) {
+  if (slow_poll && (this->fault_history_sensor_ != nullptr || this->has_any_fault_counter_sensor_)) {
     this->start_fault_history_read_();
     return;
   }
@@ -1029,46 +1050,61 @@ void WaterFurnaceAurora::start_fault_history_read_() {
 }
 
 void WaterFurnaceAurora::process_fault_history_response_(const protocol::ParsedResponse &resp) {
-  if (this->fault_history_sensor_ == nullptr) {
-    this->transition_(State::IDLE);
-    return;
-  }
-  
-  // Reuse cached string to avoid heap allocation on every slow-tier cycle (~5min).
-  // clear() preserves the existing buffer capacity (reserved to 256 in setup()).
-  this->cached_fault_history_.clear();
-  int fault_count = 0;
-  const int max_faults = 10;
-  
-  for (const auto &rv : resp.registers) {
-    if (fault_count >= max_faults) break;
-    if (rv.value == 0 || rv.value == 0xFFFF) continue;
-    
-    uint8_t fault_code = rv.value % 100;
-    if (fault_code == 0) continue;
-    
-    if (!this->cached_fault_history_.empty()) this->cached_fault_history_ += "; ";
-    this->cached_fault_history_ += "E";
-    char code_buf[4];
-    snprintf(code_buf, sizeof(code_buf), "%u", fault_code);
-    this->cached_fault_history_ += code_buf;
-    
-    const char *desc = get_fault_description(fault_code);
-    if (desc && strcmp(desc, "Unknown Fault") != 0) {
-      this->cached_fault_history_ += " (";
-      this->cached_fault_history_ += desc;
-      this->cached_fault_history_ += ")";
+  // Publish individual fault counters (E1-E99)
+  // Each register value is the count of how many times that fault occurred.
+  // Register 601 = E1, 602 = E2, ..., 699 = E99.
+  if (this->has_any_fault_counter_sensor_) {
+    for (const auto &rv : resp.registers) {
+      if (rv.address < registers::FAULT_HISTORY_START || rv.address > registers::FAULT_HISTORY_END)
+        continue;
+      uint8_t idx = static_cast<uint8_t>(rv.address - registers::FAULT_HISTORY_START);
+      if (idx >= FAULT_COUNTER_COUNT) continue;
+      sensor::Sensor *sens = this->fault_counter_sensors_[idx];
+      if (sens == nullptr) continue;
+      float fval = static_cast<float>(rv.value);
+      if (sensor_value_changed_(sens, fval))
+        sens->publish_state(fval);
     }
-    fault_count++;
+  }
+
+  if (this->fault_history_sensor_ != nullptr) {
+    // Reuse cached string to avoid heap allocation on every slow-tier cycle (~5min).
+    // clear() preserves the existing buffer capacity (reserved to 256 in setup()).
+    this->cached_fault_history_.clear();
+    int fault_count = 0;
+    const int max_faults = 10;
+    
+    for (const auto &rv : resp.registers) {
+      if (fault_count >= max_faults) break;
+      if (rv.value == 0 || rv.value == 0xFFFF) continue;
+      
+      uint8_t fault_code = rv.value % 100;
+      if (fault_code == 0) continue;
+      
+      if (!this->cached_fault_history_.empty()) this->cached_fault_history_ += "; ";
+      this->cached_fault_history_ += "E";
+      char code_buf[4];
+      snprintf(code_buf, sizeof(code_buf), "%u", fault_code);
+      this->cached_fault_history_ += code_buf;
+      
+      const char *desc = get_fault_description(fault_code);
+      if (desc && strcmp(desc, "Unknown Fault") != 0) {
+        this->cached_fault_history_ += " (";
+        this->cached_fault_history_ += desc;
+        this->cached_fault_history_ += ")";
+      }
+      fault_count++;
+    }
+    
+    if (this->cached_fault_history_.empty()) {
+      this->cached_fault_history_ = "No faults";
+    } else if (fault_count >= max_faults) {
+      this->cached_fault_history_ += "...";
+    }
+    
+    this->fault_history_sensor_->publish_state(this->cached_fault_history_);
   }
   
-  if (this->cached_fault_history_.empty()) {
-    this->cached_fault_history_ = "No faults";
-  } else if (fault_count >= max_faults) {
-    this->cached_fault_history_ += "...";
-  }
-  
-  this->fault_history_sensor_->publish_state(this->cached_fault_history_);
   this->transition_(State::IDLE);
 }
 
@@ -1480,6 +1516,27 @@ void WaterFurnaceAurora::publish_equipment_sensors_(const RegisterMap &regs) {
   
   this->publish_sensor_int32(regs, registers::HEAT_OF_EXTRACTION, this->heat_of_extraction_sensor_);
   this->publish_sensor_int32(regs, registers::HEAT_OF_REJECTION, this->heat_of_rejection_sensor_);
+  
+  // AXB diagnostic sensors (medium tier)
+  this->publish_sensor_signed_tenths(regs, registers::AXB_LEAVING_AIR_TEMP, this->axb_leaving_air_temperature_sensor_);
+  this->publish_sensor_signed_tenths(regs, registers::AXB_SUCTION_TEMP, this->axb_suction_temperature_sensor_);
+  this->publish_sensor_signed_tenths(regs, registers::SATURATED_EVAPORATOR_TEMP, this->saturated_evaporator_temperature_sensor_);
+  this->publish_sensor_signed_tenths(regs, registers::AXB_SUPERHEAT, this->axb_superheat_sensor_);
+  this->publish_sensor(regs, registers::VAPOR_INJECTOR_OPEN, this->vapor_injector_open_sensor_);
+  
+  // EEV2 sensors (medium tier)
+  this->publish_sensor_signed_tenths(regs, registers::EEV_SUPERHEAT, this->eev_superheat_sensor_);
+  this->publish_sensor(regs, registers::EEV_OPEN, this->eev_open_sensor_);
+  this->publish_sensor_signed_tenths(regs, registers::EEV_SUCTION_TEMP, this->eev_suction_temperature_sensor_);
+  this->publish_sensor_signed_tenths(regs, registers::EEV_SATURATED_SUCTION_TEMP, this->eev_saturated_suction_temperature_sensor_);
+  {
+    const uint16_t *val = reg_find(regs, registers::EEV2_CTL);
+    if (val && *val != this->cached_eev2_ctl_raw_) {
+      this->cached_eev2_ctl_raw_ = *val;
+      this->publish_text_if_changed(this->eev2_ctl_sensor_, this->cached_eev2_ctl_,
+                                      get_eev2_ctl_string(*val));
+    }
+  }
 }
 
 void WaterFurnaceAurora::publish_humidity_control_sensors_(const RegisterMap &regs) {
@@ -1856,6 +1913,44 @@ bool WaterFurnaceAurora::set_dehumidifier_mode(bool auto_mode) {
   ESP_LOGI(TAG, "Setting dehumidifier mode to %s (reg %d = 0x%04X)", auto_mode ? "Auto" : "Manual", write_reg, raw_value);
   this->write_register(write_reg, raw_value);
   this->dehumidifier_auto_ = auto_mode;
+  return true;
+}
+
+bool WaterFurnaceAurora::set_manual_operation(uint8_t mode, uint8_t compressor_speed,
+                                               uint8_t blower_speed, bool aux_heat) {
+  if (compressor_speed > 15) { ESP_LOGW(TAG, "Manual compressor speed %d out of range (0-15)", compressor_speed); return false; }
+  if (blower_speed > 15 && blower_speed != 255) { ESP_LOGW(TAG, "Manual blower speed %d out of range (0-15 or 255=auto)", blower_speed); return false; }
+  if (mode > 2) { ESP_LOGW(TAG, "Manual mode %d out of range (0=off, 1=heat, 2=cool)", mode); return false; }
+  
+  if (mode == 0) {
+    return this->set_manual_operation_off();
+  }
+  
+  // Build bitmask per Ruby gem abc_client.rb:307-332
+  uint16_t value = 0;
+  value |= (compressor_speed & 0x0F);
+  value |= (blower_speed == 255) ? registers::MANUAL_BLOWER_WITH_COMPRESSOR
+                                  : static_cast<uint16_t>((blower_speed & 0x0F) << 4);
+  if (mode == 2) value |= registers::MANUAL_OPERATION_COOLING;
+  if (aux_heat) value |= registers::MANUAL_OPERATION_AUX_HEAT;
+  
+  ESP_LOGI(TAG, "Setting manual operation: mode=%s compressor=%d blower=%s%s (reg 3002=0x%04X)",
+           mode == 2 ? "cooling" : "heating", compressor_speed,
+           blower_speed == 255 ? "auto" : "manual",
+           aux_heat ? " +aux" : "", value);
+  this->write_register(registers::MANUAL_OPERATION, value);
+  return true;
+}
+
+bool WaterFurnaceAurora::set_manual_operation_off() {
+  ESP_LOGI(TAG, "Turning off manual operation");
+  this->write_register(registers::MANUAL_OPERATION, registers::MANUAL_OPERATION_OFF);
+  return true;
+}
+
+bool WaterFurnaceAurora::set_test_mode(bool enabled) {
+  ESP_LOGI(TAG, "%s test mode", enabled ? "Enabling" : "Disabling");
+  this->write_register(registers::TEST_MODE, enabled ? 1 : 0);
   return true;
 }
 

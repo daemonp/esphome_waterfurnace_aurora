@@ -157,6 +157,13 @@ namespace registers {
   static constexpr uint16_t VS_ALARM1 = 217;
   static constexpr uint16_t VS_ALARM2 = 218;
 
+  // EEV2 (independent EEV control block)
+  static constexpr uint16_t EEV2_CTL = 280;             // Bitmask: sensor failure conditions
+  static constexpr uint16_t EEV_SUPERHEAT = 281;
+  static constexpr uint16_t EEV_OPEN = 282;
+  static constexpr uint16_t EEV_SUCTION_TEMP = 283;
+  static constexpr uint16_t EEV_SATURATED_SUCTION_TEMP = 284;
+
   // Blower / ECM
   static constexpr uint16_t VS_PUMP_MIN = 321;
   static constexpr uint16_t VS_PUMP_MAX = 322;
@@ -213,7 +220,12 @@ namespace registers {
   static constexpr uint16_t DISCHARGE_PRESSURE = 1115;
   static constexpr uint16_t SUCTION_PRESSURE = 1116;
   static constexpr uint16_t WATERFLOW = 1117;
+  static constexpr uint16_t AXB_LEAVING_AIR_TEMP = 1112;
+  static constexpr uint16_t AXB_SUCTION_TEMP = 1113;
   static constexpr uint16_t LOOP_PRESSURE = 1119;
+  static constexpr uint16_t SATURATED_EVAPORATOR_TEMP = 1124;
+  static constexpr uint16_t AXB_SUPERHEAT = 1125;
+  static constexpr uint16_t VAPOR_INJECTOR_OPEN = 1126;
   static constexpr uint16_t SATURATED_CONDENSER_TEMP = 1134;
   static constexpr uint16_t SUBCOOL_HEATING = 1135;
   static constexpr uint16_t SUBCOOL_COOLING = 1136;
@@ -257,6 +269,14 @@ namespace registers {
   // Thermostat config (read)
   static constexpr uint16_t FAN_CONFIG = 12005;
   static constexpr uint16_t HEATING_MODE_READ = 12006;
+
+  // Manual operation / test mode
+  static constexpr uint16_t TEST_MODE = 45;
+  static constexpr uint16_t MANUAL_OPERATION = 3002;
+  static constexpr uint16_t MANUAL_OPERATION_OFF = 0x7FFF;
+  static constexpr uint16_t MANUAL_OPERATION_COOLING = 0x100;
+  static constexpr uint16_t MANUAL_OPERATION_AUX_HEAT = 0x200;
+  static constexpr uint16_t MANUAL_BLOWER_WITH_COMPRESSOR = 0xF0;
 
   // System commands
   static constexpr uint16_t CLEAR_FAULT_HISTORY = 47;
@@ -338,6 +358,11 @@ static constexpr uint16_t VS_SAFE_EEV_INDOOR_FAILED = 0x01;
 static constexpr uint16_t VS_SAFE_EEV_OUTDOOR_FAILED = 0x02;
 static constexpr uint16_t VS_SAFE_INVALID_AMBIENT_TEMP = 0x04;
 
+// EEV2 control bitmask (registers 280, 3804) — from registers.rb VS_EEV2
+static constexpr uint16_t EEV2_INVALID_SUCTION_TEMP = 0x0010;
+static constexpr uint16_t EEV2_INVALID_LEAVING_AIR_TEMP = 0x0020;
+static constexpr uint16_t EEV2_INVALID_SUCTION_PRESSURE = 0x0040;
+
 // ============================================================================
 // Bitmask-to-String Helpers
 // ============================================================================
@@ -363,6 +388,9 @@ inline constexpr size_t VS_DERATE_BITS_COUNT = 5;
 
 extern const BitLabel VS_SAFE_MODE_BITS[];
 inline constexpr size_t VS_SAFE_MODE_BITS_COUNT = 3;
+
+extern const BitLabel EEV2_CTL_BITS[];
+inline constexpr size_t EEV2_CTL_BITS_COUNT = 3;
 
 // ============================================================================
 // Data Conversion Functions
@@ -424,6 +452,9 @@ std::string get_vs_safe_mode_string(uint16_t value);
 
 /// Get VS alarm string from two alarm registers.
 std::string get_vs_alarm_string(uint16_t alarm1, uint16_t alarm2);
+
+/// Get EEV2 control status string from bitmask.
+std::string get_eev2_ctl_string(uint16_t value);
 
 /// Get AXB inputs string from bitmask.
 std::string get_axb_inputs_string(uint16_t value);

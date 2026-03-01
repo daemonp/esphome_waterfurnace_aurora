@@ -181,6 +181,20 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   void set_heat_of_extraction_sensor(sensor::Sensor *sensor) { this->heat_of_extraction_sensor_ = sensor; }
   void set_heat_of_rejection_sensor(sensor::Sensor *sensor) { this->heat_of_rejection_sensor_ = sensor; }
   
+  // AXB diagnostic sensors
+  void set_axb_leaving_air_temperature_sensor(sensor::Sensor *sensor) { this->axb_leaving_air_temperature_sensor_ = sensor; }
+  void set_axb_suction_temperature_sensor(sensor::Sensor *sensor) { this->axb_suction_temperature_sensor_ = sensor; }
+  void set_saturated_evaporator_temperature_sensor(sensor::Sensor *sensor) { this->saturated_evaporator_temperature_sensor_ = sensor; }
+  void set_axb_superheat_sensor(sensor::Sensor *sensor) { this->axb_superheat_sensor_ = sensor; }
+  void set_vapor_injector_open_sensor(sensor::Sensor *sensor) { this->vapor_injector_open_sensor_ = sensor; }
+
+  // EEV2 sensors
+  void set_eev_superheat_sensor(sensor::Sensor *sensor) { this->eev_superheat_sensor_ = sensor; }
+  void set_eev_open_sensor(sensor::Sensor *sensor) { this->eev_open_sensor_ = sensor; }
+  void set_eev_suction_temperature_sensor(sensor::Sensor *sensor) { this->eev_suction_temperature_sensor_ = sensor; }
+  void set_eev_saturated_suction_temperature_sensor(sensor::Sensor *sensor) { this->eev_saturated_suction_temperature_sensor_ = sensor; }
+  void set_eev2_ctl_sensor(text_sensor::TextSensor *sensor) { this->eev2_ctl_sensor_ = sensor; }
+
   // Humidifier sensors
   void set_humidification_target_sensor(sensor::Sensor *sensor) { this->humidification_target_sensor_ = sensor; }
   void set_dehumidification_target_sensor(sensor::Sensor *sensor) { this->dehumidification_target_sensor_ = sensor; }
@@ -202,6 +216,14 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   void set_derated_binary_sensor(binary_sensor::BinarySensor *sensor) { this->derated_sensor_ = sensor; }
   void set_safe_mode_binary_sensor(binary_sensor::BinarySensor *sensor) { this->safe_mode_sensor_ = sensor; }
   void set_diverting_valve_binary_sensor(binary_sensor::BinarySensor *sensor) { this->diverting_valve_sensor_ = sensor; }
+
+  // Individual fault history counters (E1-E99)
+  static constexpr size_t FAULT_COUNTER_COUNT = 99;
+  void set_fault_counter_sensor(uint8_t index, sensor::Sensor *sensor) {
+    if (index < FAULT_COUNTER_COUNT) this->fault_counter_sensors_[index] = sensor;
+  }
+  bool has_any_fault_counter_sensor() const { return this->has_any_fault_counter_sensor_; }
+  void set_has_any_fault_counter_sensor() { this->has_any_fault_counter_sensor_ = true; }
 
   // Text sensors
   void set_current_mode_sensor(text_sensor::TextSensor *sensor) { this->current_mode_sensor_ = sensor; }
@@ -259,6 +281,19 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   bool set_humidifier_mode(bool auto_mode);
   bool set_dehumidifier_mode(bool auto_mode);
   
+  // Manual operation / test mode
+  /// Set manual operation mode.
+  /// mode: 0=off, 1=heating, 2=cooling
+  /// compressor_speed: 0-15 (0 = compressor off)
+  /// blower_speed: 0-15, or 255 = match compressor ("with_compressor")
+  /// aux_heat: enable auxiliary electric heat
+  bool set_manual_operation(uint8_t mode, uint8_t compressor_speed,
+                            uint8_t blower_speed, bool aux_heat);
+  /// Turn off manual operation (write 0x7FFF to register 3002).
+  bool set_manual_operation_off();
+  /// Enable/disable test mode (register 45: 1=enable, 0=disable).
+  bool set_test_mode(bool enabled);
+
   // System controls
   bool clear_fault_history();
   
@@ -672,6 +707,19 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   sensor::Sensor *compressor_1_amps_sensor_{nullptr};
   sensor::Sensor *compressor_2_amps_sensor_{nullptr};
 
+  // --- AXB diagnostic sensors ---
+  sensor::Sensor *axb_leaving_air_temperature_sensor_{nullptr};
+  sensor::Sensor *axb_suction_temperature_sensor_{nullptr};
+  sensor::Sensor *saturated_evaporator_temperature_sensor_{nullptr};
+  sensor::Sensor *axb_superheat_sensor_{nullptr};
+  sensor::Sensor *vapor_injector_open_sensor_{nullptr};
+
+  // --- EEV2 sensors ---
+  sensor::Sensor *eev_superheat_sensor_{nullptr};
+  sensor::Sensor *eev_open_sensor_{nullptr};
+  sensor::Sensor *eev_suction_temperature_sensor_{nullptr};
+  sensor::Sensor *eev_saturated_suction_temperature_sensor_{nullptr};
+
   // --- VS Drive sensors ---
   sensor::Sensor *compressor_desired_speed_sensor_{nullptr};
   sensor::Sensor *discharge_temperature_sensor_{nullptr};
@@ -710,6 +758,10 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   // --- Humidity control sensors ---
   sensor::Sensor *humidification_target_sensor_{nullptr};
   sensor::Sensor *dehumidification_target_sensor_{nullptr};
+
+  // --- Fault history counters (E1-E99) ---
+  std::array<sensor::Sensor *, FAULT_COUNTER_COUNT> fault_counter_sensors_{};
+  bool has_any_fault_counter_sensor_{false};
 
   // --- Derived / computed sensors ---
   sensor::Sensor *cop_sensor_{nullptr};
@@ -761,6 +813,7 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   text_sensor::TextSensor *humidifier_mode_sensor_{nullptr};
   text_sensor::TextSensor *dehumidifier_mode_sensor_{nullptr};
   text_sensor::TextSensor *pump_type_sensor_{nullptr};
+  text_sensor::TextSensor *eev2_ctl_sensor_{nullptr};
   
   // --- Lockout diagnostic sensors ---
   sensor::Sensor *lockout_fault_code_sensor_{nullptr};
@@ -792,6 +845,8 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   uint16_t cached_axb_inputs_raw_{0xFFFF};
   std::string cached_humidifier_mode_;
   std::string cached_dehumidifier_mode_;
+  std::string cached_eev2_ctl_;
+  uint16_t cached_eev2_ctl_raw_{0xFFFF};
   std::string cached_lockout_fault_description_;
   std::string cached_outputs_at_lockout_;
   uint16_t cached_outputs_at_lockout_raw_{0xFFFF};

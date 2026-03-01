@@ -2,6 +2,8 @@
 
 #include "esphome/core/component.h"
 #include "esphome/components/climate/climate.h"
+#include "esphome/components/sensor/sensor.h"
+#include "esphome/components/text_sensor/text_sensor.h"
 #include "../waterfurnace_aurora.h"
 
 namespace esphome {
@@ -16,6 +18,11 @@ class AuroraClimate : public climate::Climate, public Component {
 
   void set_parent(WaterFurnaceAurora *parent) { this->parent_ = parent; }
   void set_zone(uint8_t zone) { this->zone_ = zone; }
+
+  // Optional per-zone diagnostic sensors (IZ2 only)
+  void set_zone_priority_sensor(text_sensor::TextSensor *sensor) { this->zone_priority_sensor_ = sensor; }
+  void set_zone_size_sensor(text_sensor::TextSensor *sensor) { this->zone_size_sensor_ = sensor; }
+  void set_zone_normalized_size_sensor(sensor::Sensor *sensor) { this->zone_normalized_size_sensor_ = sensor; }
 
   // Climate traits
   climate::ClimateTraits traits() override;
@@ -34,8 +41,17 @@ class AuroraClimate : public climate::Climate, public Component {
     return this->zone_ > 1 || (this->zone_ == 1 && this->parent_->has_iz2());
   }
 
+  void publish_zone_diagnostics_();
+
   WaterFurnaceAurora *parent_{nullptr};
   uint8_t zone_{1};
+
+  // Per-zone diagnostic sensors (IZ2 only)
+  text_sensor::TextSensor *zone_priority_sensor_{nullptr};
+  text_sensor::TextSensor *zone_size_sensor_{nullptr};
+  sensor::Sensor *zone_normalized_size_sensor_{nullptr};
+  std::string cached_zone_priority_;
+  std::string cached_zone_size_;
 
   // EMA state for current_temperature smoothing.
   // Suppresses ADC jitter (±0.1°F) from IZ2 zone thermostats so the HA

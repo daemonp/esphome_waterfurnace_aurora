@@ -32,6 +32,7 @@ TEXT_SENSORS = {
     "lockout_fault_description": DIAGNOSTIC_TEXT_SCHEMA,
     "outputs_at_lockout": DIAGNOSTIC_TEXT_SCHEMA,
     "inputs_at_lockout": DIAGNOSTIC_TEXT_SCHEMA,
+    "eev2_ctl": DIAGNOSTIC_TEXT_SCHEMA,
 }
 
 CONFIG_SCHEMA = cv.Schema(

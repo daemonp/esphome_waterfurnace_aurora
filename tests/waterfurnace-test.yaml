@@ -62,12 +62,23 @@ water_heater:
     name: "Test Domestic Hot Water"
     aurora_id: aurora
 
-# --- Climate (main thermostat) ---
+# --- Climate (main thermostat + IZ2 zone with diagnostics) ---
 climate:
   - platform: waterfurnace_aurora
     id: aurora_thermostat
     name: "Test Heat Pump"
     aurora_id: aurora
+  - platform: waterfurnace_aurora
+    id: aurora_zone2
+    name: "Test Zone 2"
+    aurora_id: aurora
+    zone: 2
+    zone_priority:
+      name: "Test Zone 2 Priority"
+    zone_size:
+      name: "Test Zone 2 Size"
+    zone_normalized_size:
+      name: "Test Zone 2 Normalized Size"
 
 # --- Switch ---
 switch:
@@ -75,6 +86,8 @@ switch:
     aurora_id: aurora
     dhw_enabled:
       name: "Test DHW Enabled"
+    test_mode:
+      name: "Test Test Mode"
 
 # --- Number controls ---
 number:
@@ -245,6 +258,30 @@ sensor:
       name: "Test Compressor 1 Amps"
     compressor_2_amps:
       name: "Test Compressor 2 Amps"
+    axb_leaving_air_temperature:
+      name: "Test AXB Leaving Air Temp"
+    axb_suction_temperature:
+      name: "Test AXB Suction Temp"
+    saturated_evaporator_temperature:
+      name: "Test Saturated Evaporator Temp"
+    axb_superheat:
+      name: "Test AXB Superheat"
+    vapor_injector_open:
+      name: "Test Vapor Injector Open"
+    eev_superheat:
+      name: "Test EEV Superheat"
+    eev_open:
+      name: "Test EEV Open"
+    eev_suction_temperature:
+      name: "Test EEV Suction Temp"
+    eev_saturated_suction_temperature:
+      name: "Test EEV Sat Suction Temp"
+    fault_e1:
+      name: "Test Fault E1 Count"
+    fault_e2:
+      name: "Test Fault E2 Count"
+    fault_e99:
+      name: "Test Fault E99 Count"
 
 # --- ALL Binary sensors ---
 binary_sensor:
@@ -321,6 +358,8 @@ text_sensor:
       name: "Test Outputs at Lockout"
     inputs_at_lockout:
       name: "Test Inputs at Lockout"
+    eev2_ctl:
+      name: "Test EEV2 Ctl"
 
 # --- Selects ---
 select:
@@ -330,6 +369,10 @@ select:
       name: "Test Humidifier Mode Select"
     dehumidifier_mode:
       name: "Test Dehumidifier Mode Select"
+    manual_operation:
+      name: "Test Manual Operation"
+      compressor_speed: 8
+      blower_speed: 255
 
 # --- Buttons ---
 button:
