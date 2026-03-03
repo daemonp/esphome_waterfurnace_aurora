@@ -207,6 +207,90 @@ TEST_CASE("IZ2 zone validation", "[hub][iz2]") {
 }
 
 // ============================================================================
+// Setup Failure & Re-Detection (Issue 17)
+// ============================================================================
+
+TEST_CASE("Setup failure and re-detection", "[hub][state][redetect]") {
+  WaterFurnaceAurora hub;
+  
+  // Create a minimal sensor to verify normal operation restoration
+  sensor::Sensor entering_water;
+  hub.set_entering_water_temperature_sensor(&entering_water);
+  
+  set_millis(0);
+  hub.setup();
+
+  SECTION("setup timeout after MAX_SETUP_RETRIES sets needs_redetect") {
+    // Loop through 5 timeout cycles
+    for (int i = 0; i < 5; i++) {
+      hub.loop();                  // sends ID request → TX_PENDING
+      hub.mock_get_transmitted();  // drain tx
+      complete_tx(hub, millis());  // WAITING_RESPONSE
+      
+      // Advance past timeout
+      set_millis(millis() + 2100);
+      hub.loop();  // handle_timeout_() -> increments retry count -> ERROR_BACKOFF
+      
+      if (i < 4) {
+        // Advance past backoff to start next retry
+        set_millis(millis() + 5000);
+        hub.loop();  // exits ERROR_BACKOFF -> SETUP_READ_ID
+      }
+    }
+    
+    // On the 5th timeout (now), finish_setup_() is called with defaults
+    REQUIRE(hub.is_setup_complete());
+    REQUIRE(hub.needs_redetect());
+    REQUIRE_FALSE(hub.get_axb_status()); // Default is false
+  }
+
+  SECTION("first successful poll after failed setup triggers re-detection") {
+    // 1. Force state to failed setup
+    // We can't easily drive the loop 5 times in a sub-section without copy-paste,
+    // so we'll simulate the end state by using the public API where possible,
+    // but here we really need to just drive it.
+    for (int i = 0; i < 5; i++) {
+      hub.loop(); hub.mock_get_transmitted(); complete_tx(hub, millis());
+      set_millis(millis() + 2100); hub.loop();
+      if (i < 4) { set_millis(millis() + 5000); hub.loop(); }
+    }
+    REQUIRE(hub.needs_redetect());
+
+    // 2. Trigger a poll cycle
+    set_millis(millis() + 100);
+    hub.update(); // builds minimal fast-tier address list
+    auto tx = hub.mock_get_transmitted();
+    REQUIRE(tx.size() > 0);
+    complete_tx(hub, millis());
+
+    // 3. Feed a valid 0x42 response
+    // Response just needs to correspond to the requested registers.
+    // Since detection failed, it's the minimal set.
+    size_t num_regs = (tx.size() - 4) / 2;
+    std::vector<std::pair<uint16_t, uint16_t>> resp_vals;
+    for (size_t i = 0; i < num_regs; i++) {
+      uint16_t addr = (tx[2 + i * 2] << 8) | tx[3 + i * 2];
+      resp_vals.emplace_back(addr, 0); // Value doesn't matter much for triggering re-detect
+    }
+    hub.mock_receive(make_response_42(resp_vals));
+
+    // 4. Process response -> trigger re-detect
+    set_millis(millis() + 50);
+    hub.loop(); 
+    
+    // Should have transitioned back to setup
+    REQUIRE_FALSE(hub.is_setup_complete());
+    REQUIRE_FALSE(hub.needs_redetect()); // Flag cleared
+    
+    // Next loop should send ID request
+    hub.loop();
+    tx = hub.mock_get_transmitted();
+    REQUIRE(tx.size() > 0);
+    REQUIRE(tx[1] == 0x03); // func 0x03 ID request
+  }
+}
+
+// ============================================================================
 // Setup Callbacks
 // ============================================================================
 

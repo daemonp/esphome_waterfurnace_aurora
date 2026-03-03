@@ -118,7 +118,9 @@ bool WaterFurnaceAurora::read_frame_() {
   
   // Validate CRC
   if (!protocol::validate_frame_crc(this->response_frame_.data(), this->response_frame_len_)) {
-    ESP_LOGW(TAG, "CRC mismatch in response (%d bytes)", this->response_frame_len_);
+    ESP_LOGW(TAG, "CRC mismatch in response (%d bytes, func=0x%02X)",
+             this->response_frame_len_,
+             this->response_frame_len_ >= 2 ? this->response_frame_[1] : 0xFF);
     this->status_set_warning(LOG_STR("CRC mismatch in Modbus response"));
     return false;
   }
@@ -199,8 +201,24 @@ void WaterFurnaceAurora::process_response_() {
 }
 
 void WaterFurnaceAurora::handle_timeout_() {
-  ESP_LOGW(TAG, "Response timeout for request type %d (rx_buf=%d bytes)",
-           static_cast<int>(this->pending_request_), this->rx_buffer_len_);
+  // Log first 16 bytes of buffer as hex for remote diagnosis if present
+  if (this->rx_buffer_len_ > 0) {
+    char hex[49];  // 16 bytes * 3 chars + null
+    size_t n = std::min(this->rx_buffer_len_, static_cast<size_t>(16));
+    for (size_t i = 0; i < n; i++) {
+      snprintf(hex + i * 3, 4, "%02X ", this->rx_buffer_[i]);
+    }
+    hex[n * 3 - 1] = '\0';  // trim trailing space
+    
+    size_t expected = protocol::expected_frame_size(this->rx_buffer_.data(), this->rx_buffer_len_);
+    ESP_LOGW(TAG, "Response timeout for request type %d (rx_buf=%d bytes: %s)",
+             static_cast<int>(this->pending_request_), this->rx_buffer_len_, hex);
+    ESP_LOGW(TAG, "  expected_frame_size=%d", expected);
+  } else {
+    ESP_LOGW(TAG, "Response timeout for request type %d (rx_buf=0 bytes)",
+             static_cast<int>(this->pending_request_));
+  }
+
   this->rx_buffer_len_ = 0;
   
   // During setup, use retry/backoff
@@ -208,7 +226,8 @@ void WaterFurnaceAurora::handle_timeout_() {
       this->pending_request_ == PendingRequest::SETUP_DETECT) {
     this->setup_retry_count_++;
     if (this->setup_retry_count_ >= MAX_SETUP_RETRIES) {
-      ESP_LOGW(TAG, "Setup failed after %d retries — will continue with defaults", MAX_SETUP_RETRIES);
+      ESP_LOGW(TAG, "Setup failed after %d retries — will re-detect when heat pump responds", MAX_SETUP_RETRIES);
+      this->needs_redetect_ = true;
       // Deliberately NOT calling mark_failed() here: the heat pump may come online
       // later, so we degrade gracefully with default config rather than permanently
       // disabling the component.  status_set_error() surfaces the issue in the UI.
@@ -1078,6 +1097,13 @@ void WaterFurnaceAurora::start_poll_cycle_() {
     ESP_LOGD(TAG, "No registers to poll");
     return;
   }
+
+  // Bounds check: if address list overflowed (should be caught by add_poll_addr_ but safe > sorry)
+  if (this->addresses_to_read_len_ > MAX_POLL_ADDRESSES) {
+    ESP_LOGW(TAG, "Poll address list overflow: %d > %d (truncating)",
+             this->addresses_to_read_len_, MAX_POLL_ADDRESSES);
+    this->addresses_to_read_len_ = MAX_POLL_ADDRESSES;
+  }
   
   // The ABC board limits reads to 100 registers per request.
   // When the combined fast + medium tier exceeds this limit, we send only
@@ -1093,8 +1119,10 @@ void WaterFurnaceAurora::start_poll_cycle_() {
     return;
   }
   
-  ESP_LOGV(TAG, "Poll: %d total addresses, sending batch 1 of %d",
-           this->addresses_to_read_len_, first_batch);
+  ESP_LOGD(TAG, "Poll: %d total addresses%s, sending batch 1 of %d",
+           this->addresses_to_read_len_,
+           (this->poll_tier_counter_ % 6 == 0) ? " (medium tier)" : "",
+           first_batch);
   
   this->send_request_(frame, PendingRequest::POLL_REGISTERS,
                       this->addresses_to_read_.data(), first_batch);
@@ -1123,6 +1151,21 @@ void WaterFurnaceAurora::process_poll_response_(const protocol::ParsedResponse &
   // Successful poll — reset retry counter.
   this->poll_retry_count_ = 0;
   
+  // First successful poll after a failed setup — trigger hardware re-detection
+  if (this->needs_redetect_) {
+    this->needs_redetect_ = false;
+    this->setup_complete_ = false;  // Temporarily allow setup states
+    this->setup_retry_count_ = 0;
+    ESP_LOGI(TAG, "Heat pump responded — re-running hardware detection");
+
+    // Merge what we got so far (may help with partial detection)
+    for (const auto &rv : resp.registers) {
+      reg_insert(this->register_cache_, rv.address, rv.value);
+    }
+    this->transition_(State::SETUP_READ_ID);
+    return;
+  }
+
   // Merge response directly into cache — no intermediate allocation.
   // reg_insert() handles insert-or-update in the sorted vector.
   for (const auto &rv : resp.registers) {

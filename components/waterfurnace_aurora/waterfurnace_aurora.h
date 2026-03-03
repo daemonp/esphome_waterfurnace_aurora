@@ -364,6 +364,7 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   uint16_t get_axb_outputs() const { return this->axb_outputs_; }
   bool is_locked_out() const { return this->locked_out_; }
   bool is_setup_complete() const { return this->setup_complete_; }
+  bool needs_redetect() const { return this->needs_redetect_; }
   bool is_active_dehumidify() const { return this->active_dehumidify_; }
   float get_relative_humidity() const { return this->relative_humidity_; }
   bool get_humidifier_auto() const { return this->humidifier_auto_; }
@@ -418,6 +419,8 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   }
 
   // IZ2 Zone getters
+  bool get_axb_status() const { return this->has_axb_; }
+  bool get_vs_drive_status() const { return this->has_vs_drive_; }
   bool has_iz2() const { return this->has_iz2_; }
   uint8_t get_num_iz2_zones() const { return this->num_iz2_zones_; }
   const IZ2ZoneData& get_zone_data(uint8_t zone_number) const;
@@ -628,6 +631,7 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   State state_{State::SETUP_READ_ID};
   PendingRequest pending_request_{PendingRequest::NONE};
   bool setup_complete_{false};
+  bool needs_redetect_{false};
   uint8_t setup_retry_count_{0};
   uint8_t poll_retry_count_{0};     // Retry counter for normal poll-cycle timeouts
   static constexpr uint8_t MAX_SETUP_RETRIES = 5;
