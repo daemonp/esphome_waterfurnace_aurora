@@ -2366,22 +2366,29 @@ void WaterFurnaceAurora::publish_derived_sensors(const RegisterMap &regs) {
     }
   }
   
-  // Approach temperature — only meaningful when the compressor is running.
-  // When idle, the saturated condenser register holds stale values that produce
-  // nonsensical results (e.g., -40°F).
+  // Approach temperature — condenser approach, only meaningful when compressor is running.
+  // In cooling: condenser is water-side HX → approach = sat_cond - EWT
+  // In heating: condenser is indoor air coil → approach = sat_cond - leaving_air (reg 900)
+  //   Leaving air requires AWL AXB; on non-AXB systems, heating approach is NAN.
   if (this->approach_temperature_sensor_ != nullptr) {
     bool compressor_on = (this->system_outputs_ & (OUTPUT_CC | OUTPUT_CC2)) != 0;
     if (compressor_on) {
-      const uint16_t *val_lw = reg_find(regs, registers::LEAVING_WATER);
-      const uint16_t *val_ew = reg_find(regs, registers::ENTERING_WATER);
       const uint16_t *val_sc = reg_find(regs, registers::SATURATED_CONDENSER_TEMP);
       if (val_sc) {
         float sat_cond = to_signed_tenths(*val_sc);
         bool cooling = (this->system_outputs_ & OUTPUT_RV) != 0;
-        if (cooling && val_ew)
-          this->approach_temperature_sensor_->publish_state(sat_cond - to_signed_tenths(*val_ew));
-        else if (!cooling && val_lw)
-          this->approach_temperature_sensor_->publish_state(sat_cond - to_signed_tenths(*val_lw));
+        if (cooling) {
+          const uint16_t *val_ew = reg_find(regs, registers::ENTERING_WATER);
+          if (val_ew)
+            this->approach_temperature_sensor_->publish_state(sat_cond - to_signed_tenths(*val_ew));
+        } else {
+          // Heating: condenser is air-side, use leaving air temp (register 900, requires AXB)
+          const uint16_t *val_la = reg_find(regs, registers::LEAVING_AIR);
+          if (val_la)
+            this->approach_temperature_sensor_->publish_state(sat_cond - to_signed_tenths(*val_la));
+          else if (sensor_value_changed_(this->approach_temperature_sensor_, NAN))
+            this->approach_temperature_sensor_->publish_state(NAN);  // No AXB, no supply air
+        }
       }
     } else if (sensor_value_changed_(this->approach_temperature_sensor_, NAN)) {
       this->approach_temperature_sensor_->publish_state(NAN);

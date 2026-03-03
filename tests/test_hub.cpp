@@ -866,7 +866,7 @@ TEST_CASE("Approach temperature requires compressor running", "[hub][sensors][de
   hub.loop();
   REQUIRE(hub.is_setup_complete());
 
-  auto run_poll = [&](uint16_t outputs, uint16_t sat_cond, uint16_t lwt,
+  auto run_poll = [&](uint16_t outputs, uint16_t sat_cond, uint16_t leaving_air,
                       uint16_t ewt, uint32_t time_ms) {
     set_millis(time_ms);
     hub.update();
@@ -881,7 +881,7 @@ TEST_CASE("Approach temperature requires compressor running", "[hub][sensors][de
       uint16_t val = 0;
       if (addr == registers::SYSTEM_OUTPUTS) val = outputs;
       if (addr == registers::SATURATED_CONDENSER_TEMP) val = sat_cond;
-      if (addr == registers::LEAVING_WATER) val = lwt;
+      if (addr == registers::LEAVING_AIR) val = leaving_air;
       if (addr == registers::ENTERING_WATER) val = ewt;
       resp_vals.emplace_back(addr, val);
     }
@@ -892,36 +892,37 @@ TEST_CASE("Approach temperature requires compressor running", "[hub][sensors][de
 
   SECTION("compressor off → publishes NAN") {
     // No CC/CC2 in outputs = compressor off
-    // sat_cond=500 (50.0), lwt=520 (52.0), ewt=480 (48.0)
-    run_poll(0x0000, 500, 520, 480, 200);
+    // sat_cond=500 (50.0), leaving_air=720 (72.0), ewt=480 (48.0)
+    run_poll(0x0000, 500, 720, 480, 200);
     REQUIRE(approach.has_state_);
     REQUIRE(std::isnan(approach.state));
   }
 
-  SECTION("compressor on heating → publishes SatCond - LWT") {
+  SECTION("compressor on heating → publishes SatCond - LeavingAir") {
     // CC bit (0x01) set, no RV = heating mode
-    // In heating, condenser heats water: sat_cond > LWT.
-    // sat_cond=550 (55.0°F), lwt=520 (52.0°F) → approach = 55.0 - 52.0 = 3.0
-    run_poll(OUTPUT_CC, 550, 520, 480, 200);
+    // In heating, condenser is indoor air coil: sat_cond > leaving_air.
+    // sat_cond=1050 (105.0°F), leaving_air=1020 (102.0°F) → approach = 105.0 - 102.0 = 3.0
+    run_poll(OUTPUT_CC, 1050, 1020, 480, 200);
     REQUIRE(approach.has_state_);
     REQUIRE(approach.state == Catch::Approx(3.0f));
   }
 
   SECTION("compressor on cooling → publishes SatCond - EWT") {
     // CC bit (0x01) + RV bit (0x04) = cooling mode
-    // sat_cond=500 (50.0°F), ewt=480 (48.0°F) → approach = 50.0 - 48.0 = 2.0
-    run_poll(OUTPUT_CC | OUTPUT_RV, 500, 530, 480, 200);
+    // sat_cond=500 (50.0°F), leaving_air=550 (55.0°F), ewt=480 (48.0°F)
+    // approach = 50.0 - 48.0 = 2.0 (leaving_air unused in cooling)
+    run_poll(OUTPUT_CC | OUTPUT_RV, 500, 550, 480, 200);
     REQUIRE(approach.has_state_);
     REQUIRE(approach.state == Catch::Approx(2.0f));
   }
 
   SECTION("transition from running to idle clears to NAN") {
-    // First: compressor running → valid approach
-    run_poll(OUTPUT_CC, 500, 530, 480, 200);
+    // First: compressor running in cooling → valid approach
+    run_poll(OUTPUT_CC | OUTPUT_RV, 500, 550, 480, 200);
     REQUIRE_FALSE(std::isnan(approach.state));
 
     // Then: compressor off → NAN
-    run_poll(0x0000, 500, 530, 480, 300);
+    run_poll(0x0000, 500, 550, 480, 300);
     REQUIRE(std::isnan(approach.state));
   }
 }
