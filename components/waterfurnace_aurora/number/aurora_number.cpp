@@ -124,6 +124,12 @@ void AuroraNumber::update_state_() {
     case AuroraNumberType::LINE_VOLTAGE_SETTING:
       value = this->parent_->get_cached_register(registers::LINE_VOLTAGE_SETTING);
       break;
+    case AuroraNumberType::COOLING_AIRFLOW_ADJUSTMENT:
+      value = this->parent_->get_cached_register_signed(registers::COOLING_AIRFLOW_ADJUSTMENT);
+      break;
+    case AuroraNumberType::LOOP_PRESSURE_TRIP:
+      value = this->parent_->get_cached_register_tenths(registers::LOOP_PRESSURE_TRIP);
+      break;
     default:
       return;
   }
@@ -149,6 +155,8 @@ void AuroraNumber::dump_config() {
     case AuroraNumberType::HUMIDIFICATION_TARGET: type_name = "Humidification Target"; break;
     case AuroraNumberType::DEHUMIDIFICATION_TARGET: type_name = "Dehumidification Target"; break;
     case AuroraNumberType::LINE_VOLTAGE_SETTING: type_name = "Line Voltage Setting"; break;
+    case AuroraNumberType::COOLING_AIRFLOW_ADJUSTMENT: type_name = "Cooling Airflow Adjustment"; break;
+    case AuroraNumberType::LOOP_PRESSURE_TRIP: type_name = "Loop Pressure Trip"; break;
     default: break;
   }
   ESP_LOGCONFIG(TAG, "Aurora Number: %s%s", type_name,
@@ -167,6 +175,24 @@ void AuroraNumber::control(float value) {
   // LINE_VOLTAGE_SETTING needs uint16_t range (90-635), handle before uint8_t clamping
   if (this->type_ == AuroraNumberType::LINE_VOLTAGE_SETTING) {
     if (this->parent_->set_line_voltage_setting(static_cast<uint16_t>(value))) {
+      this->publish_state(value);
+    }
+    return;
+  }
+
+  // COOLING_AIRFLOW_ADJUSTMENT — signed int16_t (NEGATABLE encoding)
+  if (this->type_ == AuroraNumberType::COOLING_AIRFLOW_ADJUSTMENT) {
+    // Clamp to int16_t range before cast (YAML schema limits to [-10,10], this is defense-in-depth)
+    float clamped_s = (value < -32768.0f) ? -32768.0f : (value > 32767.0f) ? 32767.0f : value;
+    if (this->parent_->set_cooling_airflow_adjustment(static_cast<int16_t>(clamped_s))) {
+      this->publish_state(value);
+    }
+    return;
+  }
+
+  // LOOP_PRESSURE_TRIP — float, stored as value * 10
+  if (this->type_ == AuroraNumberType::LOOP_PRESSURE_TRIP) {
+    if (this->parent_->set_loop_pressure_trip(value)) {
       this->publish_state(value);
     }
     return;

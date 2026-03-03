@@ -62,12 +62,23 @@ water_heater:
     name: "Test Domestic Hot Water"
     aurora_id: aurora
 
-# --- Climate (main thermostat) ---
+# --- Climate (main thermostat + IZ2 zone with diagnostics) ---
 climate:
   - platform: waterfurnace_aurora
     id: aurora_thermostat
     name: "Test Heat Pump"
     aurora_id: aurora
+  - platform: waterfurnace_aurora
+    id: aurora_zone2
+    name: "Test Zone 2"
+    aurora_id: aurora
+    zone: 2
+    zone_priority:
+      name: "Test Zone 2 Priority"
+    zone_size:
+      name: "Test Zone 2 Size"
+    zone_normalized_size:
+      name: "Test Zone 2 Normalized Size"
 
 # --- Switch ---
 switch:
@@ -75,6 +86,8 @@ switch:
     aurora_id: aurora
     dhw_enabled:
       name: "Test DHW Enabled"
+    test_mode:
+      name: "Test Test Mode"
 
 # --- Number controls ---
 number:
@@ -102,6 +115,10 @@ number:
       name: "Test Humidification Setpoint"
     dehumidification_target:
       name: "Test Dehumidification Setpoint"
+    cooling_airflow_adjustment:
+      name: "Test Cooling Airflow Adjustment"
+    loop_pressure_trip:
+      name: "Test Loop Pressure Trip"
 
 # --- ALL Sensors (complete coverage) ---
 sensor:
@@ -245,6 +262,40 @@ sensor:
       name: "Test Compressor 1 Amps"
     compressor_2_amps:
       name: "Test Compressor 2 Amps"
+    axb_leaving_air_temperature:
+      name: "Test AXB Leaving Air Temp"
+    axb_suction_temperature:
+      name: "Test AXB Suction Temp"
+    saturated_evaporator_temperature:
+      name: "Test Saturated Evaporator Temp"
+    axb_superheat:
+      name: "Test AXB Superheat"
+    vapor_injector_open:
+      name: "Test Vapor Injector Open"
+    eev_superheat:
+      name: "Test EEV Superheat"
+    eev_open:
+      name: "Test EEV2 Open"
+    eev_suction_temperature:
+      name: "Test EEV Suction Temp"
+    eev_saturated_suction_temperature:
+      name: "Test EEV Sat Suction Temp"
+    # Configuration sensors (gap 11)
+    off_time_length:
+      name: "Test Off Time Length"
+    power_adj_factor_l:
+      name: "Test Power Adj Factor L"
+    power_adj_factor_h:
+      name: "Test Power Adj Factor H"
+    # Condensate monitoring (gap 13)
+    condensate:
+      name: "Test Condensate"
+    fault_e1:
+      name: "Test Fault E1 Count"
+    fault_e2:
+      name: "Test Fault E2 Count"
+    fault_e99:
+      name: "Test Fault E99 Count"
 
 # --- ALL Binary sensors ---
 binary_sensor:
@@ -282,6 +333,13 @@ binary_sensor:
       name: "Test Safe Mode"
     diverting_valve:
       name: "Test Diverting Valve"
+    # Configuration triggers (gap 11)
+    smartgrid_trigger:
+      name: "Test SmartGrid Trigger"
+    ha_alarm_1_trigger:
+      name: "Test HA Alarm 1 Trigger"
+    ha_alarm_2_trigger:
+      name: "Test HA Alarm 2 Trigger"
 
 # --- ALL Text sensors ---
 text_sensor:
@@ -321,6 +379,44 @@ text_sensor:
       name: "Test Outputs at Lockout"
     inputs_at_lockout:
       name: "Test Inputs at Lockout"
+    eev2_ctl:
+      name: "Test EEV2 Ctl"
+    # Configuration text sensors (gap 11)
+    brine_type:
+      name: "Test Brine Type"
+    flow_meter_type:
+      name: "Test Flow Meter Type"
+    smartgrid_action:
+      name: "Test SmartGrid Action"
+    ha_alarm_1_action:
+      name: "Test HA Alarm 1 Action"
+    ha_alarm_2_action:
+      name: "Test HA Alarm 2 Action"
+    energy_phase_type:
+      name: "Test Energy Phase Type"
+    # VS Drive 3200-range duplicates (gap 14)
+    vs_drive_derate_alt:
+      name: "Test VS Drive Derate Alt"
+    vs_drive_safe_mode_alt:
+      name: "Test VS Drive Safe Mode Alt"
+    vs_drive_alarm_alt:
+      name: "Test VS Drive Alarm Alt"
+    # VS Drive EEV2 Ctl (gap 15)
+    vs_drive_eev2_ctl:
+      name: "Test VS Drive EEV2 Ctl"
+    # Dealer information (gap 19)
+    dealer_name:
+      name: "Test Dealer Name"
+    dealer_phone:
+      name: "Test Dealer Phone"
+    dealer_address_1:
+      name: "Test Dealer Address 1"
+    dealer_address_2:
+      name: "Test Dealer Address 2"
+    dealer_email:
+      name: "Test Dealer Email"
+    dealer_website:
+      name: "Test Dealer Website"
 
 # --- Selects ---
 select:
@@ -330,6 +426,10 @@ select:
       name: "Test Humidifier Mode Select"
     dehumidifier_mode:
       name: "Test Dehumidifier Mode Select"
+    manual_operation:
+      name: "Test Manual Operation"
+      compressor_speed: 8
+      blower_speed: 255
 
 # --- Buttons ---
 button:

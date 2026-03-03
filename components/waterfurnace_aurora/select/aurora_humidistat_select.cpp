@@ -56,5 +56,6 @@ void AuroraHumidistatSelect::control(const std::string &value) {
   }
 }
 
+
 }  // namespace waterfurnace_aurora
 }  // namespace esphome

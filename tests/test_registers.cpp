@@ -339,3 +339,101 @@ TEST_CASE("RegisterMap operations", "[registers][map]") {
     REQUIRE(*reg_find(map, 742) == 100);
   }
 }
+
+// ============================================================================
+// DIP Switch Parsing (register 33)
+// ============================================================================
+
+TEST_CASE("parse_dip_switches", "[registers][dip_switch]") {
+  SECTION("manual mode (0x7FFF)") {
+    auto ds = parse_dip_switches(0x7FFF);
+    REQUIRE(ds.manual == true);
+  }
+
+  SECTION("all zeros — default settings") {
+    auto ds = parse_dip_switches(0x0000);
+    REQUIRE(ds.manual == false);
+    REQUIRE(ds.fp1 == 15);        // bit 0 clear → 15
+    REQUIRE(ds.fp2 == 0);         // bit 1 clear → off (0)
+    REQUIRE(ds.reversing_valve == ReversingValveType::B_TYPE);  // bit 2 clear
+    REQUIRE(ds.accessory_relay == AccessoryRelay::COMPRESSOR);  // bits 3-4 = 0
+    REQUIRE(ds.compressor_stages == 2);  // bit 5 clear → dual stage
+    REQUIRE(ds.lockout == LockoutType::PULSE);  // bit 6 clear
+    REQUIRE(ds.dehumidifier_reheat == DehumidifierReheat::REHEAT);  // bit 7 clear
+  }
+
+  SECTION("all bits set (0xFF)") {
+    auto ds = parse_dip_switches(0xFF);
+    REQUIRE(ds.manual == false);
+    REQUIRE(ds.fp1 == 30);        // bit 0 set → 30
+    REQUIRE(ds.fp2 == 30);        // bit 1 set → 30
+    REQUIRE(ds.reversing_valve == ReversingValveType::O_TYPE);  // bit 2 set
+    REQUIRE(ds.accessory_relay == AccessoryRelay::BLOWER);  // bits 3-4 = 0b11 = 3
+    REQUIRE(ds.compressor_stages == 1);  // bit 5 set → single stage
+    REQUIRE(ds.lockout == LockoutType::CONTINUOUS);  // bit 6 set
+    REQUIRE(ds.dehumidifier_reheat == DehumidifierReheat::DEHUMIDIFIER);  // bit 7 set
+  }
+
+  SECTION("humidifier accessory relay (bits 3-4 = 0b10 = 2)") {
+    // bits 3-4 = 0b10 → value 2 → HUMIDIFIER
+    uint16_t value = 0x10;  // bit 4 set → (0x10 >> 3) & 3 = 2
+    auto ds = parse_dip_switches(value);
+    REQUIRE(ds.accessory_relay == AccessoryRelay::HUMIDIFIER);
+  }
+
+  SECTION("slow opening water valve (bits 3-4 = 0b01 = 1)") {
+    uint16_t value = 0x08;  // bit 3 set → (0x08 >> 3) & 3 = 1
+    auto ds = parse_dip_switches(value);
+    REQUIRE(ds.accessory_relay == AccessoryRelay::SLOW_OPENING_WATER_VALVE);
+  }
+
+  SECTION("dual stage compressor from bit 5 clear") {
+    auto ds = parse_dip_switches(0x00);  // bit 5 clear
+    REQUIRE(ds.compressor_stages == 2);
+  }
+
+  SECTION("single stage compressor from bit 5 set") {
+    auto ds = parse_dip_switches(0x20);  // bit 5 set
+    REQUIRE(ds.compressor_stages == 1);
+  }
+
+  SECTION("mixed realistic config — O-type RV, humidifier, single stage, continuous lockout") {
+    // bit 2 (RV O-type) | bit 4 (acc=humidifier) | bit 5 (single) | bit 6 (continuous)
+    uint16_t value = 0x04 | 0x10 | 0x20 | 0x40;
+    auto ds = parse_dip_switches(value);
+    REQUIRE(ds.reversing_valve == ReversingValveType::O_TYPE);
+    REQUIRE(ds.accessory_relay == AccessoryRelay::HUMIDIFIER);
+    REQUIRE(ds.compressor_stages == 1);
+    REQUIRE(ds.lockout == LockoutType::CONTINUOUS);
+    REQUIRE(ds.dehumidifier_reheat == DehumidifierReheat::REHEAT);
+  }
+}
+
+// ============================================================================
+// AXB Accessory Relay 2 Extraction (register 1103 bits 7-8)
+// ============================================================================
+
+TEST_CASE("axb_extract_accessory_relay2", "[registers][axb]") {
+  SECTION("neither bit set → DEHUMIDIFIER (default)") {
+    REQUIRE(axb_extract_accessory_relay2(0x000) == AxbAccessoryRelay2::DEHUMIDIFIER);
+  }
+
+  SECTION("bit 7 only → HIGH_CAPACITY_COMPRESSOR") {
+    REQUIRE(axb_extract_accessory_relay2(0x080) == AxbAccessoryRelay2::HIGH_CAPACITY_COMPRESSOR);
+  }
+
+  SECTION("bit 8 only → LOW_CAPACITY_COMPRESSOR") {
+    REQUIRE(axb_extract_accessory_relay2(0x100) == AxbAccessoryRelay2::LOW_CAPACITY_COMPRESSOR);
+  }
+
+  SECTION("both bits set → BLOWER") {
+    REQUIRE(axb_extract_accessory_relay2(0x180) == AxbAccessoryRelay2::BLOWER);
+  }
+
+  SECTION("other bits do not affect result") {
+    // Bits 0-6 set, but bits 7-8 clear → still DEHUMIDIFIER
+    REQUIRE(axb_extract_accessory_relay2(0x07F) == AxbAccessoryRelay2::DEHUMIDIFIER);
+    // Bits 0-6 and 9+ set, bits 7-8 = 0b10 → HIGH_CAPACITY_COMPRESSOR
+    REQUIRE(axb_extract_accessory_relay2(0x07F | 0x080 | 0x200) == AxbAccessoryRelay2::HIGH_CAPACITY_COMPRESSOR);
+  }
+}

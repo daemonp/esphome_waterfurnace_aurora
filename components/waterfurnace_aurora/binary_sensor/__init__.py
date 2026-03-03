@@ -62,6 +62,10 @@ BINARY_SENSORS = {
     "diverting_valve": binary_sensor.binary_sensor_schema(
         device_class=DEVICE_CLASS_RUNNING,
     ),
+    # Configuration triggers (gap 11)
+    "smartgrid_trigger": binary_sensor.binary_sensor_schema(),
+    "ha_alarm_1_trigger": binary_sensor.binary_sensor_schema(),
+    "ha_alarm_2_trigger": binary_sensor.binary_sensor_schema(),
 }
 
 CONFIG_SCHEMA = cv.Schema(

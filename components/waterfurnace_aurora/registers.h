@@ -62,6 +62,40 @@ enum class PumpType : uint8_t {
   OTHER = 255
 };
 
+// DIP Switch accessory relay settings (from registers.rb ACCESSORY_RELAY_SETTINGS)
+enum class AccessoryRelay : uint8_t {
+  COMPRESSOR = 0,
+  SLOW_OPENING_WATER_VALVE = 1,
+  HUMIDIFIER = 2,
+  BLOWER = 3
+};
+
+// AXB accessory relay 2 mode (from registers.rb axb_inputs bits 7-8)
+enum class AxbAccessoryRelay2 : uint8_t {
+  DEHUMIDIFIER = 0,        // Neither bit 7 nor bit 8 set
+  HIGH_CAPACITY_COMPRESSOR = 1,  // Bit 7 only
+  LOW_CAPACITY_COMPRESSOR = 2,   // Bit 8 only
+  BLOWER = 3               // Both bits 7 and 8 set
+};
+
+// DIP Switch reversing valve type
+enum class ReversingValveType : uint8_t {
+  B_TYPE = 0,  // Energize to heat
+  O_TYPE = 1   // Energize to cool
+};
+
+// DIP Switch lockout behavior
+enum class LockoutType : uint8_t {
+  PULSE = 0,
+  CONTINUOUS = 1
+};
+
+// DIP Switch dehumidifier/reheat setting
+enum class DehumidifierReheat : uint8_t {
+  REHEAT = 0,
+  DEHUMIDIFIER = 1
+};
+
 // IZ2 Zone current mode/call (from registers.rb CALLS hash)
 enum class ZoneCall : uint8_t {
   STANDBY = 0,
@@ -111,6 +145,7 @@ namespace registers {
   static constexpr uint16_t INPUTS_AT_LOCKOUT = 28;      // Bitmask: system status/inputs when lockout occurred
   static constexpr uint16_t SYSTEM_OUTPUTS = 30;
   static constexpr uint16_t SYSTEM_STATUS = 31;
+  static constexpr uint16_t DIP_SWITCH_STATUS = 33;  // ABC DIP switch bitmask
   static constexpr uint16_t ABC_PROGRAM = 88;         // 4 registers (88-91) — program version string
   static constexpr uint16_t MODEL_NUMBER = 92;        // 12 registers (92-103)
   static constexpr uint16_t SERIAL_NUMBER = 105;      // 5 registers (105-109)
@@ -122,6 +157,16 @@ namespace registers {
   static constexpr uint16_t VS_ALARM1 = 217;
   static constexpr uint16_t VS_ALARM2 = 218;
 
+  // EEV2 (independent EEV control block)
+  static constexpr uint16_t EEV2_CTL = 280;             // Bitmask: sensor failure conditions
+  static constexpr uint16_t EEV_SUPERHEAT = 281;
+  static constexpr uint16_t EEV_OPEN = 282;
+  static constexpr uint16_t EEV_SUCTION_TEMP = 283;
+  static constexpr uint16_t EEV_SATURATED_SUCTION_TEMP = 284;
+
+  // Condensate monitoring (gap 13)
+  static constexpr uint16_t CONDENSATE = 21;
+
   // Blower / ECM
   static constexpr uint16_t VS_PUMP_MIN = 321;
   static constexpr uint16_t VS_PUMP_MAX = 322;
@@ -131,6 +176,7 @@ namespace registers {
   static constexpr uint16_t LO_COMPRESSOR_ECM_SPEED = 341;
   static constexpr uint16_t HI_COMPRESSOR_ECM_SPEED = 342;
   static constexpr uint16_t ECM_SPEED = 344;
+  static constexpr uint16_t COOLING_AIRFLOW_ADJUSTMENT = 346;  // Signed, writable (gap 12)
   static constexpr uint16_t AUX_HEAT_ECM_SPEED = 347;
   static constexpr uint16_t ACTIVE_DEHUMIDIFY = 362;
 
@@ -138,10 +184,25 @@ namespace registers {
   static constexpr uint16_t DHW_ENABLED = 400;
   static constexpr uint16_t DHW_SETPOINT = 401;
 
+  // Configuration/settings registers (gap 11)
+  static constexpr uint16_t BRINE_TYPE_REG = 402;
+  static constexpr uint16_t FLOW_METER_TYPE_REG = 403;
+
   // Hardware detection
   static constexpr uint16_t BLOWER_TYPE = 404;
+  static constexpr uint16_t SMARTGRID_TRIGGER = 405;
+  static constexpr uint16_t SMARTGRID_ACTION_REG = 406;
+  static constexpr uint16_t OFF_TIME_LENGTH = 407;
+  static constexpr uint16_t HA_ALARM1_TRIGGER = 408;
+  static constexpr uint16_t HA_ALARM1_ACTION = 409;
+  static constexpr uint16_t HA_ALARM2_TRIGGER = 410;
+  static constexpr uint16_t HA_ALARM2_ACTION = 411;
   static constexpr uint16_t ENERGY_MONITOR = 412;
   static constexpr uint16_t PUMP_TYPE = 413;
+  static constexpr uint16_t ENERGY_PHASE_TYPE_REG = 416;
+  static constexpr uint16_t POWER_ADJ_FACTOR_L = 417;
+  static constexpr uint16_t POWER_ADJ_FACTOR_H = 418;
+  static constexpr uint16_t LOOP_PRESSURE_TRIP = 419;  // Writable, TO_TENTHS
 
   // IZ2 system registers
   static constexpr uint16_t IZ2_NUM_ZONES = 483;
@@ -178,7 +239,12 @@ namespace registers {
   static constexpr uint16_t DISCHARGE_PRESSURE = 1115;
   static constexpr uint16_t SUCTION_PRESSURE = 1116;
   static constexpr uint16_t WATERFLOW = 1117;
+  static constexpr uint16_t AXB_LEAVING_AIR_TEMP = 1112;
+  static constexpr uint16_t AXB_SUCTION_TEMP = 1113;
   static constexpr uint16_t LOOP_PRESSURE = 1119;
+  static constexpr uint16_t SATURATED_EVAPORATOR_TEMP = 1124;
+  static constexpr uint16_t AXB_SUPERHEAT = 1125;
+  static constexpr uint16_t VAPOR_INJECTOR_OPEN = 1126;
   static constexpr uint16_t SATURATED_CONDENSER_TEMP = 1134;
   static constexpr uint16_t SUBCOOL_HEATING = 1135;
   static constexpr uint16_t SUBCOOL_COOLING = 1136;
@@ -214,6 +280,15 @@ namespace registers {
   static constexpr uint16_t VS_INVERTER_TEMP = 3522;
   static constexpr uint16_t VS_UDC_VOLTAGE = 3523;
   static constexpr uint16_t VS_FAN_SPEED = 3524;
+  // VS Drive 3200-range duplicates (gap 14) — same bitmasks as 200-range
+  static constexpr uint16_t VS_DRIVE_DERATE_ALT = 3223;
+  static constexpr uint16_t VS_DRIVE_SAFE_MODE_ALT = 3225;
+  static constexpr uint16_t VS_DRIVE_ALARM1_ALT = 3226;
+  static constexpr uint16_t VS_DRIVE_ALARM2_ALT = 3227;
+
+  // VS Drive EEV2 Ctl duplicate (gap 15) — same bitmask as EEV2_CTL (280)
+  static constexpr uint16_t VS_DRIVE_EEV2_CTL = 3804;
+
   static constexpr uint16_t VS_EEV_OPEN = 3808;
   static constexpr uint16_t VS_SUCTION_TEMP = 3903;
   static constexpr uint16_t VS_SAT_EVAP_DISCHARGE_TEMP = 3905;
@@ -222,6 +297,14 @@ namespace registers {
   // Thermostat config (read)
   static constexpr uint16_t FAN_CONFIG = 12005;
   static constexpr uint16_t HEATING_MODE_READ = 12006;
+
+  // Manual operation / test mode
+  static constexpr uint16_t TEST_MODE = 45;
+  static constexpr uint16_t MANUAL_OPERATION = 3002;
+  static constexpr uint16_t MANUAL_OPERATION_OFF = 0x7FFF;
+  static constexpr uint16_t MANUAL_OPERATION_COOLING = 0x100;
+  static constexpr uint16_t MANUAL_OPERATION_AUX_HEAT = 0x200;
+  static constexpr uint16_t MANUAL_BLOWER_WITH_COMPRESSOR = 0xF0;
 
   // System commands
   static constexpr uint16_t CLEAR_FAULT_HISTORY = 47;
@@ -256,6 +339,16 @@ namespace registers {
   static constexpr uint16_t IZ2_CONFIG1_BASE = 31008;
   static constexpr uint16_t IZ2_CONFIG2_BASE = 31009;
   static constexpr uint16_t IZ2_CONFIG3_BASE = 31200;
+
+  // Dealer information (gap 19) — multi-register ASCII strings
+  static constexpr uint16_t DEALER_NAME = 31400;         // 13 registers (26 chars)
+  static constexpr uint16_t DEALER_PHONE = 31413;        // 8 registers (16 chars)
+  static constexpr uint16_t DEALER_ADDRESS1 = 31421;     // 13 registers (26 chars)
+  static constexpr uint16_t DEALER_ADDRESS2 = 31434;     // 13 registers (26 chars)
+  static constexpr uint16_t DEALER_EMAIL = 31447;        // 13 registers (26 chars)
+  static constexpr uint16_t DEALER_WEBSITE = 31460;      // 13 registers (26 chars)
+  static constexpr uint16_t DEALER_INFO_START = 31400;
+  static constexpr uint16_t DEALER_INFO_COUNT = 73;      // 31400-31472
 }  // namespace registers
 
 // ============================================================================
@@ -303,6 +396,11 @@ static constexpr uint16_t VS_SAFE_EEV_INDOOR_FAILED = 0x01;
 static constexpr uint16_t VS_SAFE_EEV_OUTDOOR_FAILED = 0x02;
 static constexpr uint16_t VS_SAFE_INVALID_AMBIENT_TEMP = 0x04;
 
+// EEV2 control bitmask (registers 280, 3804) — from registers.rb VS_EEV2
+static constexpr uint16_t EEV2_INVALID_SUCTION_TEMP = 0x0010;
+static constexpr uint16_t EEV2_INVALID_LEAVING_AIR_TEMP = 0x0020;
+static constexpr uint16_t EEV2_INVALID_SUCTION_PRESSURE = 0x0040;
+
 // ============================================================================
 // Bitmask-to-String Helpers
 // ============================================================================
@@ -329,6 +427,9 @@ inline constexpr size_t VS_DERATE_BITS_COUNT = 5;
 extern const BitLabel VS_SAFE_MODE_BITS[];
 inline constexpr size_t VS_SAFE_MODE_BITS_COUNT = 3;
 
+extern const BitLabel EEV2_CTL_BITS[];
+inline constexpr size_t EEV2_CTL_BITS_COUNT = 3;
+
 // ============================================================================
 // Data Conversion Functions
 // ============================================================================
@@ -345,6 +446,11 @@ inline float to_signed_tenths(uint16_t value) {
 inline float to_tenths(uint16_t value) {
   if (value == 0x270F) return NAN;
   return value / 10.0f;
+}
+
+/// Convert raw unsigned hundredths (uint16 / 100.0). For power adjustment factors.
+inline float to_hundredths(uint16_t value) {
+  return value / 100.0f;
 }
 
 /// Assemble two consecutive 16-bit registers into uint32 (high word first).
@@ -390,6 +496,24 @@ std::string get_vs_safe_mode_string(uint16_t value);
 /// Get VS alarm string from two alarm registers.
 std::string get_vs_alarm_string(uint16_t alarm1, uint16_t alarm2);
 
+/// Get EEV2 control status string from bitmask.
+std::string get_eev2_ctl_string(uint16_t value);
+
+/// Get brine type string (register 402). Ruby: BRINE_TYPE enum.
+const char *get_brine_type_string(uint16_t value);
+
+/// Get flow meter type string (register 403). Ruby: FLOW_METER_TYPE enum.
+const char *get_flow_meter_type_string(uint16_t value);
+
+/// Get SmartGrid action string (register 406). Ruby: SMARTGRID_ACTION enum.
+const char *get_smartgrid_action_string(uint16_t value);
+
+/// Get HA alarm action string (registers 409, 411). Ruby: HA_ALARM enum.
+const char *get_ha_alarm_action_string(uint16_t value);
+
+/// Get energy phase type string (register 416). Ruby: PHASE_TYPE enum.
+const char *get_energy_phase_type_string(uint16_t value);
+
 /// Get AXB inputs string from bitmask.
 std::string get_axb_inputs_string(uint16_t value);
 
@@ -398,6 +522,52 @@ std::string get_outputs_string(uint16_t value);
 
 /// Get system inputs/status string from bitmask (for lockout diagnostics).
 std::string get_inputs_string(uint16_t value);
+
+// ============================================================================
+// DIP Switch Parsing (register 33 — from registers.rb dipswitch_settings)
+// ============================================================================
+
+/// Parsed DIP switch settings from register 33.
+/// Special case: when raw value is 0x7FFF, the system is in manual DIP switch mode.
+struct DipSwitchSettings {
+  bool manual{false};                                    ///< 0x7FFF = manual mode
+  uint8_t fp1{15};                                       ///< Freeze protection 1 delta: 15 or 30
+  uint8_t fp2{0};                                        ///< Freeze protection 2 delta: 30, or 0 = off
+  ReversingValveType reversing_valve{ReversingValveType::B_TYPE};
+  AccessoryRelay accessory_relay{AccessoryRelay::COMPRESSOR};
+  uint8_t compressor_stages{2};                          ///< 1 = single stage, 2 = dual stage
+  LockoutType lockout{LockoutType::PULSE};
+  DehumidifierReheat dehumidifier_reheat{DehumidifierReheat::REHEAT};
+};
+
+/// Parse register 33 (or 4) DIP switch bitmask into structured settings.
+/// Matches Ruby gem registers.rb:211-223 dipswitch_settings().
+inline DipSwitchSettings parse_dip_switches(uint16_t value) {
+  DipSwitchSettings ds;
+  if (value == 0x7FFF) {
+    ds.manual = true;
+    return ds;
+  }
+  ds.fp1 = (value & 0x01) ? 30 : 15;
+  ds.fp2 = (value & 0x02) ? 30 : 0;  // 0 = off
+  ds.reversing_valve = (value & 0x04) ? ReversingValveType::O_TYPE : ReversingValveType::B_TYPE;
+  ds.accessory_relay = static_cast<AccessoryRelay>((value >> 3) & 0x03);
+  ds.compressor_stages = (value & 0x20) ? 1 : 2;
+  ds.lockout = (value & 0x40) ? LockoutType::CONTINUOUS : LockoutType::PULSE;
+  ds.dehumidifier_reheat = (value & 0x80) ? DehumidifierReheat::DEHUMIDIFIER : DehumidifierReheat::REHEAT;
+  return ds;
+}
+
+/// Extract AXB accessory relay 2 mode from AXB inputs register 1103.
+/// Matches Ruby gem registers.rb:322-330 axb_inputs().
+inline AxbAccessoryRelay2 axb_extract_accessory_relay2(uint16_t axb_inputs) {
+  bool bit7 = (axb_inputs & 0x080) != 0;
+  bool bit8 = (axb_inputs & 0x100) != 0;
+  if (bit7 && bit8) return AxbAccessoryRelay2::BLOWER;
+  if (bit8) return AxbAccessoryRelay2::LOW_CAPACITY_COMPRESSOR;
+  if (bit7) return AxbAccessoryRelay2::HIGH_CAPACITY_COMPRESSOR;
+  return AxbAccessoryRelay2::DEHUMIDIFIER;
+}
 
 // ============================================================================
 // IZ2 Zone Extraction Helpers

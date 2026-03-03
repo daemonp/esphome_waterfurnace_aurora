@@ -46,6 +46,12 @@ const BitLabel VS_SAFE_MODE_BITS[] = {
   {VS_SAFE_INVALID_AMBIENT_TEMP, "Invalid Ambient Temp"},
 };
 
+const BitLabel EEV2_CTL_BITS[] = {
+  {EEV2_INVALID_SUCTION_TEMP, "Invalid Suction Temp"},
+  {EEV2_INVALID_LEAVING_AIR_TEMP, "Invalid Leaving Air Temp"},
+  {EEV2_INVALID_SUCTION_PRESSURE, "Invalid Suction Pressure"},
+};
+
 // ============================================================================
 // Bitmask-to-String
 // ============================================================================
@@ -237,6 +243,58 @@ std::string get_vs_alarm_string(uint16_t alarm1, uint16_t alarm2) {
   }
 
   return result.empty() ? "Unknown" : result;
+}
+
+std::string get_eev2_ctl_string(uint16_t value) {
+  return bitmask_to_string(value, EEV2_CTL_BITS, EEV2_CTL_BITS_COUNT);
+}
+
+// ============================================================================
+// Configuration Register String Lookups (gap 11)
+// ============================================================================
+
+const char *get_brine_type_string(uint16_t value) {
+  return (value == 485) ? "Antifreeze" : "Water";
+}
+
+const char *get_flow_meter_type_string(uint16_t value) {
+  switch (value) {
+    case 0: return "None";
+    case 1: return "3/4\"";
+    case 2: return "1\"";
+    default: return "Other";
+  }
+}
+
+const char *get_smartgrid_action_string(uint16_t value) {
+  switch (value) {
+    case 0: return "None";
+    case 1: return "Unoccupied Set Points";
+    case 2: return "Load Shed";
+    case 3: return "Capacity Limiting";
+    case 4: return "Off Time";
+    default: return "Unknown";
+  }
+}
+
+const char *get_ha_alarm_action_string(uint16_t value) {
+  switch (value) {
+    case 0: return "None";
+    case 1: return "General";
+    case 2: return "Security";
+    case 3: return "Sump";
+    case 4: return "Carbon Monoxide";
+    case 5: return "Dirty Filter";
+    default: return "Unknown";
+  }
+}
+
+const char *get_energy_phase_type_string(uint16_t value) {
+  switch (value) {
+    case 0: return "Single";
+    case 1: return "Three";
+    default: return "Other";
+  }
 }
 
 std::string get_axb_inputs_string(uint16_t value) {

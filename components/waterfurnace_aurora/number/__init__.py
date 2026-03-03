@@ -6,6 +6,7 @@ from esphome.const import (
     CONF_MIN_VALUE,
     CONF_MAX_VALUE,
     CONF_STEP,
+    DEVICE_CLASS_PRESSURE,
     DEVICE_CLASS_TEMPERATURE,
     DEVICE_CLASS_HUMIDITY,
     DEVICE_CLASS_VOLTAGE,
@@ -15,6 +16,9 @@ from esphome.const import (
 )
 
 from .. import waterfurnace_aurora_ns, WaterFurnaceAurora, CONF_AURORA_ID, CONF_ZONE, validate_zone, UNIT_FAHRENHEIT
+
+# Unit definitions
+UNIT_PSI = "psi"
 
 DEPENDENCIES = ["waterfurnace_aurora"]
 CODEOWNERS = ["@daemonp"]
@@ -33,6 +37,8 @@ CONF_FAN_INTERMITTENT_OFF = "fan_intermittent_off"
 CONF_HUMIDIFICATION_TARGET = "humidification_target"
 CONF_DEHUMIDIFICATION_TARGET = "dehumidification_target"
 CONF_LINE_VOLTAGE_SETTING = "line_voltage_setting"
+CONF_COOLING_AIRFLOW_ADJUSTMENT = "cooling_airflow_adjustment"
+CONF_LOOP_PRESSURE_TRIP = "loop_pressure_trip"
 
 # C++ classes
 AuroraDHWNumber = waterfurnace_aurora_ns.class_(
@@ -57,6 +63,8 @@ AURORA_NUMBER_TYPES = {
     CONF_HUMIDIFICATION_TARGET: AuroraNumberType.HUMIDIFICATION_TARGET,
     CONF_DEHUMIDIFICATION_TARGET: AuroraNumberType.DEHUMIDIFICATION_TARGET,
     CONF_LINE_VOLTAGE_SETTING: AuroraNumberType.LINE_VOLTAGE_SETTING,
+    CONF_COOLING_AIRFLOW_ADJUSTMENT: AuroraNumberType.COOLING_AIRFLOW_ADJUSTMENT,
+    CONF_LOOP_PRESSURE_TRIP: AuroraNumberType.LOOP_PRESSURE_TRIP,
 }
 
 # Schema for ECM blower speeds (1-12)
@@ -181,6 +189,32 @@ CONFIG_SCHEMA = cv.Schema(
                 cv.Optional(CONF_MIN_VALUE, default=90): cv.float_,
                 cv.Optional(CONF_MAX_VALUE, default=635): cv.float_,
                 cv.Optional(CONF_STEP, default=1): cv.float_,
+            }
+        ).extend(cv.COMPONENT_SCHEMA),
+        # Cooling airflow adjustment (gap 12 — NEGATABLE signed int16)
+        cv.Optional(CONF_COOLING_AIRFLOW_ADJUSTMENT): number.number_schema(
+            AuroraNumber,
+            entity_category=ENTITY_CATEGORY_CONFIG,
+            icon="mdi:fan-chevron-down",
+        ).extend(
+            {
+                cv.Optional(CONF_MIN_VALUE, default=-10): cv.float_,
+                cv.Optional(CONF_MAX_VALUE, default=10): cv.float_,
+                cv.Optional(CONF_STEP, default=1): cv.float_,
+            }
+        ).extend(cv.COMPONENT_SCHEMA),
+        # Loop pressure trip point (gap 11 — TO_TENTHS, writable)
+        cv.Optional(CONF_LOOP_PRESSURE_TRIP): number.number_schema(
+            AuroraNumber,
+            unit_of_measurement=UNIT_PSI,
+            device_class=DEVICE_CLASS_PRESSURE,
+            entity_category=ENTITY_CATEGORY_CONFIG,
+            icon="mdi:gauge",
+        ).extend(
+            {
+                cv.Optional(CONF_MIN_VALUE, default=0): cv.float_,
+                cv.Optional(CONF_MAX_VALUE, default=100): cv.float_,
+                cv.Optional(CONF_STEP, default=0.1): cv.float_,
             }
         ).extend(cv.COMPONENT_SCHEMA),
     }

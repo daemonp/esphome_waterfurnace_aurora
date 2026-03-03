@@ -207,6 +207,90 @@ TEST_CASE("IZ2 zone validation", "[hub][iz2]") {
 }
 
 // ============================================================================
+// Setup Failure & Re-Detection (Issue 17)
+// ============================================================================
+
+TEST_CASE("Setup failure and re-detection", "[hub][state][redetect]") {
+  WaterFurnaceAurora hub;
+  
+  // Create a minimal sensor to verify normal operation restoration
+  sensor::Sensor entering_water;
+  hub.set_entering_water_temperature_sensor(&entering_water);
+  
+  set_millis(0);
+  hub.setup();
+
+  SECTION("setup timeout after MAX_SETUP_RETRIES sets needs_redetect") {
+    // Loop through 5 timeout cycles
+    for (int i = 0; i < 5; i++) {
+      hub.loop();                  // sends ID request → TX_PENDING
+      hub.mock_get_transmitted();  // drain tx
+      complete_tx(hub, millis());  // WAITING_RESPONSE
+      
+      // Advance past timeout
+      set_millis(millis() + 2100);
+      hub.loop();  // handle_timeout_() -> increments retry count -> ERROR_BACKOFF
+      
+      if (i < 4) {
+        // Advance past backoff to start next retry
+        set_millis(millis() + 5000);
+        hub.loop();  // exits ERROR_BACKOFF -> SETUP_READ_ID
+      }
+    }
+    
+    // On the 5th timeout (now), finish_setup_() is called with defaults
+    REQUIRE(hub.is_setup_complete());
+    REQUIRE(hub.needs_redetect());
+    REQUIRE_FALSE(hub.get_axb_status()); // Default is false
+  }
+
+  SECTION("first successful poll after failed setup triggers re-detection") {
+    // 1. Force state to failed setup
+    // We can't easily drive the loop 5 times in a sub-section without copy-paste,
+    // so we'll simulate the end state by using the public API where possible,
+    // but here we really need to just drive it.
+    for (int i = 0; i < 5; i++) {
+      hub.loop(); hub.mock_get_transmitted(); complete_tx(hub, millis());
+      set_millis(millis() + 2100); hub.loop();
+      if (i < 4) { set_millis(millis() + 5000); hub.loop(); }
+    }
+    REQUIRE(hub.needs_redetect());
+
+    // 2. Trigger a poll cycle
+    set_millis(millis() + 100);
+    hub.update(); // builds minimal fast-tier address list
+    auto tx = hub.mock_get_transmitted();
+    REQUIRE(tx.size() > 0);
+    complete_tx(hub, millis());
+
+    // 3. Feed a valid 0x42 response
+    // Response just needs to correspond to the requested registers.
+    // Since detection failed, it's the minimal set.
+    size_t num_regs = (tx.size() - 4) / 2;
+    std::vector<std::pair<uint16_t, uint16_t>> resp_vals;
+    for (size_t i = 0; i < num_regs; i++) {
+      uint16_t addr = (tx[2 + i * 2] << 8) | tx[3 + i * 2];
+      resp_vals.emplace_back(addr, 0); // Value doesn't matter much for triggering re-detect
+    }
+    hub.mock_receive(make_response_42(resp_vals));
+
+    // 4. Process response -> trigger re-detect
+    set_millis(millis() + 50);
+    hub.loop(); 
+    
+    // Should have transitioned back to setup
+    REQUIRE_FALSE(hub.is_setup_complete());
+    REQUIRE_FALSE(hub.needs_redetect()); // Flag cleared
+    
+    // Next loop should send ID request
+    hub.loop();
+    tx = hub.mock_get_transmitted();
+    REQUIRE(tx.size() > 0);
+    REQUIRE(tx[1] == 0x03); // func 0x03 ID request
+  }
+}
+
+// ============================================================================
 // Setup Callbacks
 // ============================================================================
 
@@ -631,6 +715,299 @@ TEST_CASE("Leaving air temperature on non-AWL systems", "[hub][sensors]") {
     REQUIRE(hub.is_setup_complete());
     // AWL AXB detected — leaving air should NOT have been published as NAN
     REQUIRE_FALSE(leaving_air.has_state_);
+  }
+}
+
+// ============================================================================
+// Pressure Switch Polarity (field validation fix)
+// ============================================================================
+
+TEST_CASE("Pressure switch polarity", "[hub][sensors][binary]") {
+  WaterFurnaceAurora hub;
+  binary_sensor::BinarySensor lps;
+  binary_sensor::BinarySensor hps;
+  hub.set_low_pressure_switch_binary_sensor(&lps);
+  hub.set_high_pressure_switch_binary_sensor(&hps);
+
+  set_millis(0);
+  drive_setup(hub);
+  REQUIRE(hub.is_setup_complete());
+
+  // Helper: run a poll cycle with a specific SYSTEM_STATUS value
+  auto run_poll_with_status = [&](uint16_t status_val, uint32_t time_ms) {
+    set_millis(time_ms);
+    hub.update();
+    auto tx = hub.mock_get_transmitted();
+    REQUIRE(tx.size() > 0);
+    complete_tx(hub, time_ms);
+
+    size_t num_regs = (tx.size() - 4) / 2;
+    std::vector<std::pair<uint16_t, uint16_t>> resp_vals;
+    for (size_t i = 0; i < num_regs; i++) {
+      uint16_t addr = (tx[2 + i * 2] << 8) | tx[3 + i * 2];
+      uint16_t val = 0;
+      if (addr == registers::SYSTEM_STATUS) val = status_val;
+      resp_vals.emplace_back(addr, val);
+    }
+    hub.mock_receive(make_response_42(resp_vals));
+    set_millis(time_ms + 50);
+    hub.loop();
+  };
+
+  SECTION("bits set (closed) → no problem (false)") {
+    // Both LPS (0x80) and HPS (0x100) bits set = switches closed = normal
+    run_poll_with_status(STATUS_LPS | STATUS_HPS, 200);
+    REQUIRE(lps.has_state_);
+    REQUIRE(lps.state == false);  // not a problem
+    REQUIRE(hps.has_state_);
+    REQUIRE(hps.state == false);  // not a problem
+  }
+
+  SECTION("bits clear (open) → problem (true)") {
+    // Both bits clear = switches open = fault condition
+    run_poll_with_status(0x0000, 200);
+    REQUIRE(lps.has_state_);
+    REQUIRE(lps.state == true);  // problem
+    REQUIRE(hps.has_state_);
+    REQUIRE(hps.state == true);  // problem
+  }
+
+  SECTION("only LPS open → LPS problem, HPS ok") {
+    // HPS bit set (0x100), LPS bit clear
+    run_poll_with_status(STATUS_HPS, 200);
+    REQUIRE(lps.state == true);   // LPS open = problem
+    REQUIRE(hps.state == false);  // HPS closed = ok
+  }
+
+  SECTION("only HPS open → HPS problem, LPS ok") {
+    // LPS bit set (0x80), HPS bit clear
+    run_poll_with_status(STATUS_LPS, 200);
+    REQUIRE(lps.state == false);  // LPS closed = ok
+    REQUIRE(hps.state == true);   // HPS open = problem
+  }
+}
+
+// ============================================================================
+// Entering Air Temperature Zero-Suppression
+// ============================================================================
+
+TEST_CASE("Entering air temperature suppresses zero values", "[hub][sensors]") {
+  WaterFurnaceAurora hub;
+  sensor::Sensor entering_air;
+  hub.set_entering_air_temperature_sensor(&entering_air);
+
+  set_millis(0);
+  drive_setup(hub);  // non-AWL system → reads register 567
+  REQUIRE(hub.is_setup_complete());
+
+  auto run_poll_with_entering_air = [&](uint16_t raw_val, uint32_t time_ms) {
+    set_millis(time_ms);
+    hub.update();
+    auto tx = hub.mock_get_transmitted();
+    REQUIRE(tx.size() > 0);
+    complete_tx(hub, time_ms);
+
+    size_t num_regs = (tx.size() - 4) / 2;
+    std::vector<std::pair<uint16_t, uint16_t>> resp_vals;
+    for (size_t i = 0; i < num_regs; i++) {
+      uint16_t addr = (tx[2 + i * 2] << 8) | tx[3 + i * 2];
+      uint16_t val = 0;
+      if (addr == registers::ENTERING_AIR) val = raw_val;
+      resp_vals.emplace_back(addr, val);
+    }
+    hub.mock_receive(make_response_42(resp_vals));
+    set_millis(time_ms + 50);
+    hub.loop();
+  };
+
+  SECTION("zero value is not published") {
+    run_poll_with_entering_air(0, 200);
+    // Zero should be suppressed — sensor should not have state
+    REQUIRE_FALSE(entering_air.has_state_);
+  }
+
+  SECTION("non-zero value is published as signed tenths") {
+    // 698 = 69.8°F
+    run_poll_with_entering_air(698, 200);
+    REQUIRE(entering_air.has_state_);
+    REQUIRE(entering_air.state == Catch::Approx(69.8f));
+  }
+
+  SECTION("non-zero then zero does not overwrite") {
+    // First: valid reading
+    run_poll_with_entering_air(698, 200);
+    REQUIRE(entering_air.state == Catch::Approx(69.8f));
+    int count_after_first = entering_air.publish_count_;
+
+    // Second: zero — should not publish, value stays at 69.8
+    run_poll_with_entering_air(0, 300);
+    REQUIRE(entering_air.publish_count_ == count_after_first);
+    REQUIRE(entering_air.state == Catch::Approx(69.8f));
+  }
+}
+
+// ============================================================================
+// Outdoor Temperature Zero-Suppression
+// ============================================================================
+
+TEST_CASE("Outdoor temperature suppresses zero values", "[hub][sensors]") {
+  WaterFurnaceAurora hub;
+  sensor::Sensor outdoor_temp;
+  hub.set_outdoor_temperature_sensor(&outdoor_temp);
+
+  // Need AWL communicating to poll outdoor temp (register 742)
+  // drive_setup creates thermostat v3.00 which satisfies awl_thermostat()
+  set_millis(0);
+  drive_setup(hub);
+  REQUIRE(hub.is_setup_complete());
+
+  auto run_poll_with_outdoor = [&](uint16_t raw_val, uint32_t time_ms) {
+    set_millis(time_ms);
+    hub.update();
+    auto tx = hub.mock_get_transmitted();
+    REQUIRE(tx.size() > 0);
+    complete_tx(hub, time_ms);
+
+    size_t num_regs = (tx.size() - 4) / 2;
+    std::vector<std::pair<uint16_t, uint16_t>> resp_vals;
+    for (size_t i = 0; i < num_regs; i++) {
+      uint16_t addr = (tx[2 + i * 2] << 8) | tx[3 + i * 2];
+      uint16_t val = 0;
+      if (addr == registers::OUTDOOR_TEMP) val = raw_val;
+      resp_vals.emplace_back(addr, val);
+    }
+    hub.mock_receive(make_response_42(resp_vals));
+    set_millis(time_ms + 50);
+    hub.loop();
+  };
+
+  SECTION("zero value is not published") {
+    run_poll_with_outdoor(0, 200);
+    REQUIRE_FALSE(outdoor_temp.has_state_);
+  }
+
+  SECTION("non-zero value is published") {
+    // 350 = 35.0°F
+    run_poll_with_outdoor(350, 200);
+    REQUIRE(outdoor_temp.has_state_);
+    REQUIRE(outdoor_temp.state == Catch::Approx(35.0f));
+  }
+}
+
+// ============================================================================
+// Approach Temperature Compressor Guard
+// ============================================================================
+
+TEST_CASE("Approach temperature requires compressor running", "[hub][sensors][derived]") {
+  WaterFurnaceAurora hub;
+  sensor::Sensor approach;
+  hub.set_approach_temperature_sensor(&approach);
+
+  // Need AXB for water temps, and refrigeration monitoring for sat condenser
+  hub.set_has_axb_override(true);
+
+  // Custom drive_setup with AXB + refrigeration monitoring
+  set_millis(0);
+  hub.setup();
+
+  // Step 1: ID request
+  hub.loop();
+  hub.mock_get_transmitted();
+  complete_tx(hub, 0);
+  std::vector<uint16_t> id_values(18, 0x2020);
+  hub.mock_receive(make_response_03(id_values));
+  set_millis(50);
+  hub.loop();
+
+  // Step 2: Detect request — AXB present, energy monitor level 1 (refrigeration)
+  hub.loop();
+  auto tx = hub.mock_get_transmitted();
+  size_t num_detect_regs = (tx.size() - 4) / 2;
+  std::vector<std::pair<uint16_t, uint16_t>> detect_vals;
+  for (size_t i = 0; i < num_detect_regs; i++) {
+    uint16_t addr = (tx[2 + i * 2] << 8) | tx[3 + i * 2];
+    uint16_t val = 3;
+    if (addr == registers::THERMOSTAT_VERSION) val = 300;
+    if (addr == registers::AXB_VERSION) val = 200;  // AWL AXB v2.00
+    if (addr == registers::BLOWER_TYPE) val = 0;
+    if (addr == registers::ENERGY_MONITOR) val = 1;  // refrigeration monitoring
+    if (addr == registers::PUMP_TYPE) val = 0;
+    if (addr >= 88 && addr <= 91) val = 0x2020;
+    detect_vals.emplace_back(addr, val);
+  }
+  complete_tx(hub, 50);
+  hub.mock_receive(make_response_42(detect_vals));
+  set_millis(100);
+  hub.loop();
+
+  // Step 3: VS probe
+  hub.loop();
+  hub.loop();
+  hub.mock_get_transmitted();
+  complete_tx(hub, 100);
+  hub.mock_receive(make_response_42({{3001, 0}, {3322, 0}, {3325, 0}}));
+  set_millis(150);
+  hub.loop();
+  REQUIRE(hub.is_setup_complete());
+
+  auto run_poll = [&](uint16_t outputs, uint16_t sat_cond, uint16_t leaving_air,
+                      uint16_t ewt, uint32_t time_ms) {
+    set_millis(time_ms);
+    hub.update();
+    auto tx2 = hub.mock_get_transmitted();
+    REQUIRE(tx2.size() > 0);
+    complete_tx(hub, time_ms);
+
+    size_t num_regs = (tx2.size() - 4) / 2;
+    std::vector<std::pair<uint16_t, uint16_t>> resp_vals;
+    for (size_t i = 0; i < num_regs; i++) {
+      uint16_t addr = (tx2[2 + i * 2] << 8) | tx2[3 + i * 2];
+      uint16_t val = 0;
+      if (addr == registers::SYSTEM_OUTPUTS) val = outputs;
+      if (addr == registers::SATURATED_CONDENSER_TEMP) val = sat_cond;
+      if (addr == registers::LEAVING_AIR) val = leaving_air;
+      if (addr == registers::ENTERING_WATER) val = ewt;
+      resp_vals.emplace_back(addr, val);
+    }
+    hub.mock_receive(make_response_42(resp_vals));
+    set_millis(time_ms + 50);
+    hub.loop();
+  };
+
+  SECTION("compressor off → publishes NAN") {
+    // No CC/CC2 in outputs = compressor off
+    // sat_cond=500 (50.0), leaving_air=720 (72.0), ewt=480 (48.0)
+    run_poll(0x0000, 500, 720, 480, 200);
+    REQUIRE(approach.has_state_);
+    REQUIRE(std::isnan(approach.state));
+  }
+
+  SECTION("compressor on heating → publishes SatCond - LeavingAir") {
+    // CC bit (0x01) set, no RV = heating mode
+    // In heating, condenser is indoor air coil: sat_cond > leaving_air.
+    // sat_cond=1050 (105.0°F), leaving_air=1020 (102.0°F) → approach = 105.0 - 102.0 = 3.0
+    run_poll(OUTPUT_CC, 1050, 1020, 480, 200);
+    REQUIRE(approach.has_state_);
+    REQUIRE(approach.state == Catch::Approx(3.0f));
+  }
+
+  SECTION("compressor on cooling → publishes SatCond - EWT") {
+    // CC bit (0x01) + RV bit (0x04) = cooling mode
+    // sat_cond=500 (50.0°F), leaving_air=550 (55.0°F), ewt=480 (48.0°F)
+    // approach = 50.0 - 48.0 = 2.0 (leaving_air unused in cooling)
+    run_poll(OUTPUT_CC | OUTPUT_RV, 500, 550, 480, 200);
+    REQUIRE(approach.has_state_);
+    REQUIRE(approach.state == Catch::Approx(2.0f));
+  }
+
+  SECTION("transition from running to idle clears to NAN") {
+    // First: compressor running in cooling → valid approach
+    run_poll(OUTPUT_CC | OUTPUT_RV, 500, 550, 480, 200);
+    REQUIRE_FALSE(std::isnan(approach.state));
+
+    // Then: compressor off → NAN
+    run_poll(0x0000, 500, 550, 480, 300);
+    REQUIRE(std::isnan(approach.state));
   }
 }
 

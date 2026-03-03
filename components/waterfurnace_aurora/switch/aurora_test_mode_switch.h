@@ -1,18 +1,15 @@
 #pragma once
 
 #include "esphome/core/component.h"
-#include "esphome/components/select/select.h"
+#include "esphome/components/switch/switch.h"
 #include "../waterfurnace_aurora.h"
 
 namespace esphome {
 namespace waterfurnace_aurora {
 
-enum class AuroraHumidistatType : uint8_t {
-  HUMIDIFIER,
-  DEHUMIDIFIER,
-};
-
-class AuroraHumidistatSelect : public select::Select, public Component {
+/// Switch entity for test mode (register 45).
+/// Write-only: 1 = enable, 0 = disable. No read-back register.
+class AuroraTestModeSwitch : public switch_::Switch, public Component {
  public:
   void setup() override;
   void dump_config() override;
@@ -20,18 +17,12 @@ class AuroraHumidistatSelect : public select::Select, public Component {
   float get_setup_priority() const override { return setup_priority::PROCESSOR; }
 
   void set_parent(WaterFurnaceAurora *parent) { this->parent_ = parent; }
-  void set_type(AuroraHumidistatType type) { this->type_ = type; }
 
  protected:
-  void control(const std::string &value) override;
-  void update_state_();
+  void write_state(bool state) override;
 
   WaterFurnaceAurora *parent_{nullptr};
-  AuroraHumidistatType type_{AuroraHumidistatType::HUMIDIFIER};
-  bool has_published_{false};
-  bool last_auto_{false};
 };
-
 
 }  // namespace waterfurnace_aurora
 }  // namespace esphome
