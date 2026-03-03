@@ -1155,12 +1155,6 @@ void WaterFurnaceAurora::finish_poll_cycle_() {
   
   // Check if we need fault history this cycle
   bool slow_poll = (this->poll_tier_counter_ % 60) == 0;
-  if (slow_poll) {
-    ESP_LOGD(TAG, "Slow tier cycle %d: fault_sensor=%s, fault_counters=%s",
-             this->poll_tier_counter_,
-             this->fault_history_sensor_ != nullptr ? "yes" : "no",
-             this->has_any_fault_counter_sensor_ ? "yes" : "no");
-  }
   if (slow_poll && (this->fault_history_sensor_ != nullptr || this->has_any_fault_counter_sensor_)) {
     this->start_fault_history_read_();
     return;
