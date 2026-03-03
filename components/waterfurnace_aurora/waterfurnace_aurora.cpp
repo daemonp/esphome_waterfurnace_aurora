@@ -153,7 +153,10 @@ void WaterFurnaceAurora::process_response_() {
   this->status_clear_warning();
   this->status_clear_error();
   
-  // Route to appropriate handler
+  // Route to appropriate handler.
+  // Handlers may chain to a new request (e.g. poll → fault history → dealer info).
+  // Only clear pending_request_ if the handler did NOT chain — detected by the
+  // state still being WAITING_RESPONSE (chained requests transition to TX_PENDING).
   switch (this->pending_request_) {
     case PendingRequest::SETUP_ID:
       this->process_setup_id_response_(resp);
@@ -185,7 +188,14 @@ void WaterFurnaceAurora::process_response_() {
       break;
   }
   
-  this->pending_request_ = PendingRequest::NONE;
+  // Only clear pending_request_ if the handler did NOT chain to a new request.
+  // Chained requests (fault history, dealer info, medium poll) call send_request_()
+  // which transitions state to TX_PENDING and sets pending_request_ to the new type.
+  // Clearing it here would clobber the new request, causing the response to be
+  // silently discarded by the default case above.
+  if (this->state_ != State::TX_PENDING) {
+    this->pending_request_ = PendingRequest::NONE;
+  }
 }
 
 void WaterFurnaceAurora::handle_timeout_() {
