@@ -26,8 +26,8 @@ CODEOWNERS = ["@daemonp"]
 # Configuration keys
 CONF_DHW_SETPOINT = "dhw_setpoint"
 CONF_BLOWER_ONLY_SPEED = "blower_only_speed"
-CONF_LO_COMPRESSOR_SPEED = "lo_compressor_speed"
-CONF_HI_COMPRESSOR_SPEED = "hi_compressor_speed"
+CONF_LOW_COMPRESSOR_SPEED = "low_compressor_speed"
+CONF_HIGH_COMPRESSOR_SPEED = "high_compressor_speed"
 CONF_AUX_HEAT_SPEED = "aux_heat_speed"
 CONF_PUMP_SPEED = "pump_speed"
 CONF_PUMP_MIN_SPEED = "pump_min_speed"
@@ -52,8 +52,8 @@ AuroraNumberType = waterfurnace_aurora_ns.enum("AuroraNumberType", is_class=True
 # Number type enum values
 AURORA_NUMBER_TYPES = {
     CONF_BLOWER_ONLY_SPEED: AuroraNumberType.BLOWER_ONLY_SPEED,
-    CONF_LO_COMPRESSOR_SPEED: AuroraNumberType.LO_COMPRESSOR_SPEED,
-    CONF_HI_COMPRESSOR_SPEED: AuroraNumberType.HI_COMPRESSOR_SPEED,
+    CONF_LOW_COMPRESSOR_SPEED: AuroraNumberType.LO_COMPRESSOR_SPEED,
+    CONF_HIGH_COMPRESSOR_SPEED: AuroraNumberType.HI_COMPRESSOR_SPEED,
     CONF_AUX_HEAT_SPEED: AuroraNumberType.AUX_HEAT_SPEED,
     CONF_PUMP_SPEED: AuroraNumberType.PUMP_SPEED,
     CONF_PUMP_MIN_SPEED: AuroraNumberType.PUMP_MIN_SPEED,
@@ -152,8 +152,8 @@ CONFIG_SCHEMA = cv.Schema(
         ).extend(cv.COMPONENT_SCHEMA),
         # Blower speed settings
         cv.Optional(CONF_BLOWER_ONLY_SPEED): BLOWER_SPEED_SCHEMA,
-        cv.Optional(CONF_LO_COMPRESSOR_SPEED): BLOWER_SPEED_SCHEMA,
-        cv.Optional(CONF_HI_COMPRESSOR_SPEED): BLOWER_SPEED_SCHEMA,
+        cv.Optional(CONF_LOW_COMPRESSOR_SPEED): BLOWER_SPEED_SCHEMA,
+        cv.Optional(CONF_HIGH_COMPRESSOR_SPEED): BLOWER_SPEED_SCHEMA,
         cv.Optional(CONF_AUX_HEAT_SPEED): BLOWER_SPEED_SCHEMA,
         # Pump speed settings
         cv.Optional(CONF_PUMP_SPEED): PUMP_SPEED_SCHEMA,

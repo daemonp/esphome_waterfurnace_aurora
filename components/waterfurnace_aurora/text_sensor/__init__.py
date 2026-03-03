@@ -22,9 +22,9 @@ TEXT_SENSORS = {
     "model_number": DIAGNOSTIC_TEXT_SCHEMA,
     "serial_number": DIAGNOSTIC_TEXT_SCHEMA,
     "fault_history": DIAGNOSTIC_TEXT_SCHEMA,
-    "vs_derate": DIAGNOSTIC_TEXT_SCHEMA,
-    "vs_safe_mode": DIAGNOSTIC_TEXT_SCHEMA,
-    "vs_alarm": DIAGNOSTIC_TEXT_SCHEMA,
+    "compressor_derate": DIAGNOSTIC_TEXT_SCHEMA,
+    "compressor_safe_mode": DIAGNOSTIC_TEXT_SCHEMA,
+    "compressor_alarm": DIAGNOSTIC_TEXT_SCHEMA,
     "axb_inputs": DIAGNOSTIC_TEXT_SCHEMA,
     "humidifier_mode": text_sensor.text_sensor_schema(),
     "dehumidifier_mode": text_sensor.text_sensor_schema(),
@@ -40,12 +40,12 @@ TEXT_SENSORS = {
     "ha_alarm_1_action": DIAGNOSTIC_TEXT_SCHEMA,
     "ha_alarm_2_action": DIAGNOSTIC_TEXT_SCHEMA,
     "energy_phase_type": DIAGNOSTIC_TEXT_SCHEMA,
-    # VS Drive 3200-range duplicates (gap 14)
-    "vs_drive_derate_alt": DIAGNOSTIC_TEXT_SCHEMA,
-    "vs_drive_safe_mode_alt": DIAGNOSTIC_TEXT_SCHEMA,
-    "vs_drive_alarm_alt": DIAGNOSTIC_TEXT_SCHEMA,
-    # VS Drive EEV2 Ctl (gap 15)
-    "vs_drive_eev2_ctl": DIAGNOSTIC_TEXT_SCHEMA,
+    # Compressor drive 3200-range alt diagnostics (gap 14)
+    "compressor_derate_alt": DIAGNOSTIC_TEXT_SCHEMA,
+    "compressor_safe_mode_alt": DIAGNOSTIC_TEXT_SCHEMA,
+    "compressor_alarm_alt": DIAGNOSTIC_TEXT_SCHEMA,
+    # Compressor drive EEV2 Ctl (gap 15)
+    "compressor_eev2_ctl": DIAGNOSTIC_TEXT_SCHEMA,
     # Dealer information (gap 19)
     "dealer_name": DIAGNOSTIC_TEXT_SCHEMA,
     "dealer_phone": DIAGNOSTIC_TEXT_SCHEMA,

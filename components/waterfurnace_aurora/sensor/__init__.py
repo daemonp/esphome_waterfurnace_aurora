@@ -90,18 +90,18 @@ SENSORS = {
     "dhw_temperature": TEMPERATURE_SENSOR_SCHEMA,
     "dhw_setpoint": TEMPERATURE_SENSOR_SCHEMA,
     "superheat_temperature": TEMPERATURE_SENSOR_SCHEMA,
-    "fp1_temperature": TEMPERATURE_SENSOR_SCHEMA,
-    "fp2_temperature": TEMPERATURE_SENSOR_SCHEMA,
+    "cooling_liquid_line_temperature": TEMPERATURE_SENSOR_SCHEMA,
+    "air_coil_temperature": TEMPERATURE_SENSOR_SCHEMA,
     "discharge_temperature": TEMPERATURE_SENSOR_SCHEMA,
     "suction_temperature": TEMPERATURE_SENSOR_SCHEMA,
-    "vs_drive_temperature": TEMPERATURE_SENSOR_SCHEMA,
-    "vs_inverter_temperature": TEMPERATURE_SENSOR_SCHEMA,
+    "compressor_drive_temperature": TEMPERATURE_SENSOR_SCHEMA,
+    "compressor_inverter_temperature": TEMPERATURE_SENSOR_SCHEMA,
     "heating_liquid_line_temperature": TEMPERATURE_SENSOR_SCHEMA,
     "saturated_condenser_temperature": TEMPERATURE_SENSOR_SCHEMA,
     "subcool_temperature": TEMPERATURE_SENSOR_SCHEMA,
-    "vs_ambient_temperature": TEMPERATURE_SENSOR_SCHEMA,
+    "compressor_ambient_temperature": TEMPERATURE_SENSOR_SCHEMA,
     "saturated_evaporator_discharge_temperature": TEMPERATURE_SENSOR_SCHEMA,
-    "vs_entering_water_temperature": TEMPERATURE_SENSOR_SCHEMA,
+    "compressor_entering_water_temperature": TEMPERATURE_SENSOR_SCHEMA,
     # Derived temperature sensors
     "water_delta_t": TEMPERATURE_SENSOR_SCHEMA,
     "approach_temperature": TEMPERATURE_SENSOR_SCHEMA,
@@ -127,16 +127,16 @@ SENSORS = {
     ),
     # Voltage
     "line_voltage": VOLTAGE_SENSOR_SCHEMA,
-    "vs_line_voltage": VOLTAGE_SENSOR_SCHEMA,
-    "vs_supply_voltage": VOLTAGE_SENSOR_SCHEMA,
-    "vs_udc_voltage": VOLTAGE_SENSOR_SCHEMA,
+    "compressor_line_voltage": VOLTAGE_SENSOR_SCHEMA,
+    "compressor_supply_voltage": VOLTAGE_SENSOR_SCHEMA,
+    "compressor_udc_voltage": VOLTAGE_SENSOR_SCHEMA,
     # Power sensors
     "total_watts": POWER_SENSOR_SCHEMA,
     "compressor_watts": POWER_SENSOR_SCHEMA,
     "blower_watts": POWER_SENSOR_SCHEMA,
     "aux_heat_watts": POWER_SENSOR_SCHEMA,
     "pump_watts": POWER_SENSOR_SCHEMA,
-    "vs_compressor_watts": POWER_SENSOR_SCHEMA,
+    "compressor_drive_watts": POWER_SENSOR_SCHEMA,
     # Flow
     "waterflow": sensor.sensor_schema(
         unit_of_measurement=UNIT_GPM,
@@ -170,8 +170,8 @@ SENSORS = {
     # Blower/ECM sensors
     "blower_speed": SPEED_SENSOR_SCHEMA,
     "blower_only_speed": SPEED_SENSOR_SCHEMA,
-    "lo_compressor_speed": SPEED_SENSOR_SCHEMA,
-    "hi_compressor_speed": SPEED_SENSOR_SCHEMA,
+    "low_compressor_speed": SPEED_SENSOR_SCHEMA,
+    "high_compressor_speed": SPEED_SENSOR_SCHEMA,
     "aux_heat_speed": SPEED_SENSOR_SCHEMA,
     # VS Pump sensors
     "pump_speed": PERCENT_SENSOR_SCHEMA,
@@ -188,10 +188,10 @@ SENSORS = {
         accuracy_decimals=0,
         state_class=STATE_CLASS_MEASUREMENT,
     ),
-    # Additional VS Drive sensors
-    "vs_fan_speed": PERCENT_SENSOR_SCHEMA,
+    # Additional compressor drive sensors
+    "compressor_fan_speed": PERCENT_SENSOR_SCHEMA,
     "aux_heat_stage": SPEED_SENSOR_SCHEMA,
-    "vs_thermo_power": PERCENT_SENSOR_SCHEMA,
+    "compressor_thermo_power": PERCENT_SENSOR_SCHEMA,
     # AXB current sensors
     "blower_amps": CURRENT_SENSOR_SCHEMA,
     "aux_amps": CURRENT_SENSOR_SCHEMA,

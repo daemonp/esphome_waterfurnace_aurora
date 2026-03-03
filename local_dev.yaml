@@ -164,9 +164,9 @@ number:
     # NOTE: Requires ECM blower (blower type 1 or 2). Shows "Unknown" on PSC/5-speed blowers.
     blower_only_speed:
       name: "Indoor Blower Only Speed"
-    lo_compressor_speed:
+    low_compressor_speed:
       name: "Low Compressor ECM Speed"
-    hi_compressor_speed:
+    high_compressor_speed:
       name: "High Compressor ECM Speed"
     aux_heat_speed:
       name: "Aux Electric Heat ECM Speed"
@@ -259,25 +259,25 @@ sensor:
       name: "Heating Liquid Line Temperature"
     saturated_condenser_temperature:
       name: "Saturated Condenser Temperature"
-    fp1_temperature:
+    cooling_liquid_line_temperature:
       name: "FP1 Temperature"
-    fp2_temperature:
+    air_coil_temperature:
       name: "FP2 Temperature"
     
     # VS Drive temperatures (requires VS drive; shows "Unknown" on non-VS systems)
-    vs_drive_temperature:
+    compressor_drive_temperature:
       name: "VS Drive Temperature"
-    vs_inverter_temperature:
+    compressor_inverter_temperature:
       name: "VS Inverter Temperature"
-    vs_ambient_temperature:
+    compressor_ambient_temperature:
       name: "VS Compressor Ambient Temperature"
     saturated_evaporator_discharge_temperature:
       name: "Saturated Evaporator Discharge Temperature"
     
     # VS Drive additional (requires VS drive)
-    vs_fan_speed:
+    compressor_fan_speed:
       name: "VS Fan Speed"
-    vs_compressor_watts:
+    compressor_drive_watts:
       name: "VS Compressor Power"
     
     # Aux electric heat
@@ -313,9 +313,9 @@ sensor:
       name: "Indoor Blower Speed"
     blower_only_speed:
       name: "Indoor Blower Only Speed Setting"
-    lo_compressor_speed:
+    low_compressor_speed:
       name: "Low Compressor ECM Speed Setting"
-    hi_compressor_speed:
+    high_compressor_speed:
       name: "High Compressor ECM Speed Setting"
     aux_heat_speed:
       name: "Aux Electric Heat ECM Speed Setting"
@@ -394,7 +394,7 @@ binary_sensor:
       name: "Dehumidifier Running"
     
     # Fault/problem states
-    lockout:
+    locked_out:
       name: "Lockout"
       device_class: problem
     low_pressure_switch:
@@ -442,11 +442,11 @@ text_sensor:
       name: "Serial Number"
     
     # VS Drive status (requires VS drive; show "Unknown" on non-VS systems)
-    vs_derate:
+    compressor_derate:
       name: "VS Drive Derate"
-    vs_safe_mode:
+    compressor_safe_mode:
       name: "VS Drive Safe Mode"
-    vs_alarm:
+    compressor_alarm:
       name: "VS Drive Alarm"
     
     # AXB status

@@ -137,8 +137,8 @@ namespace registers {
   static constexpr uint16_t ABC_VERSION = 2;
   static constexpr uint16_t COMPRESSOR_ANTI_SHORT_CYCLE = 6;
   static constexpr uint16_t LINE_VOLTAGE = 16;
-  static constexpr uint16_t FP1_TEMP = 19;
-  static constexpr uint16_t FP2_TEMP = 20;
+  static constexpr uint16_t FP1_TEMP = 19;                // Cooling liquid line temperature (FP1)
+  static constexpr uint16_t FP2_TEMP = 20;                // Air coil temperature (FP2)
   static constexpr uint16_t LAST_FAULT = 25;
   static constexpr uint16_t LAST_LOCKOUT_FAULT = 26;     // High bit = locked, bits 0-14 = fault code
   static constexpr uint16_t OUTPUTS_AT_LOCKOUT = 27;     // Bitmask: system outputs when lockout occurred
