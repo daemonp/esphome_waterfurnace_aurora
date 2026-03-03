@@ -1278,8 +1278,10 @@ void WaterFurnaceAurora::publish_system_status_sensors_(const RegisterMap &regs)
     const uint16_t *val = reg_find(regs, registers::SYSTEM_STATUS);
     if (val) {
       uint16_t status = *val;
-      publish_binary_if_changed_(this->low_pressure_switch_sensor_, (status & STATUS_LPS) != 0);
-      publish_binary_if_changed_(this->high_pressure_switch_sensor_, (status & STATUS_HPS) != 0);
+      // Pressure switch bits: SET = closed (normal), CLEAR = open (fault).
+      // Binary sensors use device_class PROBLEM, so true = problem = switch open.
+      publish_binary_if_changed_(this->low_pressure_switch_sensor_, (status & STATUS_LPS) == 0);
+      publish_binary_if_changed_(this->high_pressure_switch_sensor_, (status & STATUS_HPS) == 0);
       publish_binary_if_changed_(this->emergency_shutdown_sensor_,
                                  (status & STATUS_EMERGENCY_SHUTDOWN) != 0);
       publish_binary_if_changed_(this->load_shed_sensor_, (status & STATUS_LOAD_SHED) != 0);
@@ -1334,10 +1336,30 @@ void WaterFurnaceAurora::publish_temperature_sensors_(const RegisterMap &regs) {
     }
   }
   
-  uint16_t entering_air_reg = this->awl_axb() ? registers::ENTERING_AIR_AWL : registers::ENTERING_AIR;
-  this->publish_sensor_signed_tenths(regs, entering_air_reg, this->entering_air_temperature_sensor_);
+  // Entering air (return air) — suppress zero readings (register returns 0 when
+  // the sensor is absent or the system is not AWL-communicating).  The Ruby gem
+  // does: `unless entering_air_temperature.zero?`
+  {
+    uint16_t entering_air_reg = this->awl_axb() ? registers::ENTERING_AIR_AWL : registers::ENTERING_AIR;
+    const uint16_t *val = reg_find(regs, entering_air_reg);
+    if (val && *val != 0) {
+      float fval = to_signed_tenths(*val);
+      if (sensor_value_changed_(this->entering_air_temperature_sensor_, fval))
+        this->entering_air_temperature_sensor_->publish_state(fval);
+    }
+  }
   this->publish_sensor_signed_tenths(regs, registers::LEAVING_AIR, this->leaving_air_temperature_sensor_);
-  this->publish_sensor_signed_tenths(regs, registers::OUTDOOR_TEMP, this->outdoor_temperature_sensor_);
+  // Outdoor temperature — suppress zero readings (register returns 0 when the
+  // system is not AWL-communicating).  The Ruby gem does:
+  // `if awl_communicating? && !outdoor_temperature.zero?`
+  {
+    const uint16_t *val = reg_find(regs, registers::OUTDOOR_TEMP);
+    if (val && *val != 0) {
+      float fval = to_signed_tenths(*val);
+      if (sensor_value_changed_(this->outdoor_temperature_sensor_, fval))
+        this->outdoor_temperature_sensor_->publish_state(fval);
+    }
+  }
   this->publish_sensor_signed_tenths(regs, registers::LEAVING_WATER, this->leaving_water_temperature_sensor_);
   this->publish_sensor_signed_tenths(regs, registers::ENTERING_WATER, this->entering_water_temperature_sensor_);
   
@@ -2266,18 +2288,25 @@ void WaterFurnaceAurora::publish_derived_sensors(const RegisterMap &regs) {
     }
   }
   
-  // Approach temperature
+  // Approach temperature — only meaningful when the compressor is running.
+  // When idle, the saturated condenser register holds stale values that produce
+  // nonsensical results (e.g., -40°F).
   if (this->approach_temperature_sensor_ != nullptr) {
-    const uint16_t *val_lw = reg_find(regs, registers::LEAVING_WATER);
-    const uint16_t *val_ew = reg_find(regs, registers::ENTERING_WATER);
-    const uint16_t *val_sc = reg_find(regs, registers::SATURATED_CONDENSER_TEMP);
-    if (val_sc) {
-      float sat_cond = to_signed_tenths(*val_sc);
-      bool cooling = (this->system_outputs_ & OUTPUT_RV) != 0;
-      if (cooling && val_ew)
-        this->approach_temperature_sensor_->publish_state(sat_cond - to_signed_tenths(*val_ew));
-      else if (!cooling && val_lw)
-        this->approach_temperature_sensor_->publish_state(to_signed_tenths(*val_lw) - sat_cond);
+    bool compressor_on = (this->system_outputs_ & (OUTPUT_CC | OUTPUT_CC2)) != 0;
+    if (compressor_on) {
+      const uint16_t *val_lw = reg_find(regs, registers::LEAVING_WATER);
+      const uint16_t *val_ew = reg_find(regs, registers::ENTERING_WATER);
+      const uint16_t *val_sc = reg_find(regs, registers::SATURATED_CONDENSER_TEMP);
+      if (val_sc) {
+        float sat_cond = to_signed_tenths(*val_sc);
+        bool cooling = (this->system_outputs_ & OUTPUT_RV) != 0;
+        if (cooling && val_ew)
+          this->approach_temperature_sensor_->publish_state(sat_cond - to_signed_tenths(*val_ew));
+        else if (!cooling && val_lw)
+          this->approach_temperature_sensor_->publish_state(to_signed_tenths(*val_lw) - sat_cond);
+      }
+    } else if (sensor_value_changed_(this->approach_temperature_sensor_, NAN)) {
+      this->approach_temperature_sensor_->publish_state(NAN);
     }
   }
 }

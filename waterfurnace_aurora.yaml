@@ -147,6 +147,7 @@ number:
     # dhw_setpoint:
     #   name: "DHW Setpoint"
     # Indoor Blower/ECM speed settings (1-12)
+    # NOTE: Requires ECM blower (blower type 1 or 2). Shows "Unknown" on PSC/5-speed blowers.
     blower_only_speed:
       name: "Indoor Blower Only Speed"
     lo_compressor_speed:
@@ -156,6 +157,7 @@ number:
     aux_heat_speed:
       name: "Aux Electric Heat ECM Speed"
     # Loop Pump speed settings (1-100%)
+    # NOTE: Requires variable speed (VS) pump. Shows "Unknown" on fixed-speed pumps.
     pump_min_speed:
       name: "Loop Pump Minimum Speed"
     pump_max_speed:
@@ -183,13 +185,13 @@ sensor:
     aurora_id: aurora
     
     # Air temperatures
-    entering_air_temperature:
+    entering_air_temperature:  # reads register 740 (AWL AXB) or 567 (non-AWL); suppresses 0 values
       name: "Return Air Temperature"
-    leaving_air_temperature:  # requires AWL AXB (AXB firmware >= v2.0)
+    leaving_air_temperature:  # requires AWL AXB (AXB firmware >= v2.0); shows "Unknown" otherwise
       name: "Supply Air Temperature"
     ambient_temperature:
       name: "Ambient Temperature"
-    outdoor_temperature:
+    outdoor_temperature:  # requires AWL communicating thermostat; suppresses 0 values
       name: "Outdoor Temperature"
     
     # Water/loop temperatures
@@ -220,15 +222,15 @@ sensor:
     compressor_desired_speed:
       name: "Compressor Desired Speed"
     
-    # Pressures
+    # Pressures (requires VS drive for discharge/suction; AXB for loop pressure)
     discharge_pressure:
       name: "Discharge Pressure"
     suction_pressure:
       name: "Suction Pressure"
-    loop_pressure:
+    loop_pressure:  # requires AXB board with pressure sensor hardware
       name: "Loop Pressure"
     
-    # Refrigeration
+    # Refrigeration (requires VS drive; requires refrigeration monitoring for liquid line/subcool)
     eev_open_percentage:
       name: "EEV Open Percentage"
     superheat_temperature:
@@ -248,7 +250,7 @@ sensor:
     fp2_temperature:
       name: "FP2 Temperature"
     
-    # VS Drive temperatures
+    # VS Drive temperatures (requires VS drive; shows "Unknown" on non-VS systems)
     vs_drive_temperature:
       name: "VS Drive Temperature"
     vs_inverter_temperature:
@@ -258,7 +260,7 @@ sensor:
     saturated_evaporator_discharge_temperature:
       name: "Saturated Evaporator Discharge Temperature"
     
-    # VS Drive additional
+    # VS Drive additional (requires VS drive)
     vs_fan_speed:
       name: "VS Fan Speed"
     vs_compressor_watts:
@@ -268,7 +270,7 @@ sensor:
     aux_heat_stage:
       name: "Aux Electric Heat Stage"
     
-    # Energy / Power
+    # Energy / Power (requires energy monitoring level >= 2)
     line_voltage:
       name: "Line Voltage"
     total_watts:
@@ -291,6 +293,8 @@ sensor:
       name: "Loop Flow Rate"
     
     # Indoor Blower/ECM speeds
+    # NOTE: blower_speed works for all blower types (ECM reads register, others derive from outputs).
+    # The _setting sensors require ECM blower (type 1 or 2); show "Unknown" on PSC/5-speed.
     blower_speed:
       name: "Indoor Blower Speed"
     blower_only_speed:
@@ -302,7 +306,7 @@ sensor:
     aux_heat_speed:
       name: "Aux Electric Heat ECM Speed Setting"
     
-    # Loop Pump speeds
+    # Loop Pump speeds (requires variable speed pump; show "Unknown" on fixed-speed pumps)
     pump_speed:
       name: "Loop Pump Speed"
     pump_min_speed:
@@ -328,12 +332,12 @@ sensor:
     # iz2_unit_demand:
     #   name: "IZ2 Unit Demand"
     
-    # Derived sensors (computed on-device)
-    cop:
+    # Derived sensors (computed on-device; require underlying registers to be available)
+    cop:  # requires energy monitoring + compressor running; shows 0 when idle
       name: "Coefficient of Performance"
-    water_delta_t:
+    water_delta_t:  # requires AXB (leaving/entering water temps)
       name: "Water Delta-T"
-    approach_temperature:
+    approach_temperature:  # requires refrigeration monitoring + compressor running; "Unknown" when idle
       name: "Approach Temperature"
 
 # =============================================================================
@@ -404,7 +408,7 @@ text_sensor:
     serial_number:
       name: "Serial Number"
     
-    # VS Drive status
+    # VS Drive status (requires VS drive; show "Unknown" on non-VS systems)
     vs_derate:
       name: "VS Drive Derate"
     vs_safe_mode:
