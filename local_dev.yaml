@@ -260,9 +260,9 @@ sensor:
     saturated_condenser_temperature:
       name: "Saturated Condenser Temperature"
     cooling_liquid_line_temperature:
-      name: "FP1 Temperature"
+      name: "Cooling Liquid Line Temperature"
     air_coil_temperature:
-      name: "FP2 Temperature"
+      name: "Air Coil Temperature"
     
     # VS Drive temperatures (requires VS drive; shows "Unknown" on non-VS systems)
     compressor_drive_temperature:

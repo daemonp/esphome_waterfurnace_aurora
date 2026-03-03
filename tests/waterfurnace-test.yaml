@@ -177,9 +177,9 @@ sensor:
     lockout_fault_code:
       name: "Test Lockout Fault Code"
     cooling_liquid_line_temperature:
-      name: "Test FP1 Temp"
+      name: "Test Cooling Liquid Line Temp"
     air_coil_temperature:
-      name: "Test FP2 Temp"
+      name: "Test Air Coil Temp"
     line_voltage_setting:
       name: "Test Line Voltage Setting"
     anti_short_cycle:
