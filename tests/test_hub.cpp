@@ -898,10 +898,11 @@ TEST_CASE("Approach temperature requires compressor running", "[hub][sensors][de
     REQUIRE(std::isnan(approach.state));
   }
 
-  SECTION("compressor on heating → publishes LWT - SatCond") {
+  SECTION("compressor on heating → publishes SatCond - LWT") {
     // CC bit (0x01) set, no RV = heating mode
-    // sat_cond=500 (50.0°F), lwt=530 (53.0°F) → approach = 53.0 - 50.0 = 3.0
-    run_poll(OUTPUT_CC, 500, 530, 480, 200);
+    // In heating, condenser heats water: sat_cond > LWT.
+    // sat_cond=550 (55.0°F), lwt=520 (52.0°F) → approach = 55.0 - 52.0 = 3.0
+    run_poll(OUTPUT_CC, 550, 520, 480, 200);
     REQUIRE(approach.has_state_);
     REQUIRE(approach.state == Catch::Approx(3.0f));
   }

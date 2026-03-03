@@ -182,7 +182,9 @@ void AuroraNumber::control(float value) {
 
   // COOLING_AIRFLOW_ADJUSTMENT — signed int16_t (NEGATABLE encoding)
   if (this->type_ == AuroraNumberType::COOLING_AIRFLOW_ADJUSTMENT) {
-    if (this->parent_->set_cooling_airflow_adjustment(static_cast<int16_t>(value))) {
+    // Clamp to int16_t range before cast (YAML schema limits to [-10,10], this is defense-in-depth)
+    float clamped_s = (value < -32768.0f) ? -32768.0f : (value > 32767.0f) ? 32767.0f : value;
+    if (this->parent_->set_cooling_airflow_adjustment(static_cast<int16_t>(clamped_s))) {
       this->publish_state(value);
     }
     return;

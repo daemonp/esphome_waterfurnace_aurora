@@ -409,9 +409,9 @@ void AuroraClimate::publish_zone_diagnostics_() {
   // Priority (text: "Comfort" or "Economy")
   if (this->zone_priority_sensor_ != nullptr) {
     const char *priority_str = (zone.priority == ZonePriority::ECONOMY) ? "Economy" : "Comfort";
-    if (this->cached_zone_priority_.empty() || strcmp(this->cached_zone_priority_.c_str(), priority_str) != 0) {
+    if (this->cached_zone_priority_ != priority_str) {
       this->cached_zone_priority_ = priority_str;
-      this->zone_priority_sensor_->publish_state(this->cached_zone_priority_);
+      this->zone_priority_sensor_->publish_state(priority_str);
     }
   }
   
@@ -425,9 +425,9 @@ void AuroraClimate::publish_zone_diagnostics_() {
       case ZoneSize::FULL: size_str = "70"; break;
       default: size_str = "Unknown"; break;
     }
-    if (this->cached_zone_size_.empty() || strcmp(this->cached_zone_size_.c_str(), size_str) != 0) {
+    if (this->cached_zone_size_ != size_str) {
       this->cached_zone_size_ = size_str;
-      this->zone_size_sensor_->publish_state(this->cached_zone_size_);
+      this->zone_size_sensor_->publish_state(size_str);
     }
   }
   

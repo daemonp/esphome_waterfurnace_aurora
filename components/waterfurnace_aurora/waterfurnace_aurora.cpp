@@ -208,6 +208,15 @@ void WaterFurnaceAurora::handle_timeout_() {
     }
     this->error_backoff_until_ = millis() + ERROR_BACKOFF_MS;
     this->transition_(State::ERROR_BACKOFF);
+  } else if (this->pending_request_ == PendingRequest::POLL_FAULT_HISTORY) {
+    // Fault history read failure — not critical, skip this cycle
+    ESP_LOGD(TAG, "Fault history read timed out");
+    // Chain to dealer info if needed, otherwise go idle
+    if (!this->dealer_info_read_ && this->has_any_dealer_sensor_()) {
+      this->start_dealer_info_read_();
+    } else {
+      this->transition_(State::IDLE);
+    }
   } else if (this->pending_request_ == PendingRequest::POLL_DEALER_INFO) {
     // Dealer info read failure — not critical, skip
     ESP_LOGD(TAG, "Dealer info read timed out");
@@ -1151,7 +1160,10 @@ void WaterFurnaceAurora::finish_poll_cycle_() {
 }
 
 void WaterFurnaceAurora::start_fault_history_read_() {
-  auto frame = protocol::build_read_holding_request(this->address_, registers::FAULT_HISTORY_START, 99);
+  // Ruby gem reads 601..699 via func 0x41 (read contiguous ranges).
+  // The ABC board does not respond to func 0x03 for this register range.
+  auto frame = protocol::build_read_ranges_request(
+      this->address_, {{registers::FAULT_HISTORY_START, 99}});
   
   // Build fault history address list once (static local, persists across calls).
   // Thread-safe: ESPHome main loop is single-threaded; no concurrent access.
@@ -1684,7 +1696,8 @@ void WaterFurnaceAurora::publish_equipment_sensors_(const RegisterMap &regs) {
   {
     const uint16_t *val = reg_find(regs, subcool_reg);
     if (val) {
-      float fval = to_signed_tenths(*val);
+      // ABC stores subcool with sign; magnitude is what matters for diagnostics
+      float fval = std::abs(to_signed_tenths(*val));
       if (sensor_value_changed_(this->subcool_temperature_sensor_, fval))
         this->subcool_temperature_sensor_->publish_state(fval);
     }
@@ -2211,6 +2224,7 @@ bool WaterFurnaceAurora::set_test_mode(bool enabled) {
 }
 
 bool WaterFurnaceAurora::set_cooling_airflow_adjustment(int16_t value) {
+  if (value < -10 || value > 10) { ESP_LOGW(TAG, "Cooling airflow adjustment out of range: %d", value); return false; }
   // NEGATABLE encoding: negative values stored as 0x10000 + value (two's complement)
   uint16_t raw = static_cast<uint16_t>(value);
   ESP_LOGD(TAG, "Setting cooling airflow adjustment to %d (raw 0x%04X)", value, raw);
@@ -2219,6 +2233,7 @@ bool WaterFurnaceAurora::set_cooling_airflow_adjustment(int16_t value) {
 }
 
 bool WaterFurnaceAurora::set_loop_pressure_trip(float value) {
+  if (value < 0.0f || value > 100.0f) { ESP_LOGW(TAG, "Loop pressure trip out of range: %.1f", value); return false; }
   // Register stores value * 10 (inverse of TO_TENTHS)
   uint16_t raw = static_cast<uint16_t>(value * 10);
   ESP_LOGD(TAG, "Setting loop pressure trip to %.1f psi (raw %d)", value, raw);
@@ -2296,7 +2311,8 @@ void WaterFurnaceAurora::publish_derived_sensors(const RegisterMap &regs) {
     const uint16_t *val_lw = reg_find(regs, registers::LEAVING_WATER);
     const uint16_t *val_ew = reg_find(regs, registers::ENTERING_WATER);
     if (val_lw && val_ew) {
-      this->water_delta_t_sensor_->publish_state(to_signed_tenths(*val_lw) - to_signed_tenths(*val_ew));
+      // Absolute value: in heating EWT > LWT (heat extracted), in cooling LWT > EWT
+      this->water_delta_t_sensor_->publish_state(std::abs(to_signed_tenths(*val_lw) - to_signed_tenths(*val_ew)));
     }
   }
   
@@ -2365,7 +2381,7 @@ void WaterFurnaceAurora::publish_derived_sensors(const RegisterMap &regs) {
         if (cooling && val_ew)
           this->approach_temperature_sensor_->publish_state(sat_cond - to_signed_tenths(*val_ew));
         else if (!cooling && val_lw)
-          this->approach_temperature_sensor_->publish_state(to_signed_tenths(*val_lw) - sat_cond);
+          this->approach_temperature_sensor_->publish_state(sat_cond - to_signed_tenths(*val_lw));
       }
     } else if (sensor_value_changed_(this->approach_temperature_sensor_, NAN)) {
       this->approach_temperature_sensor_->publish_state(NAN);
@@ -2374,15 +2390,17 @@ void WaterFurnaceAurora::publish_derived_sensors(const RegisterMap &regs) {
 }
 
 // ============================================================================
-// Dealer Information (gap 19) — one-shot read via func 0x03
+// Dealer Information (gap 19) — one-shot read via func 0x41
 // ============================================================================
 
 void WaterFurnaceAurora::start_dealer_info_read_() {
   ESP_LOGD(TAG, "Reading dealer information (registers %d-%d)",
            registers::DEALER_INFO_START,
            registers::DEALER_INFO_START + registers::DEALER_INFO_COUNT - 1);
-  auto frame = protocol::build_read_holding_request(
-      this->address_, registers::DEALER_INFO_START, registers::DEALER_INFO_COUNT);
+  // Use func 0x41 (read contiguous ranges) — consistent with Ruby gem's
+  // read_multiple_holding_registers which dispatches Range args to func 0x41.
+  auto frame = protocol::build_read_ranges_request(
+      this->address_, {{registers::DEALER_INFO_START, registers::DEALER_INFO_COUNT}});
 
   // Build expected address list
   static uint16_t dealer_addrs[registers::DEALER_INFO_COUNT];

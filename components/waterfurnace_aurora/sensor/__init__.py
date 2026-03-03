@@ -11,6 +11,7 @@ from esphome.const import (
     DEVICE_CLASS_PRESSURE,
     ENTITY_CATEGORY_DIAGNOSTIC,
     STATE_CLASS_MEASUREMENT,
+    STATE_CLASS_TOTAL_INCREASING,
     UNIT_AMPERE,
     UNIT_CELSIUS,
     UNIT_PERCENT,
@@ -277,7 +278,7 @@ SENSORS = {
 # Fault history counter schema — state_class: total_increasing per Ruby gem
 FAULT_COUNTER_SCHEMA = sensor.sensor_schema(
     accuracy_decimals=0,
-    state_class="total_increasing",
+    state_class=STATE_CLASS_TOTAL_INCREASING,
     entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
 )
 

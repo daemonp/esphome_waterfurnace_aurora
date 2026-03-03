@@ -29,14 +29,21 @@ HUMIDISTAT_SELECT_SCHEMA = select.select_schema(
     icon="mdi:water-percent",
 ).extend(cv.COMPONENT_SCHEMA)
 
+def validate_blower_speed(value):
+    """Validate blower speed: 0-12 for manual speed, or 255 for 'with_compressor' (auto)."""
+    value = cv.int_(value)
+    if value == 255 or 0 <= value <= 12:
+        return value
+    raise cv.Invalid("Blower speed must be 0-12 (manual) or 255 (auto/with_compressor)")
+
 MANUAL_OPERATION_SELECT_SCHEMA = select.select_schema(
     AuroraManualOperationSelect,
     entity_category=ENTITY_CATEGORY_CONFIG,
     icon="mdi:wrench-cog",
 ).extend(cv.COMPONENT_SCHEMA).extend(
     {
-        cv.Optional(CONF_COMPRESSOR_SPEED, default=8): cv.int_range(min=0, max=15),
-        cv.Optional(CONF_BLOWER_SPEED, default=255): cv.int_range(min=0, max=255),
+        cv.Optional(CONF_COMPRESSOR_SPEED, default=8): cv.int_range(min=0, max=12),
+        cv.Optional(CONF_BLOWER_SPEED, default=255): validate_blower_speed,
     }
 )
 

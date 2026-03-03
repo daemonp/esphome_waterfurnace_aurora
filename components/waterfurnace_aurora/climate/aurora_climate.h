@@ -50,8 +50,8 @@ class AuroraClimate : public climate::Climate, public Component {
   text_sensor::TextSensor *zone_priority_sensor_{nullptr};
   text_sensor::TextSensor *zone_size_sensor_{nullptr};
   sensor::Sensor *zone_normalized_size_sensor_{nullptr};
-  std::string cached_zone_priority_;
-  std::string cached_zone_size_;
+  const char *cached_zone_priority_{nullptr};
+  const char *cached_zone_size_{nullptr};
 
   // EMA state for current_temperature smoothing.
   // Suppresses ADC jitter (±0.1°F) from IZ2 zone thermostats so the HA
