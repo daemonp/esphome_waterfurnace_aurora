@@ -275,7 +275,7 @@ sensor:
     eev_superheat:
       name: "Test EEV Superheat"
     eev_open:
-      name: "Test EEV Open"
+      name: "Test EEV2 Open"
     eev_suction_temperature:
       name: "Test EEV Suction Temp"
     eev_saturated_suction_temperature:
