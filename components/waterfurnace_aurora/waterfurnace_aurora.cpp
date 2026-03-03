@@ -921,10 +921,10 @@ void WaterFurnaceAurora::build_poll_addresses_() {
     this->add_poll_addr_(registers::VS_SUCTION_TEMP);
     this->add_poll_addr_(registers::VS_SAT_EVAP_DISCHARGE_TEMP);
     this->add_poll_addr_(registers::VS_SUPERHEAT_TEMP);
-    // VS Drive additional diagnostics — only poll if at least one sensor is configured
-    if (this->vs_entering_water_temperature_sensor_ || this->vs_line_voltage_sensor_ ||
-        this->vs_thermo_power_sensor_ || this->vs_supply_voltage_sensor_ ||
-        this->vs_udc_voltage_sensor_) {
+    // Compressor drive additional diagnostics — only poll if at least one sensor is configured
+    if (this->compressor_entering_water_temperature_sensor_ || this->compressor_line_voltage_sensor_ ||
+        this->compressor_thermo_power_sensor_ || this->compressor_supply_voltage_sensor_ ||
+        this->compressor_udc_voltage_sensor_) {
       this->add_poll_addr_(registers::VS_ENTERING_WATER_TEMP);
       this->add_poll_addr_(registers::VS_LINE_VOLTAGE);
       this->add_poll_addr_(registers::VS_THERMO_POWER);
@@ -1063,17 +1063,17 @@ void WaterFurnaceAurora::build_poll_addresses_() {
       this->add_poll_addr_(registers::CONDENSATE);
     }
 
-    // VS Drive 3200-range duplicates (gap 14) — only poll if any alt sensor is configured
-    if (this->has_vs_drive_ && (this->vs_drive_derate_alt_sensor_ || this->vs_drive_safe_mode_alt_sensor_ ||
-                                 this->vs_drive_alarm_alt_sensor_)) {
+    // Compressor drive 3200-range duplicates (gap 14) — only poll if any alt sensor is configured
+    if (this->has_vs_drive_ && (this->compressor_derate_alt_sensor_ || this->compressor_safe_mode_alt_sensor_ ||
+                                 this->compressor_alarm_alt_sensor_)) {
       this->add_poll_addr_(registers::VS_DRIVE_DERATE_ALT);
       this->add_poll_addr_(registers::VS_DRIVE_SAFE_MODE_ALT);
       this->add_poll_addr_(registers::VS_DRIVE_ALARM1_ALT);
       this->add_poll_addr_(registers::VS_DRIVE_ALARM2_ALT);
     }
 
-    // VS Drive EEV2 Ctl (gap 15) — only poll if sensor is configured
-    if (this->has_vs_drive_ && this->vs_drive_eev2_ctl_sensor_) {
+    // Compressor drive EEV2 Ctl (gap 15) — only poll if sensor is configured
+    if (this->has_vs_drive_ && this->compressor_eev2_ctl_sensor_) {
       this->add_poll_addr_(registers::VS_DRIVE_EEV2_CTL);
     }
 
@@ -1311,7 +1311,7 @@ void WaterFurnaceAurora::publish_all_sensors_() {
   this->publish_temperature_sensors_(regs);
   this->publish_mode_sensors_(regs);
   this->publish_power_loop_sensors_(regs);
-  this->publish_vs_drive_sensors_(regs);
+  this->publish_compressor_drive_sensors_(regs);
   this->publish_equipment_sensors_(regs);
   this->publish_config_sensors_(regs);
   this->publish_humidity_control_sensors_(regs);
@@ -1337,7 +1337,7 @@ void WaterFurnaceAurora::publish_fault_sensors_(const RegisterMap &regs) {
         this->fault_code_sensor_->publish_state(this->current_fault_);
       this->publish_text_if_changed(this->fault_description_sensor_, this->cached_fault_description_,
                                      get_fault_description(this->current_fault_));
-      publish_binary_if_changed_(this->lockout_sensor_, this->locked_out_);
+      publish_binary_if_changed_(this->locked_out_sensor_, this->locked_out_);
       // Derated: fault codes 41-46 (gem: abc_client.rb line 248)
       publish_binary_if_changed_(this->derated_sensor_,
                                  this->current_fault_ >= 41 && this->current_fault_ <= 46);
@@ -1594,7 +1594,7 @@ void WaterFurnaceAurora::publish_power_loop_sensors_(const RegisterMap &regs) {
   }
 }
 
-void WaterFurnaceAurora::publish_vs_drive_sensors_(const RegisterMap &regs) {
+void WaterFurnaceAurora::publish_compressor_drive_sensors_(const RegisterMap &regs) {
   // Compressor speed — source depends on whether VS drive is present.
   // VS Drive: read directly from register 3001 (actual speed, 0-12 Hz).
   // Non-VS (Generic): derive from system outputs register 30, per Ruby gem
@@ -1618,19 +1618,19 @@ void WaterFurnaceAurora::publish_vs_drive_sensors_(const RegisterMap &regs) {
   this->publish_sensor(regs, registers::COMPRESSOR_SPEED_DESIRED, this->compressor_desired_speed_sensor_);
   this->publish_sensor_signed_tenths(regs, registers::VS_DISCHARGE_TEMP, this->discharge_temperature_sensor_);
   this->publish_sensor_signed_tenths(regs, registers::VS_SUCTION_TEMP, this->suction_temperature_sensor_);
-  this->publish_sensor_signed_tenths(regs, registers::VS_DRIVE_TEMP, this->vs_drive_temperature_sensor_);
-  this->publish_sensor_signed_tenths(regs, registers::VS_INVERTER_TEMP, this->vs_inverter_temperature_sensor_);
-  this->publish_sensor(regs, registers::VS_FAN_SPEED, this->vs_fan_speed_sensor_);
-  this->publish_sensor_signed_tenths(regs, registers::VS_AMBIENT_TEMP, this->vs_ambient_temperature_sensor_);
-  this->publish_sensor_uint32(regs, registers::VS_COMPRESSOR_WATTS, this->vs_compressor_watts_sensor_);
+  this->publish_sensor_signed_tenths(regs, registers::VS_DRIVE_TEMP, this->compressor_drive_temperature_sensor_);
+  this->publish_sensor_signed_tenths(regs, registers::VS_INVERTER_TEMP, this->compressor_inverter_temperature_sensor_);
+  this->publish_sensor(regs, registers::VS_FAN_SPEED, this->compressor_fan_speed_sensor_);
+  this->publish_sensor_signed_tenths(regs, registers::VS_AMBIENT_TEMP, this->compressor_ambient_temperature_sensor_);
+  this->publish_sensor_uint32(regs, registers::VS_COMPRESSOR_WATTS, this->compressor_drive_watts_sensor_);
   this->publish_sensor_signed_tenths(regs, registers::VS_SAT_EVAP_DISCHARGE_TEMP, this->saturated_evaporator_discharge_temperature_sensor_);
   
-  // VS Drive additional diagnostics
-  this->publish_sensor_signed_tenths(regs, registers::VS_ENTERING_WATER_TEMP, this->vs_entering_water_temperature_sensor_);
-  this->publish_sensor(regs, registers::VS_LINE_VOLTAGE, this->vs_line_voltage_sensor_);
-  this->publish_sensor(regs, registers::VS_THERMO_POWER, this->vs_thermo_power_sensor_);
-  this->publish_sensor_uint32(regs, registers::VS_SUPPLY_VOLTAGE, this->vs_supply_voltage_sensor_);
-  this->publish_sensor(regs, registers::VS_UDC_VOLTAGE, this->vs_udc_voltage_sensor_);
+  // Compressor drive additional diagnostics
+  this->publish_sensor_signed_tenths(regs, registers::VS_ENTERING_WATER_TEMP, this->compressor_entering_water_temperature_sensor_);
+  this->publish_sensor(regs, registers::VS_LINE_VOLTAGE, this->compressor_line_voltage_sensor_);
+  this->publish_sensor(regs, registers::VS_THERMO_POWER, this->compressor_thermo_power_sensor_);
+  this->publish_sensor_uint32(regs, registers::VS_SUPPLY_VOLTAGE, this->compressor_supply_voltage_sensor_);
+  this->publish_sensor(regs, registers::VS_UDC_VOLTAGE, this->compressor_udc_voltage_sensor_);
   
   // AXB current sensors (tenths of amps)
   this->publish_sensor_tenths(regs, registers::AXB_BLOWER_AMPS, this->blower_amps_sensor_);
@@ -1638,21 +1638,21 @@ void WaterFurnaceAurora::publish_vs_drive_sensors_(const RegisterMap &regs) {
   this->publish_sensor_tenths(regs, registers::AXB_COMPRESSOR1_AMPS, this->compressor_1_amps_sensor_);
   this->publish_sensor_tenths(regs, registers::AXB_COMPRESSOR2_AMPS, this->compressor_2_amps_sensor_);
   
-  // VS Drive status strings — guard with raw register comparison to avoid
+  // Compressor drive status strings — guard with raw register comparison to avoid
   // bitmask_to_string() heap allocation when the underlying register is unchanged.
   {
     const uint16_t *val = reg_find(regs, registers::VS_DERATE);
-    if (val && *val != this->cached_vs_derate_raw_) {
-      this->cached_vs_derate_raw_ = *val;
-      this->publish_text_if_changed(this->vs_derate_sensor_, this->cached_vs_derate_,
+    if (val && *val != this->cached_compressor_derate_raw_) {
+      this->cached_compressor_derate_raw_ = *val;
+      this->publish_text_if_changed(this->compressor_derate_sensor_, this->cached_compressor_derate_,
                                       get_vs_derate_string(*val));
     }
   }
   {
     const uint16_t *val = reg_find(regs, registers::VS_SAFE_MODE);
-    if (val && *val != this->cached_vs_safe_mode_raw_) {
-      this->cached_vs_safe_mode_raw_ = *val;
-      this->publish_text_if_changed(this->vs_safe_mode_sensor_, this->cached_vs_safe_mode_,
+    if (val && *val != this->cached_compressor_safe_mode_raw_) {
+      this->cached_compressor_safe_mode_raw_ = *val;
+      this->publish_text_if_changed(this->compressor_safe_mode_sensor_, this->cached_compressor_safe_mode_,
                                       get_vs_safe_mode_string(*val));
     }
   }
@@ -1660,28 +1660,28 @@ void WaterFurnaceAurora::publish_vs_drive_sensors_(const RegisterMap &regs) {
     const uint16_t *val_a1 = reg_find(regs, registers::VS_ALARM1);
     const uint16_t *val_a2 = reg_find(regs, registers::VS_ALARM2);
     if (val_a1 && val_a2 &&
-        (*val_a1 != this->cached_vs_alarm1_raw_ || *val_a2 != this->cached_vs_alarm2_raw_)) {
-      this->cached_vs_alarm1_raw_ = *val_a1;
-      this->cached_vs_alarm2_raw_ = *val_a2;
-      this->publish_text_if_changed(this->vs_alarm_sensor_, this->cached_vs_alarm_,
+        (*val_a1 != this->cached_compressor_alarm1_raw_ || *val_a2 != this->cached_compressor_alarm2_raw_)) {
+      this->cached_compressor_alarm1_raw_ = *val_a1;
+      this->cached_compressor_alarm2_raw_ = *val_a2;
+      this->publish_text_if_changed(this->compressor_alarm_sensor_, this->cached_compressor_alarm_,
                                       get_vs_alarm_string(*val_a1, *val_a2));
     }
   }
 
-  // VS Drive 3200-range duplicate status strings (gap 14)
+  // Compressor drive 3200-range duplicate status strings (gap 14)
   {
     const uint16_t *val = reg_find(regs, registers::VS_DRIVE_DERATE_ALT);
-    if (val && *val != this->cached_vs_drive_derate_alt_raw_) {
-      this->cached_vs_drive_derate_alt_raw_ = *val;
-      this->publish_text_if_changed(this->vs_drive_derate_alt_sensor_, this->cached_vs_drive_derate_alt_,
+    if (val && *val != this->cached_compressor_derate_alt_raw_) {
+      this->cached_compressor_derate_alt_raw_ = *val;
+      this->publish_text_if_changed(this->compressor_derate_alt_sensor_, this->cached_compressor_derate_alt_,
                                       get_vs_derate_string(*val));
     }
   }
   {
     const uint16_t *val = reg_find(regs, registers::VS_DRIVE_SAFE_MODE_ALT);
-    if (val && *val != this->cached_vs_drive_safe_mode_alt_raw_) {
-      this->cached_vs_drive_safe_mode_alt_raw_ = *val;
-      this->publish_text_if_changed(this->vs_drive_safe_mode_alt_sensor_, this->cached_vs_drive_safe_mode_alt_,
+    if (val && *val != this->cached_compressor_safe_mode_alt_raw_) {
+      this->cached_compressor_safe_mode_alt_raw_ = *val;
+      this->publish_text_if_changed(this->compressor_safe_mode_alt_sensor_, this->cached_compressor_safe_mode_alt_,
                                       get_vs_safe_mode_string(*val));
     }
   }
@@ -1689,10 +1689,10 @@ void WaterFurnaceAurora::publish_vs_drive_sensors_(const RegisterMap &regs) {
     const uint16_t *val_a1 = reg_find(regs, registers::VS_DRIVE_ALARM1_ALT);
     const uint16_t *val_a2 = reg_find(regs, registers::VS_DRIVE_ALARM2_ALT);
     if (val_a1 && val_a2 &&
-        (*val_a1 != this->cached_vs_drive_alarm1_alt_raw_ || *val_a2 != this->cached_vs_drive_alarm2_alt_raw_)) {
-      this->cached_vs_drive_alarm1_alt_raw_ = *val_a1;
-      this->cached_vs_drive_alarm2_alt_raw_ = *val_a2;
-      this->publish_text_if_changed(this->vs_drive_alarm_alt_sensor_, this->cached_vs_drive_alarm_alt_,
+        (*val_a1 != this->cached_compressor_alarm1_alt_raw_ || *val_a2 != this->cached_compressor_alarm2_alt_raw_)) {
+      this->cached_compressor_alarm1_alt_raw_ = *val_a1;
+      this->cached_compressor_alarm2_alt_raw_ = *val_a2;
+      this->publish_text_if_changed(this->compressor_alarm_alt_sensor_, this->cached_compressor_alarm_alt_,
                                       get_vs_alarm_string(*val_a1, *val_a2));
     }
   }
@@ -1700,8 +1700,8 @@ void WaterFurnaceAurora::publish_vs_drive_sensors_(const RegisterMap &regs) {
 
 void WaterFurnaceAurora::publish_equipment_sensors_(const RegisterMap &regs) {
   // FP1/FP2
-  this->publish_sensor_signed_tenths(regs, registers::FP1_TEMP, this->fp1_temperature_sensor_);
-  this->publish_sensor_signed_tenths(regs, registers::FP2_TEMP, this->fp2_temperature_sensor_);
+  this->publish_sensor_signed_tenths(regs, registers::FP1_TEMP, this->cooling_liquid_line_temperature_sensor_);
+  this->publish_sensor_signed_tenths(regs, registers::FP2_TEMP, this->air_coil_temperature_sensor_);
   
   // Line voltage setting and anti-short-cycle
   this->publish_sensor(regs, registers::LINE_VOLTAGE_SETTING, this->line_voltage_setting_sensor_);
@@ -1729,11 +1729,11 @@ void WaterFurnaceAurora::publish_equipment_sensors_(const RegisterMap &regs) {
     this->publish_sensor(regs, registers::ECM_SPEED, this->blower_speed_sensor_);
   }
   this->publish_sensor(regs, registers::BLOWER_ONLY_SPEED, this->blower_only_speed_sensor_);
-  this->publish_sensor(regs, registers::LO_COMPRESSOR_ECM_SPEED, this->lo_compressor_speed_sensor_);
-  this->publish_sensor(regs, registers::HI_COMPRESSOR_ECM_SPEED, this->hi_compressor_speed_sensor_);
+  this->publish_sensor(regs, registers::LO_COMPRESSOR_ECM_SPEED, this->low_compressor_speed_sensor_);
+  this->publish_sensor(regs, registers::HI_COMPRESSOR_ECM_SPEED, this->high_compressor_speed_sensor_);
   this->publish_sensor(regs, registers::AUX_HEAT_ECM_SPEED, this->aux_heat_speed_sensor_);
   
-  // VS Pump
+  // Pump
   this->publish_sensor(regs, registers::VS_PUMP_SPEED, this->pump_speed_sensor_);
   this->publish_sensor(regs, registers::VS_PUMP_MIN, this->pump_min_speed_sensor_);
   this->publish_sensor(regs, registers::VS_PUMP_MAX, this->pump_max_speed_sensor_);
@@ -1782,12 +1782,12 @@ void WaterFurnaceAurora::publish_equipment_sensors_(const RegisterMap &regs) {
     }
   }
 
-  // VS Drive EEV2 Ctl (gap 15) — same bitmask as register 280
+  // Compressor drive EEV2 Ctl (gap 15) — same bitmask as register 280
   {
     const uint16_t *val = reg_find(regs, registers::VS_DRIVE_EEV2_CTL);
-    if (val && *val != this->cached_vs_drive_eev2_ctl_raw_) {
-      this->cached_vs_drive_eev2_ctl_raw_ = *val;
-      this->publish_text_if_changed(this->vs_drive_eev2_ctl_sensor_, this->cached_vs_drive_eev2_ctl_,
+    if (val && *val != this->cached_compressor_eev2_ctl_raw_) {
+      this->cached_compressor_eev2_ctl_raw_ = *val;
+      this->publish_text_if_changed(this->compressor_eev2_ctl_sensor_, this->cached_compressor_eev2_ctl_,
                                       get_eev2_ctl_string(*val));
     }
   }

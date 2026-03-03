@@ -29,7 +29,7 @@ BINARY_SENSORS = {
     "loop_pump_running": binary_sensor.binary_sensor_schema(
         device_class=DEVICE_CLASS_RUNNING,
     ),
-    "lockout": binary_sensor.binary_sensor_schema(
+    "locked_out": binary_sensor.binary_sensor_schema(
         device_class=DEVICE_CLASS_PROBLEM,
     ),
     "humidifier_running": binary_sensor.binary_sensor_schema(
