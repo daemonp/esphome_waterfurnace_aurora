@@ -44,7 +44,8 @@ enum class PendingRequest : uint8_t {
   SETUP_ID,          // func 0x03 read for model/serial
   SETUP_DETECT,      // func 0x42 read for hardware detection
   SETUP_VS_PROBE,    // func 0x42 read for VS drive probing
-  POLL_REGISTERS,    // func 0x42 read for normal polling
+  POLL_REGISTERS,    // func 0x42 read for normal polling (first batch)
+  POLL_REGISTERS_MEDIUM, // func 0x42 read for medium-tier overflow (second batch)
   POLL_FAULT_HISTORY,// func 0x03 read for fault history
   POLL_DEALER_INFO,  // func 0x03 read for dealer information
   WRITE_SINGLE,      // func 0x06 write
@@ -454,8 +455,11 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   
   // --- Polling ---
   void start_poll_cycle_();
+  void start_medium_poll_();
   void start_fault_history_read_();
   void process_poll_response_(const protocol::ParsedResponse &resp);
+  void process_medium_poll_response_(const protocol::ParsedResponse &resp);
+  void finish_poll_cycle_();
   void process_fault_history_response_(const protocol::ParsedResponse &resp);
   void start_dealer_info_read_();
   void process_dealer_info_response_(const protocol::ParsedResponse &resp);
@@ -476,6 +480,14 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   void publish_config_sensors_(const RegisterMap &regs);
   void publish_humidity_control_sensors_(const RegisterMap &regs);
   void publish_iz2_zone_sensors_(const RegisterMap &regs);
+  
+  /// Bounds-checked address insertion for poll address arrays.
+  /// Silently stops adding if the buffer is full (logged once in start_poll_cycle_).
+  void add_poll_addr_(uint16_t addr) {
+    if (this->addresses_to_read_len_ < MAX_POLL_ADDRESSES) {
+      this->addresses_to_read_[this->addresses_to_read_len_++] = addr;
+    }
+  }
   
   // --- Write handling ---
   void process_pending_writes_();
@@ -672,7 +684,10 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   RegisterMap register_cache_;
   
   // Pre-allocated array for register addresses (built each poll cycle).
-  std::array<uint16_t, protocol::MAX_REGISTERS_PER_REQUEST> addresses_to_read_;
+  // Sized to 2× MAX_REGISTERS_PER_REQUEST to accommodate fast + medium tier
+  // addresses before splitting into separate ABC requests (100-register limit).
+  static constexpr size_t MAX_POLL_ADDRESSES = 200;
+  std::array<uint16_t, MAX_POLL_ADDRESSES> addresses_to_read_;
   size_t addresses_to_read_len_{0};
   
   // --- Heat pump state ---
