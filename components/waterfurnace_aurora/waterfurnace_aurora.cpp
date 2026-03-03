@@ -210,7 +210,7 @@ void WaterFurnaceAurora::handle_timeout_() {
     this->transition_(State::ERROR_BACKOFF);
   } else if (this->pending_request_ == PendingRequest::POLL_FAULT_HISTORY) {
     // Fault history read failure — not critical, skip this cycle
-    ESP_LOGD(TAG, "Fault history read timed out");
+    ESP_LOGW(TAG, "Fault history read timed out (no response from ABC for func 0x41)");
     // Chain to dealer info if needed, otherwise go idle
     if (!this->dealer_info_read_ && this->has_any_dealer_sensor_()) {
       this->start_dealer_info_read_();
@@ -1145,6 +1145,12 @@ void WaterFurnaceAurora::finish_poll_cycle_() {
   
   // Check if we need fault history this cycle
   bool slow_poll = (this->poll_tier_counter_ % 60) == 0;
+  if (slow_poll) {
+    ESP_LOGD(TAG, "Slow tier cycle %d: fault_sensor=%s, fault_counters=%s",
+             this->poll_tier_counter_,
+             this->fault_history_sensor_ != nullptr ? "yes" : "no",
+             this->has_any_fault_counter_sensor_ ? "yes" : "no");
+  }
   if (slow_poll && (this->fault_history_sensor_ != nullptr || this->has_any_fault_counter_sensor_)) {
     this->start_fault_history_read_();
     return;
@@ -1160,6 +1166,7 @@ void WaterFurnaceAurora::finish_poll_cycle_() {
 }
 
 void WaterFurnaceAurora::start_fault_history_read_() {
+  ESP_LOGD(TAG, "Starting fault history read (func 0x41, regs 601-699)");
   // Ruby gem reads 601..699 via func 0x41 (read contiguous ranges).
   // The ABC board does not respond to func 0x03 for this register range.
   auto frame = protocol::build_read_ranges_request(
@@ -1180,6 +1187,7 @@ void WaterFurnaceAurora::start_fault_history_read_() {
 }
 
 void WaterFurnaceAurora::process_fault_history_response_(const protocol::ParsedResponse &resp) {
+  ESP_LOGD(TAG, "Fault history response received (%d register values)", resp.registers.size());
   // Publish individual fault counters (E1-E99)
   // Each register value is the count of how many times that fault occurred.
   // Register 601 = E1, 602 = E2, ..., 699 = E99.
