@@ -615,8 +615,13 @@ void WaterFurnaceAurora::process_setup_detect_response_(const protocol::ParsedRe
   if (!this->axb_override_) {
     const uint16_t *val = reg_find(result, registers::AXB_INSTALLED);
     if (val) {
-      this->has_axb_ = (*val != COMPONENT_NOT_INSTALLED && *val != COMPONENT_UNSUPPORTED);
-      ESP_LOGD(TAG, "AXB reg %d = %d -> %s", registers::AXB_INSTALLED, *val,
+      // Match upstream gem: only value 3 ("removed") means absent.
+      // 0xFFFF ("missing" in COMPONENT_STATUS) is NOT excluded here because
+      // some ABC firmware versions return 0xFFFF even when the AXB is physically
+      // present.  Downstream code handles absent-DHW gracefully (sentinel values
+      // in register 1114 map to NAN, and water_heater guards against NAN).
+      this->has_axb_ = (*val != COMPONENT_NOT_INSTALLED);
+      ESP_LOGD(TAG, "AXB reg %d = %d (0x%04X) -> %s", registers::AXB_INSTALLED, *val, *val,
                this->has_axb_ ? "present" : "absent");
     }
   }
