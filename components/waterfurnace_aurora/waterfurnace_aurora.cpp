@@ -473,6 +473,9 @@ void WaterFurnaceAurora::dump_config() {
   ESP_LOGCONFIG(TAG, "  Blower: %s", this->blower_type_ == BlowerType::PSC ? "PSC" :
                 this->blower_type_ == BlowerType::FIVE_SPEED ? "5-Speed" : "ECM");
   ESP_LOGCONFIG(TAG, "  Pump: %s", get_pump_type_string(this->pump_type_));
+  if (this->water_temps_swapped_) {
+    ESP_LOGCONFIG(TAG, "  Water Temps Swapped: yes (EWT/LWT labels, COP heat registers, approach temp corrected)");
+  }
   ESP_LOGCONFIG(TAG, "  Energy Monitor: %s",
                 this->energy_monitor_level_ == 0 ? "None" :
                 this->energy_monitor_level_ == 1 ? "Compressor Monitor" : "Energy Monitor");
@@ -939,10 +942,12 @@ void WaterFurnaceAurora::build_poll_addresses_() {
     }
   }
   
-  if (this->has_axb_ && this->awl_axb()) {
-    this->add_poll_addr_(registers::VS_PUMP_SPEED);
-    if (this->is_vs_pump()) {
-      this->add_poll_addr_(registers::VS_PUMP_MANUAL);
+  // VS pump registers — the Ruby gem gates 321..324 on is_vs_pump (VSPump class),
+  // but only adds 325 (actual speed readback) when awl_axb? is true.
+  if (this->is_vs_pump()) {
+    this->add_poll_addr_(registers::VS_PUMP_MANUAL);
+    if (this->awl_axb()) {
+      this->add_poll_addr_(registers::VS_PUMP_SPEED);
     }
   }
   
@@ -1002,7 +1007,7 @@ void WaterFurnaceAurora::build_poll_addresses_() {
       this->add_poll_addr_(registers::AUX_HEAT_ECM_SPEED);
     }
     
-    if (this->has_axb_) {
+    if (this->is_vs_pump()) {
       this->add_poll_addr_(registers::VS_PUMP_MIN);
       this->add_poll_addr_(registers::VS_PUMP_MAX);
     }
@@ -1494,8 +1499,15 @@ void WaterFurnaceAurora::publish_temperature_sensors_(const RegisterMap &regs) {
         this->outdoor_temperature_sensor_->publish_state(fval);
     }
   }
-  this->publish_sensor_signed_tenths(regs, registers::LEAVING_WATER, this->leaving_water_temperature_sensor_);
-  this->publish_sensor_signed_tenths(regs, registers::ENTERING_WATER, this->entering_water_temperature_sensor_);
+  // When water_temps_swapped_ is true, the physical thermistors are on the wrong pipes,
+  // so the ABC board's "entering" register actually reads leaving water and vice versa.
+  // Swap the register→sensor mapping so HA labels match the physical reality.
+  {
+    uint16_t ewt_reg = this->water_temps_swapped_ ? registers::LEAVING_WATER : registers::ENTERING_WATER;
+    uint16_t lwt_reg = this->water_temps_swapped_ ? registers::ENTERING_WATER : registers::LEAVING_WATER;
+    this->publish_sensor_signed_tenths(regs, ewt_reg, this->entering_water_temperature_sensor_);
+    this->publish_sensor_signed_tenths(regs, lwt_reg, this->leaving_water_temperature_sensor_);
+  }
   
   // Humidity — update cached value for climate entity current_humidity,
   // and publish to the standalone sensor if configured.
@@ -1763,8 +1775,14 @@ void WaterFurnaceAurora::publish_equipment_sensors_(const RegisterMap &regs) {
     }
   }
   
-  this->publish_sensor_int32(regs, registers::HEAT_OF_EXTRACTION, this->heat_of_extraction_sensor_);
-  this->publish_sensor_int32(regs, registers::HEAT_OF_REJECTION, this->heat_of_rejection_sensor_);
+  // When water_temps_swapped_, the ABC board's delta-T has the wrong sign, so its
+  // heat values end up in the wrong register.  Swap sensor mapping to match reality.
+  {
+    uint16_t extraction_reg = this->water_temps_swapped_ ? registers::HEAT_OF_REJECTION : registers::HEAT_OF_EXTRACTION;
+    uint16_t rejection_reg = this->water_temps_swapped_ ? registers::HEAT_OF_EXTRACTION : registers::HEAT_OF_REJECTION;
+    this->publish_sensor_int32(regs, extraction_reg, this->heat_of_extraction_sensor_);
+    this->publish_sensor_int32(regs, rejection_reg, this->heat_of_rejection_sensor_);
+  }
   
   // AXB diagnostic sensors (medium tier)
   this->publish_sensor_signed_tenths(regs, registers::AXB_LEAVING_AIR_TEMP, this->axb_leaving_air_temperature_sensor_);
@@ -2394,8 +2412,11 @@ void WaterFurnaceAurora::publish_derived_sensors(const RegisterMap &regs) {
         uint32_t total_watts = to_uint32(*tw_h, *tw_l);
         if (total_watts > 0) {
           bool cooling = (this->system_outputs_ & OUTPUT_RV) != 0;
-          // Heating → ground-side heat is EXTRACTION; Cooling → ground-side heat is REJECTION
-          uint16_t heat_reg = cooling ? registers::HEAT_OF_REJECTION : registers::HEAT_OF_EXTRACTION;
+          // Heating → ground-side heat is EXTRACTION; Cooling → ground-side heat is REJECTION.
+          // When water_temps_swapped_, the ABC board's delta-T sign is inverted, so the
+          // heat value lands in the opposite register — swap which one we read.
+          bool swap = this->water_temps_swapped_;
+          uint16_t heat_reg = (cooling != swap) ? registers::HEAT_OF_REJECTION : registers::HEAT_OF_EXTRACTION;
           const uint16_t *heat_h = reg_find(regs, heat_reg);
           const uint16_t *heat_l = reg_find(regs, heat_reg + 1);
           if (heat_h && heat_l) {
@@ -2438,7 +2459,9 @@ void WaterFurnaceAurora::publish_derived_sensors(const RegisterMap &regs) {
         float sat_cond = to_signed_tenths(*val_sc);
         bool cooling = (this->system_outputs_ & OUTPUT_RV) != 0;
         if (cooling) {
-          const uint16_t *val_ew = reg_find(regs, registers::ENTERING_WATER);
+          // When water_temps_swapped_, actual EWT is in the LEAVING_WATER register
+          uint16_t ewt_reg = this->water_temps_swapped_ ? registers::LEAVING_WATER : registers::ENTERING_WATER;
+          const uint16_t *val_ew = reg_find(regs, ewt_reg);
           if (val_ew)
             this->approach_temperature_sensor_->publish_state(sat_cond - to_signed_tenths(*val_ew));
         } else {

@@ -26,6 +26,7 @@ CONF_HAS_AXB = "has_axb"
 CONF_HAS_VS_DRIVE = "has_vs_drive"
 CONF_HAS_IZ2 = "has_iz2"
 CONF_NUM_IZ2_ZONES = "num_iz2_zones"
+CONF_WATER_TEMPS_SWAPPED = "water_temps_swapped"
 CONF_ZONE = "zone"
 UNIT_FAHRENHEIT = "°F"
 
@@ -63,6 +64,10 @@ CONFIG_SCHEMA = (
             cv.Optional(CONF_HAS_VS_DRIVE): cv.boolean,
             cv.Optional(CONF_HAS_IZ2): cv.boolean,
             cv.Optional(CONF_NUM_IZ2_ZONES): cv.int_range(min=0, max=6),
+            # Water temperature sensor swap — use when EWT/LWT thermistors are
+            # physically connected to the wrong pipes.  Corrects sensor labels,
+            # COP heat-register selection, and approach temperature.
+            cv.Optional(CONF_WATER_TEMPS_SWAPPED, default=False): cv.boolean,
         }
     )
     .extend(cv.COMPONENT_SCHEMA)
@@ -98,3 +103,4 @@ async def to_code(config):
         cg.add(var.set_has_iz2_override(config[CONF_HAS_IZ2]))
     if CONF_NUM_IZ2_ZONES in config:
         cg.add(var.set_num_iz2_zones_override(config[CONF_NUM_IZ2_ZONES]))
+    cg.add(var.set_water_temps_swapped(config[CONF_WATER_TEMPS_SWAPPED]))

@@ -90,6 +90,7 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   void set_has_vs_drive_override(bool value) { this->has_vs_drive_ = value; this->vs_drive_override_ = true; }
   void set_has_iz2_override(bool value) { this->has_iz2_ = value; this->iz2_override_ = true; }
   void set_num_iz2_zones_override(uint8_t value) { this->num_iz2_zones_ = value; this->iz2_zones_override_ = true; }
+  void set_water_temps_swapped(bool value) { this->water_temps_swapped_ = value; }
 
   // Connected sensor
   void set_connected_sensor(binary_sensor::BinarySensor *sensor) { this->connected_sensor_ = sensor; }
@@ -626,6 +627,7 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   bool vs_drive_override_{false};
   bool iz2_override_{false};
   bool iz2_zones_override_{false};
+  bool water_temps_swapped_{false};  ///< Physical EWT/LWT thermistors on wrong pipes
   
   // --- State machine ---
   State state_{State::SETUP_READ_ID};

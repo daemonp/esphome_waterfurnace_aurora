@@ -1,5 +1,6 @@
 #include "catch_amalgamated.hpp"
 #include "waterfurnace_aurora.h"
+#include <set>
 
 using namespace esphome;
 using namespace esphome::waterfurnace_aurora;
@@ -1009,6 +1010,378 @@ TEST_CASE("Approach temperature requires compressor running", "[hub][sensors][de
     run_poll(0x0000, 500, 550, 480, 300);
     REQUIRE(std::isnan(approach.state));
   }
+}
+
+// ============================================================================
+// VS Pump Register Polling Gating
+// ============================================================================
+
+// Helper: extract the set of register addresses from a func 0x42 transmitted frame
+static std::set<uint16_t> extract_poll_addresses(const std::vector<uint8_t> &tx) {
+  std::set<uint16_t> addrs;
+  if (tx.size() >= 4) {
+    size_t num_regs = (tx.size() - 4) / 2;
+    for (size_t i = 0; i < num_regs; i++) {
+      addrs.insert((tx[2 + i * 2] << 8) | tx[3 + i * 2]);
+    }
+  }
+  return addrs;
+}
+
+// Helper: custom drive_setup that allows setting pump type and AXB version.
+// pump_type_val: raw register 413 value (0=open_loop, 3=VS_PUMP, etc.)
+// axb_version_val: raw register 807 value (100=v1.00, 200=v2.00), 0 = AXB absent
+// has_axb: whether to set the AXB override
+static void drive_setup_with_pump(WaterFurnaceAurora &hub, uint16_t pump_type_val,
+                                  uint16_t axb_version_val, bool has_axb) {
+  if (has_axb) hub.set_has_axb_override(true);
+  hub.setup();
+
+  // Step 1: ID request
+  hub.loop();
+  hub.mock_get_transmitted();
+  complete_tx(hub, 0);
+  std::vector<uint16_t> id_values(18, 0x2020);
+  hub.mock_receive(make_response_03(id_values));
+  set_millis(50);
+  hub.loop();
+
+  // Step 2: Detect request
+  hub.loop();
+  auto tx = hub.mock_get_transmitted();
+  size_t num_detect_regs = (tx.size() - 4) / 2;
+  std::vector<std::pair<uint16_t, uint16_t>> detect_vals;
+  for (size_t i = 0; i < num_detect_regs; i++) {
+    uint16_t addr = (tx[2 + i * 2] << 8) | tx[3 + i * 2];
+    uint16_t val = 3;
+    if (addr == registers::THERMOSTAT_VERSION) val = 300;
+    if (addr == registers::AXB_VERSION) val = axb_version_val;
+    if (addr == registers::BLOWER_TYPE) val = 0;
+    if (addr == registers::ENERGY_MONITOR) val = 0;
+    if (addr == registers::PUMP_TYPE) val = pump_type_val;
+    if (addr >= 88 && addr <= 91) val = 0x2020;
+    detect_vals.emplace_back(addr, val);
+  }
+  complete_tx(hub, 50);
+  hub.mock_receive(make_response_42(detect_vals));
+  set_millis(100);
+  hub.loop();
+
+  // Step 3: VS probe
+  hub.loop();
+  hub.loop();
+  hub.mock_get_transmitted();
+  complete_tx(hub, 100);
+  hub.mock_receive(make_response_42({{3001, 0}, {3322, 0}, {3325, 0}}));
+  set_millis(150);
+  hub.loop();
+  REQUIRE(hub.is_setup_complete());
+}
+
+TEST_CASE("VS pump register gating matches Ruby gem", "[hub][pump][poll]") {
+  // Trigger a poll and return the set of requested addresses
+  auto get_poll_addrs = [](WaterFurnaceAurora &hub, uint32_t time_ms) -> std::set<uint16_t> {
+    set_millis(time_ms);
+    hub.update();
+    auto tx = hub.mock_get_transmitted();
+    REQUIRE(tx.size() > 0);
+    complete_tx(hub, time_ms);
+    // Feed back a minimal valid response so the hub can process it
+    size_t num_regs = (tx.size() - 4) / 2;
+    std::vector<std::pair<uint16_t, uint16_t>> resp_vals;
+    for (size_t i = 0; i < num_regs; i++) {
+      uint16_t addr = (tx[2 + i * 2] << 8) | tx[3 + i * 2];
+      resp_vals.emplace_back(addr, 0);
+    }
+    hub.mock_receive(make_response_42(resp_vals));
+    set_millis(time_ms + 50);
+    hub.loop();
+    return extract_poll_addresses(tx);
+  };
+
+  SECTION("VS pump + AXB v1.x: polls 321, 322, 323 but NOT 325") {
+    // AXB v1.01 — awl_axb() is false; VS pump type 3
+    WaterFurnaceAurora hub;
+    set_millis(0);
+    drive_setup_with_pump(hub, 3, 101, true);  // pump=VS_PUMP, axb=v1.01
+
+    // First poll (fast tier)
+    auto addrs = get_poll_addrs(hub, 200);
+    REQUIRE(addrs.count(registers::VS_PUMP_MANUAL) == 1);   // 323 — any VS pump
+    REQUIRE(addrs.count(registers::VS_PUMP_SPEED) == 0);    // 325 — requires awl_axb
+
+    // Run enough fast polls to get to a medium-tier poll (every 6th cycle)
+    std::set<uint16_t> all_addrs;
+    for (int i = 0; i < 7; i++) {
+      auto a = get_poll_addrs(hub, 300 + i * 100);
+      all_addrs.insert(a.begin(), a.end());
+    }
+    REQUIRE(all_addrs.count(registers::VS_PUMP_MIN) == 1);  // 321 — any VS pump
+    REQUIRE(all_addrs.count(registers::VS_PUMP_MAX) == 1);  // 322 — any VS pump
+  }
+
+  SECTION("VS pump + AXB v2.x: polls 321, 322, 323, AND 325") {
+    // AXB v2.00 — awl_axb() is true; VS pump type 3
+    WaterFurnaceAurora hub;
+    set_millis(0);
+    drive_setup_with_pump(hub, 3, 200, true);  // pump=VS_PUMP, axb=v2.00
+
+    // First poll (fast tier)
+    auto addrs = get_poll_addrs(hub, 200);
+    REQUIRE(addrs.count(registers::VS_PUMP_MANUAL) == 1);   // 323
+    REQUIRE(addrs.count(registers::VS_PUMP_SPEED) == 1);    // 325
+
+    // Run polls to reach medium tier
+    std::set<uint16_t> all_addrs;
+    for (int i = 0; i < 7; i++) {
+      auto a = get_poll_addrs(hub, 300 + i * 100);
+      all_addrs.insert(a.begin(), a.end());
+    }
+    REQUIRE(all_addrs.count(registers::VS_PUMP_MIN) == 1);  // 321
+    REQUIRE(all_addrs.count(registers::VS_PUMP_MAX) == 1);  // 322
+  }
+
+  SECTION("non-VS pump + AXB: does NOT poll VS pump registers") {
+    // AXB v2.00 but pump type 0 (OPEN_LOOP) — is_vs_pump() is false
+    WaterFurnaceAurora hub;
+    set_millis(0);
+    drive_setup_with_pump(hub, 0, 200, true);  // pump=OPEN_LOOP, axb=v2.00
+
+    // Run enough polls to cover all tiers
+    std::set<uint16_t> all_addrs;
+    for (int i = 0; i < 7; i++) {
+      auto a = get_poll_addrs(hub, 200 + i * 100);
+      all_addrs.insert(a.begin(), a.end());
+    }
+    REQUIRE(all_addrs.count(registers::VS_PUMP_MIN) == 0);    // 321
+    REQUIRE(all_addrs.count(registers::VS_PUMP_MAX) == 0);    // 322
+    REQUIRE(all_addrs.count(registers::VS_PUMP_MANUAL) == 0); // 323
+    REQUIRE(all_addrs.count(registers::VS_PUMP_SPEED) == 0);  // 325
+  }
+}
+
+// ============================================================================
+// Water Temps Swapped
+// ============================================================================
+
+TEST_CASE("water_temps_swapped corrects sensor labels", "[hub][swap][sensors]") {
+  WaterFurnaceAurora hub;
+  sensor::Sensor ewt, lwt;
+  hub.set_entering_water_temperature_sensor(&ewt);
+  hub.set_leaving_water_temperature_sensor(&lwt);
+  hub.set_has_axb_override(true);
+  hub.set_water_temps_swapped(true);
+
+  set_millis(0);
+  drive_setup_with_pump(hub, 0, 200, true);
+
+  // Run a poll with known EWT/LWT register values
+  // ABC board register 1111 (ENTERING_WATER) = 480 → 48.0°F (physically LWT due to swap)
+  // ABC board register 1110 (LEAVING_WATER)  = 450 → 45.0°F (physically EWT due to swap)
+  set_millis(200);
+  hub.update();
+  auto tx = hub.mock_get_transmitted();
+  REQUIRE(tx.size() > 0);
+  complete_tx(hub, 200);
+  size_t num_regs = (tx.size() - 4) / 2;
+  std::vector<std::pair<uint16_t, uint16_t>> resp;
+  for (size_t i = 0; i < num_regs; i++) {
+    uint16_t addr = (tx[2 + i * 2] << 8) | tx[3 + i * 2];
+    uint16_t val = 0;
+    if (addr == registers::ENTERING_WATER) val = 480;  // ABC says "entering" = 48.0
+    if (addr == registers::LEAVING_WATER) val = 450;   // ABC says "leaving" = 45.0
+    resp.emplace_back(addr, val);
+  }
+  hub.mock_receive(make_response_42(resp));
+  set_millis(250);
+  hub.loop();
+
+  // With swap: our EWT sensor should get the LEAVING_WATER register (45.0)
+  //            our LWT sensor should get the ENTERING_WATER register (48.0)
+  REQUIRE(ewt.has_state_);
+  REQUIRE(ewt.state == Catch::Approx(45.0f));
+  REQUIRE(lwt.has_state_);
+  REQUIRE(lwt.state == Catch::Approx(48.0f));
+}
+
+TEST_CASE("water_temps_swapped corrects COP heat register", "[hub][swap][cop]") {
+  WaterFurnaceAurora hub;
+  sensor::Sensor cop;
+  hub.set_cop_sensor(&cop);
+  hub.set_has_axb_override(true);
+  hub.set_water_temps_swapped(true);
+
+  set_millis(0);
+  // Custom setup with energy monitoring level 2 so COP registers are available
+  hub.setup();
+  hub.loop();
+  hub.mock_get_transmitted();
+  complete_tx(hub, 0);
+  std::vector<uint16_t> id_values(18, 0x2020);
+  hub.mock_receive(make_response_03(id_values));
+  set_millis(50);
+  hub.loop();
+
+  hub.loop();
+  auto tx = hub.mock_get_transmitted();
+  size_t num_detect_regs = (tx.size() - 4) / 2;
+  std::vector<std::pair<uint16_t, uint16_t>> detect_vals;
+  for (size_t i = 0; i < num_detect_regs; i++) {
+    uint16_t addr = (tx[2 + i * 2] << 8) | tx[3 + i * 2];
+    uint16_t val = 3;
+    if (addr == registers::THERMOSTAT_VERSION) val = 300;
+    if (addr == registers::AXB_VERSION) val = 200;
+    if (addr == registers::BLOWER_TYPE) val = 0;
+    if (addr == registers::ENERGY_MONITOR) val = 2;  // full energy monitoring
+    if (addr == registers::PUMP_TYPE) val = 0;
+    if (addr >= 88 && addr <= 91) val = 0x2020;
+    detect_vals.emplace_back(addr, val);
+  }
+  complete_tx(hub, 50);
+  hub.mock_receive(make_response_42(detect_vals));
+  set_millis(100);
+  hub.loop();
+
+  hub.loop();
+  hub.loop();
+  hub.mock_get_transmitted();
+  complete_tx(hub, 100);
+  hub.mock_receive(make_response_42({{3001, 0}, {3322, 0}, {3325, 0}}));
+  set_millis(150);
+  hub.loop();
+  REQUIRE(hub.is_setup_complete());
+
+  // Helper to run a poll with specific register values
+  auto run_cop_poll = [&](uint16_t outputs, uint16_t total_watts_h, uint16_t total_watts_l,
+                          uint16_t extraction_h, uint16_t extraction_l,
+                          uint16_t rejection_h, uint16_t rejection_l,
+                          uint32_t time_ms) {
+    set_millis(time_ms);
+    hub.update();
+    auto tx2 = hub.mock_get_transmitted();
+    REQUIRE(tx2.size() > 0);
+    complete_tx(hub, time_ms);
+    size_t nr = (tx2.size() - 4) / 2;
+    std::vector<std::pair<uint16_t, uint16_t>> resp;
+    for (size_t i = 0; i < nr; i++) {
+      uint16_t addr = (tx2[2 + i * 2] << 8) | tx2[3 + i * 2];
+      uint16_t val = 0;
+      if (addr == registers::SYSTEM_OUTPUTS) val = outputs;
+      if (addr == registers::TOTAL_WATTS) val = total_watts_h;
+      if (addr == registers::TOTAL_WATTS + 1) val = total_watts_l;
+      if (addr == registers::HEAT_OF_EXTRACTION) val = extraction_h;
+      if (addr == registers::HEAT_OF_EXTRACTION + 1) val = extraction_l;
+      if (addr == registers::HEAT_OF_REJECTION) val = rejection_h;
+      if (addr == registers::HEAT_OF_REJECTION + 1) val = rejection_l;
+      resp.emplace_back(addr, val);
+    }
+    hub.mock_receive(make_response_42(resp));
+    set_millis(time_ms + 50);
+    hub.loop();
+  };
+
+  SECTION("heating with swapped temps reads REJECTION register for COP") {
+    // Compressor on (CC=0x01), heating (no RV).
+    // With swapped temps, ABC board puts heating heat into REJECTION register (wrong sign).
+    // total_watts = 1000W, heat_of_rejection = 15000 BTU/h (where it actually ends up),
+    // heat_of_extraction = 0 (empty because of sign inversion).
+    //
+    // COP heating = (ground_btu + watts_btu) / watts_btu
+    //             = (15000 + 1000*3.412) / (1000*3.412)
+    //             = (15000 + 3412) / 3412 = 18412 / 3412 ≈ 5.39
+    run_cop_poll(OUTPUT_CC, 0, 1000, 0, 0, 0, 15000, 200);
+    REQUIRE(cop.has_state_);
+    REQUIRE(cop.state == Catch::Approx(18412.0f / 3412.0f).margin(0.01f));
+  }
+
+  SECTION("cooling with swapped temps reads EXTRACTION register for COP") {
+    // Compressor on + reversing valve (CC=0x01 | RV=0x04), cooling mode.
+    // With swapped temps, ABC board puts cooling heat into EXTRACTION register.
+    // total_watts = 1000W, heat_of_extraction = 15000 BTU/h, heat_of_rejection = 0.
+    //
+    // COP cooling = (ground_btu - watts_btu) / watts_btu
+    //             = (15000 - 3412) / 3412 = 11588 / 3412 ≈ 3.40
+    run_cop_poll(OUTPUT_CC | OUTPUT_RV, 0, 1000, 0, 15000, 0, 0, 200);
+    REQUIRE(cop.has_state_);
+    REQUIRE(cop.state == Catch::Approx(11588.0f / 3412.0f).margin(0.01f));
+  }
+}
+
+TEST_CASE("water_temps_swapped corrects approach temp in cooling", "[hub][swap][approach]") {
+  WaterFurnaceAurora hub;
+  sensor::Sensor approach;
+  hub.set_approach_temperature_sensor(&approach);
+  hub.set_has_axb_override(true);
+  hub.set_water_temps_swapped(true);
+
+  // Custom setup with AXB + refrigeration monitoring
+  set_millis(0);
+  hub.setup();
+  hub.loop();
+  hub.mock_get_transmitted();
+  complete_tx(hub, 0);
+  std::vector<uint16_t> id_values(18, 0x2020);
+  hub.mock_receive(make_response_03(id_values));
+  set_millis(50);
+  hub.loop();
+
+  hub.loop();
+  auto tx = hub.mock_get_transmitted();
+  size_t num_detect_regs = (tx.size() - 4) / 2;
+  std::vector<std::pair<uint16_t, uint16_t>> detect_vals;
+  for (size_t i = 0; i < num_detect_regs; i++) {
+    uint16_t addr = (tx[2 + i * 2] << 8) | tx[3 + i * 2];
+    uint16_t val = 3;
+    if (addr == registers::THERMOSTAT_VERSION) val = 300;
+    if (addr == registers::AXB_VERSION) val = 200;
+    if (addr == registers::BLOWER_TYPE) val = 0;
+    if (addr == registers::ENERGY_MONITOR) val = 1;
+    if (addr == registers::PUMP_TYPE) val = 0;
+    if (addr >= 88 && addr <= 91) val = 0x2020;
+    detect_vals.emplace_back(addr, val);
+  }
+  complete_tx(hub, 50);
+  hub.mock_receive(make_response_42(detect_vals));
+  set_millis(100);
+  hub.loop();
+
+  hub.loop();
+  hub.loop();
+  hub.mock_get_transmitted();
+  complete_tx(hub, 100);
+  hub.mock_receive(make_response_42({{3001, 0}, {3322, 0}, {3325, 0}}));
+  set_millis(150);
+  hub.loop();
+  REQUIRE(hub.is_setup_complete());
+
+  // Cooling mode: approach = sat_cond - EWT.
+  // With swap, actual EWT is in LEAVING_WATER register.
+  // sat_cond = 500 (50.0°F)
+  // LEAVING_WATER (actual EWT) = 480 (48.0°F) → approach = 50.0 - 48.0 = 2.0
+  // ENTERING_WATER (actual LWT) = 520 (52.0°F) — should NOT be used
+  set_millis(200);
+  hub.update();
+  auto tx2 = hub.mock_get_transmitted();
+  REQUIRE(tx2.size() > 0);
+  complete_tx(hub, 200);
+  size_t nr = (tx2.size() - 4) / 2;
+  std::vector<std::pair<uint16_t, uint16_t>> resp;
+  for (size_t i = 0; i < nr; i++) {
+    uint16_t addr = (tx2[2 + i * 2] << 8) | tx2[3 + i * 2];
+    uint16_t val = 0;
+    if (addr == registers::SYSTEM_OUTPUTS) val = OUTPUT_CC | OUTPUT_RV;  // cooling
+    if (addr == registers::SATURATED_CONDENSER_TEMP) val = 500;           // 50.0°F
+    if (addr == registers::LEAVING_WATER) val = 480;                      // 48.0°F (actual EWT)
+    if (addr == registers::ENTERING_WATER) val = 520;                     // 52.0°F (actual LWT)
+    resp.emplace_back(addr, val);
+  }
+  hub.mock_receive(make_response_42(resp));
+  set_millis(250);
+  hub.loop();
+
+  REQUIRE(approach.has_state_);
+  // Should use LEAVING_WATER (actual EWT = 48.0) not ENTERING_WATER (actual LWT = 52.0)
+  REQUIRE(approach.state == Catch::Approx(2.0f));
 }
 
 // ============================================================================

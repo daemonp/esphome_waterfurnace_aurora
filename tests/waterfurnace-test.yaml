@@ -51,6 +51,7 @@ waterfurnace_aurora:
   address: 1
   update_interval: 10s
   flow_control_pin: GPIO4
+  water_temps_swapped: false
   connected:
     name: "Test Heat Pump Connected"
   connected_timeout: 30s
