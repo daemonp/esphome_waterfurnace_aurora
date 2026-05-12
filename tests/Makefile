@@ -21,6 +21,10 @@ HUB_CXXFLAGS = $(BASE_FLAGS) $(SANITIZE_FLAGS) \
                -I../components/waterfurnace_aurora \
                -I.
 
+# Catch2 amalgamated triggers -Wmaybe-uninitialized in GCC's own <regex> headers;
+# suppress only for this compilation unit.
+CATCH_CXXFLAGS = $(BASE_FLAGS) $(SANITIZE_FLAGS) -I. -Wno-maybe-uninitialized
+
 LDFLAGS = $(SANITIZE_FLAGS)
 
 COMPONENT_DIR = ../components/waterfurnace_aurora
@@ -45,25 +49,29 @@ test: test_protocol test_registers test_hub test_climate_math
 	@echo ""
 	@echo "All tests passed!"
 
-test_protocol: test_protocol.cpp $(COMPONENT_DIR)/protocol.cpp $(COMPONENT_DIR)/protocol.h catch_amalgamated.cpp catch_amalgamated.hpp
-	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ test_protocol.cpp $(COMPONENT_DIR)/protocol.cpp catch_amalgamated.cpp
+# Compile Catch2 once as an object file (saves rebuild time)
+catch_amalgamated.o: catch_amalgamated.cpp catch_amalgamated.hpp
+	$(CXX) $(CATCH_CXXFLAGS) -c -o $@ catch_amalgamated.cpp
 
-test_registers: test_registers.cpp $(COMPONENT_DIR)/registers.cpp $(COMPONENT_DIR)/registers.h catch_amalgamated.cpp catch_amalgamated.hpp
-	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ test_registers.cpp $(COMPONENT_DIR)/registers.cpp catch_amalgamated.cpp
+test_protocol: test_protocol.cpp $(COMPONENT_DIR)/protocol.cpp $(COMPONENT_DIR)/protocol.h catch_amalgamated.o
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ test_protocol.cpp $(COMPONENT_DIR)/protocol.cpp catch_amalgamated.o
+
+test_registers: test_registers.cpp $(COMPONENT_DIR)/registers.cpp $(COMPONENT_DIR)/registers.h catch_amalgamated.o
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ test_registers.cpp $(COMPONENT_DIR)/registers.cpp catch_amalgamated.o
 
 test_hub: test_hub.cpp mock_impl.cpp $(COMPONENT_DIR)/waterfurnace_aurora.cpp $(COMPONENT_DIR)/waterfurnace_aurora.h \
           $(COMPONENT_DIR)/protocol.cpp $(COMPONENT_DIR)/protocol.h \
           $(COMPONENT_DIR)/registers.cpp $(COMPONENT_DIR)/registers.h \
           $(MOCK_HEADERS) \
-          catch_amalgamated.cpp catch_amalgamated.hpp
+          catch_amalgamated.o
 	$(CXX) $(HUB_CXXFLAGS) $(LDFLAGS) -o $@ test_hub.cpp mock_impl.cpp \
 		$(COMPONENT_DIR)/waterfurnace_aurora.cpp \
 		$(COMPONENT_DIR)/protocol.cpp \
 		$(COMPONENT_DIR)/registers.cpp \
-		catch_amalgamated.cpp
+		catch_amalgamated.o
 
-test_climate_math: test_climate_math.cpp $(COMPONENT_DIR)/climate/climate_math.h catch_amalgamated.cpp catch_amalgamated.hpp
-	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ test_climate_math.cpp catch_amalgamated.cpp
+test_climate_math: test_climate_math.cpp $(COMPONENT_DIR)/climate/climate_math.h catch_amalgamated.o
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ test_climate_math.cpp catch_amalgamated.o
 
 clean:
-	rm -f test_protocol test_registers test_hub test_climate_math
+	rm -f test_protocol test_registers test_hub test_climate_math catch_amalgamated.o

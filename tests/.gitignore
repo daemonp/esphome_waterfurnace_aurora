@@ -3,3 +3,10 @@
 # You can modify this file to suit your needs.
 /.esphome/
 /secrets.yaml
+
+# Compiled test binaries and objects
+/test_protocol
+/test_registers
+/test_hub
+/test_climate_math
+/catch_amalgamated.o
