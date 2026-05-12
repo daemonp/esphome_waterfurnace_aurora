@@ -435,7 +435,7 @@ void AuroraClimate::publish_zone_diagnostics_() {
   if (this->zone_normalized_size_sensor_ != nullptr) {
     float norm_size = static_cast<float>(zone.normalized_size);
     if (!this->zone_normalized_size_sensor_->has_state() ||
-        this->zone_normalized_size_sensor_->raw_state != norm_size) {
+        this->zone_normalized_size_sensor_->get_raw_state() != norm_size) {
       this->zone_normalized_size_sensor_->publish_state(norm_size);
     }
   }

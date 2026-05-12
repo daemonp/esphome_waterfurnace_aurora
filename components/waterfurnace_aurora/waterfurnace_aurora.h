@@ -537,9 +537,9 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
     if (sensor == nullptr) return false;
     if (!sensor->has_state()) return true;  // First publish — always send
     // Both NaN → no change; one NaN → changed; otherwise compare values
-    if (std::isnan(value)) return !std::isnan(sensor->raw_state);
-    if (std::isnan(sensor->raw_state)) return true;
-    return value != sensor->raw_state;
+    if (std::isnan(value)) return !std::isnan(sensor->get_raw_state());
+    if (std::isnan(sensor->get_raw_state())) return true;
+    return value != sensor->get_raw_state();
   }
 
   bool publish_sensor(const RegisterMap &result, uint16_t reg,

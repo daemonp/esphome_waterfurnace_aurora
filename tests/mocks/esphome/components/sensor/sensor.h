@@ -15,6 +15,7 @@ class Sensor {
   }
 
   bool has_state() const { return this->has_state_; }
+  float get_raw_state() const { return this->raw_state; }
   
   float state{NAN};
   float raw_state{NAN};
