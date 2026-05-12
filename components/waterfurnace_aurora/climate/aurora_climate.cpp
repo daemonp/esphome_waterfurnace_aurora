@@ -12,6 +12,12 @@ namespace waterfurnace_aurora {
 static const char *const TAG = "aurora.climate";
 
 void AuroraClimate::setup() {
+  // Register custom fan modes on the Climate entity (not on ClimateTraits).
+  // ClimateTraits::set_supported_custom_fan_modes() was deprecated in 2026.5.0
+  // and removed in 2026.11.0; the Climate entity method stores them and wires
+  // them into get_traits() automatically.
+  this->set_supported_custom_fan_modes({CUSTOM_FAN_MODE_INTERMITTENT});
+
   // Defer listener registration until hardware detection completes,
   // because is_iz2_mode_() depends on the result of has_iz2() detection.
   if (this->parent_->is_setup_complete()) {
@@ -63,10 +69,10 @@ climate::ClimateTraits AuroraClimate::traits() {
   
   // Supported fan modes from registers.rb FAN_MODE
   // Auto and On (Continuous) are built-in ESPHome fan modes.
-  // Intermittent is a WaterFurnace-specific mode exposed as a custom fan mode string.
+  // Intermittent is a WaterFurnace-specific mode exposed as a custom fan mode string,
+  // registered in setup() via Climate::set_supported_custom_fan_modes().
   traits.add_supported_fan_mode(climate::CLIMATE_FAN_AUTO);
   traits.add_supported_fan_mode(climate::CLIMATE_FAN_ON);  // Continuous
-  traits.set_supported_custom_fan_modes({CUSTOM_FAN_MODE_INTERMITTENT});
   
   // Presets - use BOOST for emergency heat (there's no CLIMATE_PRESET_EMERGENCY_HEAT)
   traits.add_supported_preset(climate::CLIMATE_PRESET_NONE);
