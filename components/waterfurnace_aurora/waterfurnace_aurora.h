@@ -511,12 +511,6 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   void on_write_register_service_(int32_t address, int32_t value);
 #endif
   
-  /// Estimate TX time in milliseconds for a given frame size at 19200 baud.
-  /// 19200 baud with 8E1 = 11 bits/byte → ~0.573ms/byte. We add 1ms margin.
-  uint32_t tx_time_ms_(size_t frame_bytes) const {
-    return static_cast<uint32_t>((frame_bytes * 11 * 1000) / 19200) + 2;
-  }
-
   // AWL version helpers
   bool awl_axb() const { return this->has_axb_ && this->axb_version_ >= 2.0f; }
   bool awl_thermostat() const { return this->thermostat_version_ >= 3.0f; }
