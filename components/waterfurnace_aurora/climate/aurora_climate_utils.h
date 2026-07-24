@@ -150,6 +150,8 @@ inline bool route_humidity_write(WaterFurnaceAurora *hub, climate::ClimateMode m
 /// Returns the target value (humidification for heat modes, dehumidification for cool),
 /// or NAN if the register is not cached.
 inline float read_mode_humidity_target(WaterFurnaceAurora *hub, climate::ClimateMode mode) {
+  if (hub == nullptr || !hub->has_humidistat_targets()) return NAN;
+
   uint16_t target_reg = (hub->has_iz2() && hub->awl_communicating())
                             ? registers::IZ2_HUMIDISTAT_TARGETS
                             : registers::HUMIDISTAT_TARGETS;
@@ -157,13 +159,18 @@ inline float read_mode_humidity_target(WaterFurnaceAurora *hub, climate::Climate
   if (std::isnan(raw)) return NAN;
 
   uint16_t packed = static_cast<uint16_t>(raw);
+  uint8_t byte = 0;
   switch (mode) {
     case climate::CLIMATE_MODE_COOL:
-      return static_cast<float>(packed & 0xFF);          // Low byte: dehumidification
+      byte = static_cast<uint8_t>(packed & 0xFF);  // Low byte: dehumidification
+      if (byte == 0 || byte == 0xFF || byte < 35 || byte > 65) return NAN;
+      return static_cast<float>(byte);
     case climate::CLIMATE_MODE_HEAT:
     case climate::CLIMATE_MODE_HEAT_COOL:
     default:
-      return static_cast<float>((packed >> 8) & 0xFF);   // High byte: humidification
+      byte = static_cast<uint8_t>((packed >> 8) & 0xFF);  // High byte: humidification
+      if (byte == 0 || byte == 0xFF || byte < 15 || byte > 50) return NAN;
+      return static_cast<float>(byte);
   }
 }
 

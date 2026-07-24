@@ -41,6 +41,9 @@ void AuroraClimate::dump_config() {
     ESP_LOGCONFIG(TAG, "  Mode: %s", this->is_iz2_mode_() ? "IZ2" : "thermostat");
     if (this->is_iz2_mode_()) {
       ESP_LOGCONFIG(TAG, "  IZ2 zones: %d", this->parent_->get_num_iz2_zones());
+    } else {
+      ESP_LOGCONFIG(TAG, "  AWL thermostat controls: %s",
+                    this->parent_->has_awl_thermostat_controls() ? "yes" : "no (status-only)");
     }
   }
   ESP_LOGCONFIG(TAG, "  EMA alpha: %.2f", EMA_ALPHA);
@@ -305,79 +308,79 @@ void AuroraClimate::update_state_() {
       }
     }
   } else {
-    // === Thermostat path: read from system-wide registers ===
+    // === Thermostat path: system-wide registers (AWL) or status-only (dry-contact) ===
 
-    // Update current temperature (hardware reports °F, climate entity uses °C).
-    // EMA smoothing applied here too — the main thermostat sensor can also jitter.
-    float ambient = this->parent_->get_ambient_temperature();
-    if (!std::isnan(ambient)) {
-      float raw_c = fahrenheit_to_celsius(ambient);
+    // Current temperature: AWL ambient, else entering-air fallback (hub helper).
+    float temp_f = this->parent_->get_climate_current_temperature_f();
+    if (!std::isnan(temp_f)) {
+      float raw_c = fahrenheit_to_celsius(temp_f);
       this->current_temperature = apply_ema(raw_c, this->temp_ema_, EMA_ALPHA);
     }
 
-    // Update setpoints (hardware reports °F, climate entity uses °C)
-    // Skip during write cooldown — prevents stale device read-back from
-    // overwriting the optimistic value set by control().
-    if (!this->parent_->setpoint_cooldown_active()) {
-      float heating_sp = this->parent_->get_heating_setpoint();
-      if (!std::isnan(heating_sp)) {
-        this->target_temperature_low = fahrenheit_to_celsius(heating_sp);
+    if (this->parent_->has_awl_thermostat_controls()) {
+      // Update setpoints (hardware reports °F, climate entity uses °C)
+      // Skip during write cooldown — prevents stale device read-back from
+      // overwriting the optimistic value set by control().
+      if (!this->parent_->setpoint_cooldown_active()) {
+        float heating_sp = this->parent_->get_heating_setpoint();
+        if (!std::isnan(heating_sp)) {
+          this->target_temperature_low = fahrenheit_to_celsius(heating_sp);
+        }
+        float cooling_sp = this->parent_->get_cooling_setpoint();
+        if (!std::isnan(cooling_sp)) {
+          this->target_temperature_high = fahrenheit_to_celsius(cooling_sp);
+        }
       }
-      float cooling_sp = this->parent_->get_cooling_setpoint();
-      if (!std::isnan(cooling_sp)) {
-        this->target_temperature_high = fahrenheit_to_celsius(cooling_sp);
+
+      // Update mode and preset (skip during mode cooldown)
+      if (!this->parent_->mode_cooldown_active()) {
+        climate::ClimateMode new_mode;
+        climate::ClimatePreset new_preset;
+        if (aurora_to_esphome_mode(this->parent_->get_hvac_mode(), new_mode, new_preset)) {
+          this->mode = new_mode;
+          this->preset = new_preset;
+        }
       }
+
+      // Update fan mode (skip during fan cooldown)
+      if (!this->parent_->fan_cooldown_active()) {
+        FanMode aurora_fan = this->parent_->get_fan_mode();
+        auto builtin = aurora_to_esphome_fan(aurora_fan);
+        if (builtin.has_value()) {
+          this->set_fan_mode_(*builtin);
+        } else {
+          this->set_custom_fan_mode_(CUSTOM_FAN_MODE_INTERMITTENT);
+        }
+      }
+    } else {
+      // Dry-contact / non-AWL: clear bogus targets; do not claim mode/fan from AWL regs
+      this->target_temperature_low = NAN;
+      this->target_temperature_high = NAN;
+      this->target_humidity = NAN;
     }
 
-    // Update mode and preset (skip during mode cooldown)
-    if (!this->parent_->mode_cooldown_active()) {
-      climate::ClimateMode new_mode;
-      climate::ClimatePreset new_preset;
-      if (aurora_to_esphome_mode(this->parent_->get_hvac_mode(), new_mode, new_preset)) {
-        this->mode = new_mode;
-        this->preset = new_preset;
-      }
-    }
-
-    // Update action based on system outputs
+    // Action always tracks equipment outputs (AWL and dry-contact)
     uint16_t outputs = this->parent_->get_system_outputs();
     bool compressor = (outputs & (OUTPUT_CC | OUTPUT_CC2)) != 0;
     bool cooling = (outputs & OUTPUT_RV) != 0;
     bool aux_heat = (outputs & (OUTPUT_EH1 | OUTPUT_EH2)) != 0;
     bool blower = (outputs & OUTPUT_BLOWER) != 0;
-    // Dehumidifier detection: VS active dehumidify is gated on reversing valve (cooling
-    // mode only); AXB dehumidifier relay is gated on has_dehumidifier() (DIP switch).
     bool dehumidifying = (this->parent_->is_active_dehumidify() && cooling)
                          || (this->parent_->has_dehumidifier()
                              && (this->parent_->get_axb_outputs() & AXB_OUTPUT_DEHUMIDIFIER) != 0);
-    
+
     if (this->parent_->is_locked_out()) {
       this->action = climate::CLIMATE_ACTION_OFF;
     } else if (compressor && cooling) {
-      // During cooling, show DRYING if actively dehumidifying
       this->action = dehumidifying ? climate::CLIMATE_ACTION_DRYING : climate::CLIMATE_ACTION_COOLING;
     } else if (compressor || aux_heat) {
       this->action = climate::CLIMATE_ACTION_HEATING;
     } else if (dehumidifying) {
-      // Standalone dehumidifier running (AXB relay) without compressor
       this->action = climate::CLIMATE_ACTION_DRYING;
     } else if (blower) {
       this->action = climate::CLIMATE_ACTION_FAN;
     } else {
       this->action = climate::CLIMATE_ACTION_IDLE;
-    }
-
-    // Update fan mode (skip during fan cooldown)
-    // Use set_fan_mode_() / set_custom_fan_mode_() to ensure mutual exclusion —
-    // set_fan_mode_() clears custom_fan_mode, set_custom_fan_mode_() clears fan_mode.
-    if (!this->parent_->fan_cooldown_active()) {
-      FanMode aurora_fan = this->parent_->get_fan_mode();
-      auto builtin = aurora_to_esphome_fan(aurora_fan);
-      if (builtin.has_value()) {
-        this->set_fan_mode_(*builtin);
-      } else {
-        this->set_custom_fan_mode_(CUSTOM_FAN_MODE_INTERMITTENT);
-      }
     }
   }
 
@@ -389,10 +392,10 @@ void AuroraClimate::update_state_() {
     this->current_humidity = rh;
   }
 
-  // Update target humidity (mode-aware: humidification in heat, dehumidification in cool)
-  // Humidistat is system-wide — all IZ2 zones share the same targets, but each zone's
-  // slider reflects the target relevant to that zone's operating mode.
-  if (!this->parent_->humidity_target_cooldown_active()) {
+  // Target humidity — gated via has_humidistat_targets inside helper; force NAN on dry-contact
+  if (!this->is_iz2_mode_() && !this->parent_->has_awl_thermostat_controls()) {
+    this->target_humidity = NAN;
+  } else if (!this->parent_->humidity_target_cooldown_active()) {
     float humidity_target = read_mode_humidity_target(this->parent_, this->mode);
     if (!std::isnan(humidity_target)) {
       this->target_humidity = humidity_target;
