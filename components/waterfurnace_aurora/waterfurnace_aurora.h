@@ -515,7 +515,17 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   bool awl_thermostat() const { return this->thermostat_version_ >= 3.0f; }
   bool awl_iz2() const { return this->has_iz2_ && this->iz2_version_ >= 2.0f; }
   bool is_ecm_blower() const { return this->blower_type_ == BlowerType::ECM_208 || this->blower_type_ == BlowerType::ECM_265; }
-  bool is_vs_pump() const { return this->pump_type_ == PumpType::VS_PUMP || this->pump_type_ == PumpType::VS_PUMP_26_99 || this->pump_type_ == PumpType::VS_PUMP_UPS26_99; }
+  bool is_vs_pump() const {
+    return this->pump_type_ == PumpType::VS_PUMP || this->pump_type_ == PumpType::VS_PUMP_26_99 ||
+           this->pump_type_ == PumpType::VS_PUMP_UPS26_99;
+  }
+  /// True when registers 321-325 (min/max/manual/speed) should be polled.
+  /// VS pump types always qualify. Open loop also qualifies: many installs use the
+  /// same 0-10V output for a modulating control valve or VFD (GitHub issue #30).
+  /// Fixed-speed types (FC1/FC2/GLNP) do not.
+  bool has_modulating_loop_output() const {
+    return this->is_vs_pump() || this->pump_type_ == PumpType::OPEN_LOOP;
+  }
   bool refrigeration_monitoring() const { return this->energy_monitor_level_ >= 1; }
   bool energy_monitoring() const { return this->energy_monitor_level_ >= 2; }
 
