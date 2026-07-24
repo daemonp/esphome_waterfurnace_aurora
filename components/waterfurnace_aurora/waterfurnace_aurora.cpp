@@ -888,15 +888,17 @@ void WaterFurnaceAurora::build_poll_addresses_() {
   
   this->add_poll_addr_(registers::FP1_TEMP);
   this->add_poll_addr_(registers::FP2_TEMP);
-  this->add_poll_addr_(registers::AMBIENT_TEMP);
-  
-  // Setpoints, mode, and fan config on fast tier — these are writable from HA
-  // and must be polled frequently so the write cooldown window (7s) always
-  // contains at least one fresh read-back.  Only 4 extra registers per cycle.
-  this->add_poll_addr_(registers::HEATING_SETPOINT);
-  this->add_poll_addr_(registers::COOLING_SETPOINT);
-  this->add_poll_addr_(registers::HEATING_MODE_READ);
-  this->add_poll_addr_(registers::FAN_CONFIG);
+
+  // Thermostat ambient/setpoints/mode/fan — only meaningful with AWL thermostat
+  // (gem Thermostat#registers_to_read gated on awl_thermostat?).
+  if (this->awl_thermostat()) {
+    this->add_poll_addr_(registers::AMBIENT_TEMP);
+    // Writable from HA — poll frequently so write cooldown always has a fresh read-back.
+    this->add_poll_addr_(registers::HEATING_SETPOINT);
+    this->add_poll_addr_(registers::COOLING_SETPOINT);
+    this->add_poll_addr_(registers::HEATING_MODE_READ);
+    this->add_poll_addr_(registers::FAN_CONFIG);
+  }
   
   if (this->awl_axb()) {
     this->add_poll_addr_(registers::ENTERING_AIR_AWL);
@@ -1066,13 +1068,16 @@ void WaterFurnaceAurora::build_poll_addresses_() {
       this->add_poll_addr_(registers::VS_ALARM2);
     }
     
-    if (this->has_iz2_ && this->awl_communicating()) {
-      this->add_poll_addr_(registers::IZ2_HUMIDISTAT_SETTINGS);
-      this->add_poll_addr_(registers::IZ2_HUMIDISTAT_MODE);
-      this->add_poll_addr_(registers::IZ2_HUMIDISTAT_TARGETS);
-    } else {
-      this->add_poll_addr_(registers::HUMIDISTAT_SETTINGS);
-      this->add_poll_addr_(registers::HUMIDISTAT_TARGETS);
+    // Gem: humidistat target/settings regs only when awl_communicating && (hum/dehum/VS)
+    if (this->has_humidistat_targets()) {
+      if (this->has_iz2_ && this->awl_communicating()) {
+        this->add_poll_addr_(registers::IZ2_HUMIDISTAT_SETTINGS);
+        this->add_poll_addr_(registers::IZ2_HUMIDISTAT_MODE);
+        this->add_poll_addr_(registers::IZ2_HUMIDISTAT_TARGETS);
+      } else {
+        this->add_poll_addr_(registers::HUMIDISTAT_SETTINGS);
+        this->add_poll_addr_(registers::HUMIDISTAT_TARGETS);
+      }
     }
     
     // AXB diagnostic sensors — only poll if at least one is configured
@@ -1512,24 +1517,28 @@ void WaterFurnaceAurora::publish_system_status_sensors_(const RegisterMap &regs)
 }
 
 void WaterFurnaceAurora::publish_temperature_sensors_(const RegisterMap &regs) {
-  // Temperatures
-  {
+  // Temperatures — ambient only valid with AWL thermostat (gem gates reg 502)
+  if (this->awl_thermostat()) {
     const uint16_t *val_amb = reg_find(regs, registers::AMBIENT_TEMP);
     if (val_amb) {
       this->ambient_temp_ = to_signed_tenths(*val_amb);
       if (sensor_value_changed_(this->ambient_temperature_sensor_, this->ambient_temp_))
         this->ambient_temperature_sensor_->publish_state(this->ambient_temp_);
     }
+  } else {
+    this->ambient_temp_ = NAN;
   }
-  
+
   // Entering air (return air) — suppress zero readings (register returns 0 when
   // the sensor is absent or the system is not AWL-communicating).  The Ruby gem
   // does: `unless entering_air_temperature.zero?`
+  // Cache for climate current-temp fallback on dry-contact installs.
   {
     uint16_t entering_air_reg = this->awl_axb() ? registers::ENTERING_AIR_AWL : registers::ENTERING_AIR;
     const uint16_t *val = reg_find(regs, entering_air_reg);
     if (val && *val != 0) {
       float fval = to_signed_tenths(*val);
+      this->entering_air_temp_ = fval;
       if (sensor_value_changed_(this->entering_air_temperature_sensor_, fval))
         this->entering_air_temperature_sensor_->publish_state(fval);
     }
@@ -1561,24 +1570,41 @@ void WaterFurnaceAurora::publish_temperature_sensors_(const RegisterMap &regs) {
   {
     const uint16_t *val_rh = reg_find(regs, registers::RELATIVE_HUMIDITY);
     if (val_rh) {
-      this->relative_humidity_ = static_cast<float>(*val_rh);
+      float rh = static_cast<float>(*val_rh);
+      if (rh > 100.0f) {
+        rh = NAN;  // includes 0xFF / 255 unpopulated
+      }
+      this->relative_humidity_ = rh;
       if (this->humidity_sensor_ != nullptr &&
           sensor_value_changed_(this->humidity_sensor_, this->relative_humidity_))
         this->humidity_sensor_->publish_state(this->relative_humidity_);
     }
   }
-  
-  // Setpoints (respect write cooldown)
-  if ((millis() - this->last_setpoint_write_) > WRITE_COOLDOWN_MS) {
+
+  // Setpoints — only with AWL thermostat; sanitize gem-valid ranges
+  if (!this->awl_thermostat()) {
+    this->heating_setpoint_ = NAN;
+    this->cooling_setpoint_ = NAN;
+  } else if ((millis() - this->last_setpoint_write_) > WRITE_COOLDOWN_MS) {
     const uint16_t *val_hsp = reg_find(regs, registers::HEATING_SETPOINT);
     if (val_hsp) {
-      this->heating_setpoint_ = to_tenths(*val_hsp);
+      float v = to_tenths(*val_hsp);
+      if (std::isnan(v) || v < 40.0f || v > 90.0f) {
+        this->heating_setpoint_ = NAN;
+      } else {
+        this->heating_setpoint_ = v;
+      }
       if (sensor_value_changed_(this->heating_setpoint_sensor_, this->heating_setpoint_))
         this->heating_setpoint_sensor_->publish_state(this->heating_setpoint_);
     }
     const uint16_t *val_csp = reg_find(regs, registers::COOLING_SETPOINT);
     if (val_csp) {
-      this->cooling_setpoint_ = to_tenths(*val_csp);
+      float v = to_tenths(*val_csp);
+      if (std::isnan(v) || v < 54.0f || v > 99.0f) {
+        this->cooling_setpoint_ = NAN;
+      } else {
+        this->cooling_setpoint_ = v;
+      }
       if (sensor_value_changed_(this->cooling_setpoint_sensor_, this->cooling_setpoint_))
         this->cooling_setpoint_sensor_->publish_state(this->cooling_setpoint_);
     }
@@ -1607,8 +1633,8 @@ void WaterFurnaceAurora::publish_temperature_sensors_(const RegisterMap &regs) {
 }
 
 void WaterFurnaceAurora::publish_mode_sensors_(const RegisterMap &regs) {
-  // HVAC mode (respect write cooldown)
-  if ((millis() - this->last_mode_write_) > WRITE_COOLDOWN_MS) {
+  // HVAC mode — only from AWL thermostat holding regs
+  if (this->awl_thermostat() && (millis() - this->last_mode_write_) > WRITE_COOLDOWN_MS) {
     const uint16_t *val_mode = reg_find(regs, registers::HEATING_MODE_READ);
     if (val_mode) {
       uint8_t mode_val = (*val_mode >> 8) & 0x07;
@@ -1618,8 +1644,8 @@ void WaterFurnaceAurora::publish_mode_sensors_(const RegisterMap &regs) {
     }
   }
   
-  // Fan mode (respect write cooldown)
-  if ((millis() - this->last_fan_write_) > WRITE_COOLDOWN_MS) {
+  // Fan mode — only from AWL thermostat holding regs
+  if (this->awl_thermostat() && (millis() - this->last_fan_write_) > WRITE_COOLDOWN_MS) {
     const uint16_t *val_fan = reg_find(regs, registers::FAN_CONFIG);
     if (val_fan) {
       uint16_t config = *val_fan;
@@ -1951,8 +1977,8 @@ void WaterFurnaceAurora::publish_humidity_control_sensors_(const RegisterMap &re
                               (this->active_dehumidify_ && cooling_rv)
                               || (this->has_dehumidifier_ && (this->axb_outputs_ & AXB_OUTPUT_DEHUMIDIFIER) != 0));
   
-  // Humidistat
-  {
+  // Humidistat mode/targets — only when gem would refresh them
+  if (this->has_humidistat_targets()) {
     uint16_t mode_reg = (this->has_iz2_ && this->awl_communicating())
                             ? registers::IZ2_HUMIDISTAT_MODE
                             : registers::HUMIDISTAT_SETTINGS;
@@ -1974,11 +2000,19 @@ void WaterFurnaceAurora::publish_humidity_control_sensors_(const RegisterMap &re
     if (!this->humidity_target_cooldown_active()) {
       const uint16_t *val_targets = reg_find(regs, target_reg);
       if (val_targets) {
-        float hum_target = static_cast<float>((*val_targets >> 8) & 0xFF);
-        if (sensor_value_changed_(this->humidification_target_sensor_, hum_target))
+        uint8_t hum_b = static_cast<uint8_t>((*val_targets >> 8) & 0xFF);
+        uint8_t dehum_b = static_cast<uint8_t>(*val_targets & 0xFF);
+        float hum_target = (hum_b == 0 || hum_b == 0xFF || hum_b < 15 || hum_b > 50)
+                               ? NAN
+                               : static_cast<float>(hum_b);
+        float dehum_target = (dehum_b == 0 || dehum_b == 0xFF || dehum_b < 35 || dehum_b > 65)
+                                 ? NAN
+                                 : static_cast<float>(dehum_b);
+        if (!std::isnan(hum_target) &&
+            sensor_value_changed_(this->humidification_target_sensor_, hum_target))
           this->humidification_target_sensor_->publish_state(hum_target);
-        float dehum_target = static_cast<float>(*val_targets & 0xFF);
-        if (sensor_value_changed_(this->dehumidification_target_sensor_, dehum_target))
+        if (!std::isnan(dehum_target) &&
+            sensor_value_changed_(this->dehumidification_target_sensor_, dehum_target))
           this->dehumidification_target_sensor_->publish_state(dehum_target);
       }
     }
