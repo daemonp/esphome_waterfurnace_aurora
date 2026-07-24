@@ -1,7 +1,7 @@
 # Non-AWL / Dry-Contact Climate & Setpoint Gating — Design Spec
 
 **Date:** 2026-07-24  
-**Status:** Approved — implementation on `fix/non-awl-climate-gating`  
+**Status:** Implemented (branch `fix/non-awl-climate-gating`)  
 **Related:** GitHub #28 follow-up (daviss57 dry-contact climate targets); upstream gem `waterfurnace_aurora` **v1.6.4** at `../waterfurnace_aurora`  
 **Decisions locked:** Scope = hub-wide (A); Climate UX = status-oriented (A); Writes = reject without AWL (A); Ambient = gate 502 + EAT fallback (B)
 
@@ -418,13 +418,13 @@ No protocol/register address changes.
 
 ## 17. Acceptance criteria
 
-- [ ] Dry-contact fixture: no heating/cooling setpoint sensor state from garbage regs; climate targets NAN; humidity target not 255
-- [ ] Dry-contact: `set_*` thermostat/humidistat target APIs return false; no write frames queued
-- [ ] Dry-contact: climate `action` still tracks equipment; `current_temperature` from EAT when ambient gated off
-- [ ] AWL thermostat fixture: setpoints, mode, fan, humidity targets still poll/publish/write
-- [ ] `awl_thermostat()` requires installed + version ≥ 3.0
-- [ ] `cd tests && make test` green
-- [ ] ENTITIES/README note present
+- [x] Dry-contact fixture: no heating/cooling setpoint sensor state from garbage regs; climate targets NAN; humidity target not 255
+- [x] Dry-contact: `set_*` thermostat/humidistat target APIs return false; no write frames queued
+- [x] Dry-contact: climate `action` still tracks equipment; `current_temperature` from EAT when ambient gated off
+- [x] AWL thermostat fixture: setpoints, mode, fan, humidity targets still poll/publish/write
+- [x] `awl_thermostat()` requires installed + version ≥ 3.0
+- [x] `cd tests && make test` green
+- [x] ENTITIES/README note present
 
 ---
 
