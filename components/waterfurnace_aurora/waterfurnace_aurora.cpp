@@ -465,6 +465,16 @@ void WaterFurnaceAurora::dump_config() {
     ESP_LOGCONFIG(TAG, "  IZ2 Zones: %d%s", this->num_iz2_zones_,
                   this->iz2_zones_override_ ? " (override)" : "");
   }
+  ESP_LOGCONFIG(TAG, "  Tstat: v%.2f installed=%s awl_thermostat=%s",
+                this->thermostat_version_,
+                this->has_thermostat_ ? "yes" : "no",
+                this->awl_thermostat() ? "yes" : "no");
+  ESP_LOGCONFIG(TAG, "  AWL communicating: %s (thermostat=%s iz2=%s)",
+                this->awl_communicating() ? "yes" : "no",
+                this->awl_thermostat() ? "yes" : "no",
+                this->awl_iz2() ? "yes" : "no");
+  ESP_LOGCONFIG(TAG, "  Humidistat targets: %s (need AWL + humidifier/dehumidifier/VS)",
+                this->has_humidistat_targets() ? "yes" : "no");
   ESP_LOGCONFIG(TAG, "  DIP Switches: fp1=%d fp2=%d rv=%s acc=%d stages=%d lockout=%s dh_rh=%s%s",
                 this->dip_switches_.fp1, this->dip_switches_.fp2,
                 this->dip_switches_.reversing_valve == ReversingValveType::O_TYPE ? "O" : "B",
@@ -654,6 +664,16 @@ void WaterFurnaceAurora::process_setup_detect_response_(const protocol::ParsedRe
     }
   }
   
+  // Thermostat installed — match gem thermostat? => reg 800 != 3
+  {
+    const uint16_t *val = reg_find(result, registers::THERMOSTAT_INSTALLED);
+    if (val) {
+      this->has_thermostat_ = (*val != COMPONENT_NOT_INSTALLED);
+      ESP_LOGD(TAG, "Thermostat reg %d = %d -> %s", registers::THERMOSTAT_INSTALLED, *val,
+               this->has_thermostat_ ? "present" : "absent");
+    }
+  }
+
   // AWL versions
   const uint16_t *val_tver = reg_find(result, registers::THERMOSTAT_VERSION);
   if (val_tver) this->thermostat_version_ = static_cast<float>(*val_tver) / 100.0f;
@@ -809,6 +829,16 @@ void WaterFurnaceAurora::finish_setup_() {
   ESP_LOGI(TAG, "  IZ2: %s%s (v%.2f, %d zones)", this->has_iz2_ ? "yes" : "no",
            this->iz2_override_ ? " (override)" : "",
            this->iz2_version_, this->num_iz2_zones_);
+  ESP_LOGI(TAG, "  Tstat: v%.2f installed=%s awl_thermostat=%s",
+           this->thermostat_version_,
+           this->has_thermostat_ ? "yes" : "no",
+           this->awl_thermostat() ? "yes" : "no");
+  ESP_LOGI(TAG, "  AWL communicating: %s (thermostat=%s iz2=%s)",
+           this->awl_communicating() ? "yes" : "no",
+           this->awl_thermostat() ? "yes" : "no",
+           this->awl_iz2() ? "yes" : "no");
+  ESP_LOGI(TAG, "  Humidistat targets: %s (need AWL + humidifier/dehumidifier/VS)",
+           this->has_humidistat_targets() ? "yes" : "no");
   ESP_LOGI(TAG, "  Blower: %s, Pump: %s, Energy: %d",
            this->blower_type_ == BlowerType::PSC ? "PSC" :
            this->blower_type_ == BlowerType::FIVE_SPEED ? "5-Speed" : "ECM",
@@ -828,6 +858,17 @@ void WaterFurnaceAurora::finish_setup_() {
   this->setup_callbacks_len_ = 0;
   
   this->transition_(State::IDLE);
+}
+
+
+float WaterFurnaceAurora::get_climate_current_temperature_f() const {
+  if (this->awl_thermostat() && !std::isnan(this->ambient_temp_)) {
+    return this->ambient_temp_;
+  }
+  if (!std::isnan(this->entering_air_temp_)) {
+    return this->entering_air_temp_;
+  }
+  return NAN;
 }
 
 // ============================================================================
