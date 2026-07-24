@@ -1,7 +1,7 @@
 # Non-AWL / Dry-Contact Climate & Setpoint Gating — Design Spec
 
 **Date:** 2026-07-24  
-**Status:** Draft (awaiting approval)  
+**Status:** Approved — implementation on `fix/non-awl-climate-gating`  
 **Related:** GitHub #28 follow-up (daviss57 dry-contact climate targets); upstream gem `waterfurnace_aurora` **v1.6.4** at `../waterfurnace_aurora`  
 **Decisions locked:** Scope = hub-wide (A); Climate UX = status-oriented (A); Writes = reject without AWL (A); Ambient = gate 502 + EAT fallback (B)
 
