@@ -14,6 +14,7 @@ struct TestableHub : public WaterFurnaceAurora {
   State get_state() const { return this->state_; }
   bool get_dealer_info_read() const { return this->dealer_info_read_; }
   size_t get_response_frame_len() const { return this->response_frame_len_; }
+  size_t pending_writes() const { return this->pending_writes_len_; }
 };
 
 // Helper kept for call-site readability after a send.
@@ -25,6 +26,10 @@ static void complete_tx(WaterFurnaceAurora &hub, uint32_t current_ms) {
   set_millis(current_ms + 1);
   hub.loop();  // already WAITING_RESPONSE — may collect any already-queued RX
 }
+
+static void drive_setup(WaterFurnaceAurora &hub);
+static void drive_setup_thermostat(WaterFurnaceAurora &hub, uint16_t installed_val,
+                                   uint16_t version_raw, bool humidifier = false);
 
 // Helper: build a valid func 0x42 response frame from address-value pairs
 static std::vector<uint8_t> make_response_42(const std::vector<std::pair<uint16_t, uint16_t>> &regs) {
@@ -81,6 +86,9 @@ static std::vector<uint8_t> make_response_03(const std::vector<uint16_t> &values
 
 TEST_CASE("Write queue", "[hub][write]") {
   WaterFurnaceAurora hub;
+  // AWL + humidifier so range-validation sections exercise post-capability checks
+  set_millis(0);
+  drive_setup_thermostat(hub, 1, 300, true);
   set_millis(1000);
 
   SECTION("write_register queues a single write") {
@@ -158,13 +166,13 @@ TEST_CASE("Write queue", "[hub][write]") {
     REQUIRE(hub.set_dehumidification_target(50));         // Valid
   }
 
-  SECTION("set_hvac_mode always succeeds") {
+  SECTION("set_hvac_mode succeeds when AWL") {
     REQUIRE(hub.set_hvac_mode(HeatingMode::HEAT));
     REQUIRE(hub.set_hvac_mode(HeatingMode::COOL));
     REQUIRE(hub.set_hvac_mode(HeatingMode::OFF));
   }
 
-  SECTION("set_fan_mode always succeeds") {
+  SECTION("set_fan_mode succeeds when AWL") {
     REQUIRE(hub.set_fan_mode(FanMode::AUTO));
     REQUIRE(hub.set_fan_mode(FanMode::CONTINUOUS));
   }
@@ -480,8 +488,6 @@ TEST_CASE("RS-485 resync drops leading noise before slave address", "[hub][state
   REQUIRE(tx[1] == 0x42);
 }
 
-static void drive_setup(WaterFurnaceAurora &hub);
-
 TEST_CASE("fault history timeout chains to dealer info read", "[hub][state][chain]") {
   TestableHub hub;
   text_sensor::TextSensor fault_history;
@@ -587,7 +593,7 @@ static void drive_setup(WaterFurnaceAurora &hub) {
 /// version_raw: register 801 units (300 = v3.00).
 /// humidifier: DIP accessory_relay = HUMIDIFIER (bits 3-4 = 2 → raw 0x10).
 static void drive_setup_thermostat(WaterFurnaceAurora &hub, uint16_t installed_val,
-                                   uint16_t version_raw, bool humidifier = false) {
+                                   uint16_t version_raw, bool humidifier) {
   hub.setup();
 
   hub.loop();
@@ -1659,4 +1665,59 @@ TEST_CASE("has_humidistat_targets matches gem", "[hub][awl][humidistat]") {
     REQUIRE_FALSE(hub.has_awl_thermostat_controls());
     REQUIRE_FALSE(hub.has_humidistat_targets());
   }
+}
+
+
+TEST_CASE("Reject thermostat writes without AWL thermostat", "[hub][awl][write]") {
+  TestableHub hub;
+  set_millis(0);
+  drive_setup_thermostat(hub, COMPONENT_NOT_INSTALLED, 0);
+  REQUIRE_FALSE(hub.has_awl_thermostat_controls());
+  REQUIRE(hub.pending_writes() == 0);
+
+  REQUIRE_FALSE(hub.set_heating_setpoint(70.0f));
+  REQUIRE_FALSE(hub.set_cooling_setpoint(74.0f));
+  REQUIRE_FALSE(hub.set_hvac_mode(HeatingMode::HEAT));
+  REQUIRE_FALSE(hub.set_fan_mode(FanMode::AUTO));
+  REQUIRE_FALSE(hub.set_fan_intermittent_on(5));
+  REQUIRE_FALSE(hub.set_fan_intermittent_off(10));
+  REQUIRE_FALSE(hub.set_humidification_target(40));
+  REQUIRE_FALSE(hub.set_dehumidification_target(50));
+  REQUIRE_FALSE(hub.set_humidifier_mode(true));
+  REQUIRE_FALSE(hub.set_dehumidifier_mode(true));
+
+  REQUIRE(hub.pending_writes() == 0);
+}
+
+TEST_CASE("Allow thermostat writes with AWL thermostat", "[hub][awl][write]") {
+  TestableHub hub;
+  set_millis(0);
+  drive_setup_thermostat(hub, 1, 300);
+  REQUIRE(hub.has_awl_thermostat_controls());
+  REQUIRE(hub.pending_writes() == 0);
+
+  REQUIRE(hub.set_heating_setpoint(70.0f));
+  REQUIRE(hub.set_cooling_setpoint(74.0f));
+  REQUIRE(hub.set_hvac_mode(HeatingMode::HEAT));
+  REQUIRE(hub.set_fan_mode(FanMode::CONTINUOUS));
+  REQUIRE(hub.pending_writes() == 4);
+
+  // Humidistat targets still require AWL + humidifier/dehumidifier/VS
+  REQUIRE_FALSE(hub.has_humidistat_targets());
+  size_t before = hub.pending_writes();
+  REQUIRE_FALSE(hub.set_humidification_target(40));
+  REQUIRE(hub.pending_writes() == before);
+}
+
+TEST_CASE("Allow humidistat target writes when AWL + humidifier", "[hub][awl][write]") {
+  TestableHub hub;
+  set_millis(0);
+  drive_setup_thermostat(hub, 1, 300, true);
+  REQUIRE(hub.has_humidistat_targets());
+  REQUIRE(hub.set_humidification_target(40));
+  REQUIRE(hub.set_dehumidification_target(50));
+  REQUIRE(hub.set_humidifier_mode(true));
+  REQUIRE(hub.set_dehumidifier_mode(false));
+  // Target writes share one register address; mode writes share another — queue coalesces to 2.
+  REQUIRE(hub.pending_writes() == 2);
 }

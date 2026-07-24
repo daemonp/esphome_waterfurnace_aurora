@@ -2087,6 +2087,13 @@ void WaterFurnaceAurora::process_pending_writes_() {
 // ============================================================================
 
 bool WaterFurnaceAurora::set_heating_setpoint(float temp) {
+  if (!this->awl_thermostat()) {
+    ESP_LOGW(TAG,
+             "Ignoring heating setpoint write — no AWL communicating thermostat "
+             "(dry-contact / Tstat v%.2f)",
+             this->thermostat_version_);
+    return false;
+  }
   if (temp < 40.0f || temp > 90.0f) {
     ESP_LOGW(TAG, "Heating setpoint %.1f out of range (40-90)", temp);
     return false;
@@ -2099,6 +2106,13 @@ bool WaterFurnaceAurora::set_heating_setpoint(float temp) {
 }
 
 bool WaterFurnaceAurora::set_cooling_setpoint(float temp) {
+  if (!this->awl_thermostat()) {
+    ESP_LOGW(TAG,
+             "Ignoring cooling setpoint write — no AWL communicating thermostat "
+             "(dry-contact / Tstat v%.2f)",
+             this->thermostat_version_);
+    return false;
+  }
   if (temp < 54.0f || temp > 99.0f) {
     ESP_LOGW(TAG, "Cooling setpoint %.1f out of range (54-99)", temp);
     return false;
@@ -2111,6 +2125,13 @@ bool WaterFurnaceAurora::set_cooling_setpoint(float temp) {
 }
 
 bool WaterFurnaceAurora::set_hvac_mode(HeatingMode mode) {
+  if (!this->awl_thermostat()) {
+    ESP_LOGW(TAG,
+             "Ignoring HVAC mode write — no AWL communicating thermostat "
+             "(dry-contact / Tstat v%.2f)",
+             this->thermostat_version_);
+    return false;
+  }
   this->write_register(registers::HEATING_MODE_WRITE, static_cast<uint16_t>(mode));
   this->hvac_mode_ = mode;  // Optimistic update — prevents stale read-back during cooldown
   this->last_mode_write_ = millis();
@@ -2118,6 +2139,13 @@ bool WaterFurnaceAurora::set_hvac_mode(HeatingMode mode) {
 }
 
 bool WaterFurnaceAurora::set_fan_mode(FanMode mode) {
+  if (!this->awl_thermostat()) {
+    ESP_LOGW(TAG,
+             "Ignoring fan mode write — no AWL communicating thermostat "
+             "(dry-contact / Tstat v%.2f)",
+             this->thermostat_version_);
+    return false;
+  }
   this->write_register(registers::FAN_MODE_WRITE, static_cast<uint16_t>(mode));
   this->fan_mode_ = mode;  // Optimistic update — prevents stale read-back during cooldown
   this->last_fan_write_ = millis();
@@ -2213,6 +2241,13 @@ bool WaterFurnaceAurora::set_line_voltage_setting(uint16_t voltage) {
 }
 
 bool WaterFurnaceAurora::set_fan_intermittent_on(uint8_t minutes) {
+  if (!this->awl_thermostat()) {
+    ESP_LOGW(TAG,
+             "Ignoring fan intermittent on write — no AWL communicating thermostat "
+             "(dry-contact / Tstat v%.2f)",
+             this->thermostat_version_);
+    return false;
+  }
   if (minutes > 25 || (minutes % 5) != 0) {
     ESP_LOGW(TAG, "Fan on time %d invalid", minutes);
     return false;
@@ -2222,6 +2257,13 @@ bool WaterFurnaceAurora::set_fan_intermittent_on(uint8_t minutes) {
 }
 
 bool WaterFurnaceAurora::set_fan_intermittent_off(uint8_t minutes) {
+  if (!this->awl_thermostat()) {
+    ESP_LOGW(TAG,
+             "Ignoring fan intermittent off write — no AWL communicating thermostat "
+             "(dry-contact / Tstat v%.2f)",
+             this->thermostat_version_);
+    return false;
+  }
   if (minutes < 5 || minutes > 40 || (minutes % 5) != 0) {
     ESP_LOGW(TAG, "Fan off time %d invalid", minutes);
     return false;
@@ -2231,6 +2273,12 @@ bool WaterFurnaceAurora::set_fan_intermittent_off(uint8_t minutes) {
 }
 
 bool WaterFurnaceAurora::set_humidification_target(uint8_t percent) {
+  if (!this->has_humidistat_targets()) {
+    ESP_LOGW(TAG,
+             "Ignoring humidification target write — humidistat targets unavailable "
+             "(need AWL + humidifier/dehumidifier/VS)");
+    return false;
+  }
   if (percent < 15 || percent > 50) {
     ESP_LOGW(TAG, "Humidification target %d out of range (15-50)", percent);
     return false;
@@ -2250,6 +2298,12 @@ bool WaterFurnaceAurora::set_humidification_target(uint8_t percent) {
 }
 
 bool WaterFurnaceAurora::set_dehumidification_target(uint8_t percent) {
+  if (!this->has_humidistat_targets()) {
+    ESP_LOGW(TAG,
+             "Ignoring dehumidification target write — humidistat targets unavailable "
+             "(need AWL + humidifier/dehumidifier/VS)");
+    return false;
+  }
   if (percent < 35 || percent > 65) {
     ESP_LOGW(TAG, "Dehumidification target %d out of range (35-65)", percent);
     return false;
@@ -2268,6 +2322,12 @@ bool WaterFurnaceAurora::set_dehumidification_target(uint8_t percent) {
 }
 
 bool WaterFurnaceAurora::set_humidifier_mode(bool auto_mode) {
+  if (!this->has_humidistat_targets()) {
+    ESP_LOGW(TAG,
+             "Ignoring humidifier mode write — humidistat targets unavailable "
+             "(need AWL + humidifier/dehumidifier/VS)");
+    return false;
+  }
   // Read current settings register to preserve other bits (like the Ruby gem does)
   uint16_t read_reg = (this->has_iz2_ && this->awl_communicating())
                           ? registers::IZ2_HUMIDISTAT_MODE
@@ -2290,6 +2350,12 @@ bool WaterFurnaceAurora::set_humidifier_mode(bool auto_mode) {
 }
 
 bool WaterFurnaceAurora::set_dehumidifier_mode(bool auto_mode) {
+  if (!this->has_humidistat_targets()) {
+    ESP_LOGW(TAG,
+             "Ignoring dehumidifier mode write — humidistat targets unavailable "
+             "(need AWL + humidifier/dehumidifier/VS)");
+    return false;
+  }
   uint16_t read_reg = (this->has_iz2_ && this->awl_communicating())
                           ? registers::IZ2_HUMIDISTAT_MODE
                           : registers::HUMIDISTAT_SETTINGS;
