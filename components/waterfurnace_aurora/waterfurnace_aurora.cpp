@@ -263,9 +263,9 @@ void WaterFurnaceAurora::handle_timeout_() {
     // Chain to dealer info if needed, otherwise go idle
     if (!this->dealer_info_read_ && this->has_any_dealer_sensor_()) {
       this->start_dealer_info_read_();
-    } else {
-      this->transition_(State::IDLE);
+      return;  // do not clobber the chained POLL_DEALER_INFO with the trailing NONE below
     }
+    this->transition_(State::IDLE);
   } else if (this->pending_request_ == PendingRequest::POLL_DEALER_INFO) {
     // Dealer info read failure — not critical, skip
     ESP_LOGD(TAG, "Dealer info read timed out");

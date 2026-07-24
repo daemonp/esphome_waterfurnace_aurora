@@ -5,6 +5,17 @@
 using namespace esphome;
 using namespace esphome::waterfurnace_aurora;
 
+// Test accessor: exposes protected state-machine helpers for focused timeout tests.
+struct TestableHub : public WaterFurnaceAurora {
+  void force_fault_history_read() { this->start_fault_history_read_(); }
+  void set_state_waiting_response() { this->state_ = State::WAITING_RESPONSE; }
+  void set_tx_complete_time(uint32_t t) { this->tx_complete_time_ = t; }
+  PendingRequest get_pending_request() const { return this->pending_request_; }
+  State get_state() const { return this->state_; }
+  bool get_dealer_info_read() const { return this->dealer_info_read_; }
+  size_t get_response_frame_len() const { return this->response_frame_len_; }
+};
+
 // Helper kept for call-site readability after a send.
 // send_request_common_() now completes TX synchronously (write + flush + DE/RE
 // release) and enters WAITING_RESPONSE immediately, so there is no TX_PENDING
@@ -20,6 +31,23 @@ static std::vector<uint8_t> make_response_42(const std::vector<std::pair<uint16_
   std::vector<uint8_t> frame;
   frame.push_back(0x01);  // slave
   frame.push_back(0x42);  // func
+  frame.push_back(static_cast<uint8_t>(regs.size() * 2));  // byte count
+  for (const auto &r : regs) {
+    frame.push_back(r.second >> 8);
+    frame.push_back(r.second & 0xFF);
+  }
+  uint16_t crc = protocol::crc16(frame.data(), frame.size());
+  frame.push_back(crc & 0xFF);
+  frame.push_back(crc >> 8);
+  return frame;
+}
+
+// Helper: build a valid func 0x41 response frame from address-value pairs.
+// func 0x41 reads contiguous register ranges; the byte count is reg_count * 2.
+static std::vector<uint8_t> make_response_41(const std::vector<std::pair<uint16_t, uint16_t>> &regs) {
+  std::vector<uint8_t> frame;
+  frame.push_back(0x01);  // slave
+  frame.push_back(0x41);  // func
   frame.push_back(static_cast<uint8_t>(regs.size() * 2));  // byte count
   for (const auto &r : regs) {
     frame.push_back(r.second >> 8);
@@ -450,6 +478,61 @@ TEST_CASE("RS-485 resync drops leading noise before slave address", "[hub][state
   auto tx = hub.mock_get_transmitted();
   REQUIRE(tx.size() > 0);
   REQUIRE(tx[1] == 0x42);
+}
+
+static void drive_setup(WaterFurnaceAurora &hub);
+
+TEST_CASE("fault history timeout chains to dealer info read", "[hub][state][chain]") {
+  TestableHub hub;
+  text_sensor::TextSensor fault_history;
+  text_sensor::TextSensor dealer_address_1;
+  hub.set_fault_history_sensor(&fault_history);
+  hub.set_dealer_address_1_sensor(&dealer_address_1);
+  set_millis(0);  // Ensure deterministic setup timing independent of prior tests
+  drive_setup(hub);
+  REQUIRE(hub.is_setup_complete());
+
+  // Force fault-history request and enter WAITING_RESPONSE.
+  hub.force_fault_history_read();
+  auto tx = hub.mock_get_transmitted();
+  REQUIRE(tx.size() > 0);
+  REQUIRE(tx[1] == 0x41);
+  hub.set_state_waiting_response();
+  hub.set_tx_complete_time(0);
+
+  // Let the response timeout expire; handle_timeout_() should chain to dealer info.
+  set_millis(WaterFurnaceAurora::RESPONSE_TIMEOUT_MS + 1);
+  hub.loop();
+
+  tx = hub.mock_get_transmitted();
+  REQUIRE(tx.size() > 0);
+  REQUIRE(tx[1] == 0x41);  // dealer info is also func 0x41
+  REQUIRE(hub.get_state() == State::WAITING_RESPONSE);
+  REQUIRE(hub.get_pending_request() == PendingRequest::POLL_DEALER_INFO);
+
+  complete_tx(hub, WaterFurnaceAurora::RESPONSE_TIMEOUT_MS + 1);
+
+  // Feed a valid dealer-info response. If the bug is present, pending_request_
+  // was clobbered to NONE in handle_timeout_(), so the response is discarded
+  // and dealer_address_1 never publishes.
+  // Use printable ASCII for the dealer_address_1 range so registers_to_string()
+  // produces a non-empty string and the sensor actually publishes.
+  std::vector<std::pair<uint16_t, uint16_t>> dealer_vals;
+  for (uint16_t i = 0; i < registers::DEALER_INFO_COUNT; i++) {
+    uint16_t addr = registers::DEALER_INFO_START + i;
+    uint16_t val = 0x2020;  // spaces for most fields
+    if (addr >= registers::DEALER_ADDRESS1 && addr < registers::DEALER_ADDRESS1 + 13) {
+      val = 0x4141;  // 'AA' — non-empty string for the sensor we assert on
+    }
+    dealer_vals.emplace_back(addr, val);
+  }
+  hub.mock_receive(make_response_41(dealer_vals));
+  set_millis(WaterFurnaceAurora::RESPONSE_TIMEOUT_MS + 50);
+  hub.loop();
+
+  REQUIRE(hub.get_response_frame_len() > 0);
+  REQUIRE(hub.get_dealer_info_read());
+  REQUIRE(dealer_address_1.has_state_);
 }
 
 // Helper: drive a hub through the full setup sequence (ID + detect + VS probe).
