@@ -64,53 +64,24 @@ void WaterFurnaceAurora::send_request_common_(const uint8_t *frame, size_t frame
   if (this->flow_control_pin_ != nullptr) {
     this->flow_control_pin_->digital_write(true);
   }
-  
-  // Send frame and BLOCK until the UART hardware confirms it has actually left
-  // the wire (flush() -> uart_wait_tx_done() on the esp-idf UART backend).
-  //
-  // NOTE: this used to be non-blocking — write_array() would queue the bytes
-  // and the RS-485 direction pin would be switched back to RX after a
-  // hand-estimated delay (frame_bytes * 11 bits / baud). That estimate is only
-  // valid on backends where write() itself blocks until the data is on the
-  // wire (e.g. the Arduino HardwareSerial framework). On the esp-idf UART
-  // driver, write_array() just copies bytes into a ring buffer and returns
-  // almost immediately — actual transmission happens later, asynchronously,
-  // via interrupt. That mismatch meant the flow-control pin was frequently
-  // flipped to RX mode *before* our own request had finished transmitting,
-  // truncating the outgoing frame and injecting a glitch byte into the RX
-  // path right as the transceiver reversed direction — which desynced the
-  // response parser for the rest of that exchange (see CRC-mismatch/timeout
-  // pattern in the field logs). flush() is the only reliable way to know TX
-  // is actually done. For the frame sizes this component sends (well under
-  // ~150 bytes), that's at most ~90ms at 19200 baud — worth it for correct
-  // framing. If this ever needs to be non-blocking again, the fix has to be
-  // a real completion signal (e.g. polling the driver's TX-done state), not
-  // a bigger fixed delay — a race is still a race no matter the margin.
+
+  // Write then flush() so TX is physically complete before we release DE/RE.
+  // On esp-idf, write_array() only queues into the UART ring buffer; without
+  // flush()/uart_wait_tx_done() an estimated delay races the hardware and can
+  // truncate our own frame. Flip the pin back to RX in this same call stack —
+  // deferring to a later loop() tick misses the head of fast ABC responses
+  // (device-ID 0x03 reads). Matches esphome/components/modbus. Aurora request
+  // frames are small; flush blocks on the order of a few–tens of ms at 19200.
   this->write_array(frame, frame_len);
   this->flush();
-  
-  // IMPORTANT: flip the RS-485 transceiver back to RX and start listening
-  // *synchronously*, right here — do NOT defer this to a future loop() tick
-  // (e.g. via a TX_PENDING state checked against a timestamp). flush() only
-  // guarantees TX is physically done; if we then wait for the *next* call
-  // to loop() to notice that and flip the pin, we introduce a second,
-  // scheduler-dependent gap during which the ESP is still deaf. On a build
-  // with WiFi, the API, web_server, and a couple dozen entities sharing the
-  // loop, that gap is easily long enough (tens of ms) to miss the first
-  // several bytes of a fast-turnaround slave's response — which is exactly
-  // what field logs showed even after making flush() synchronous: captures
-  // that were always a truncated, mid-frame window into the real response,
-  // never starting at the address/function header. Doing the pin flip here,
-  // in the same call stack as flush(), removes that gap entirely.
+
   if (this->flow_control_pin_ != nullptr) {
     this->flow_control_pin_->digital_write(false);
   }
-  
+
   this->pending_request_ = type;
   this->last_request_time_ = millis();
-  // Reference point for the response timeout in the WAITING_RESPONSE state.
-  // TX is already fully complete and we're already listening, so this is
-  // simply "now" — no estimate or margin needed anymore.
+  // Response timeout is measured from TX-complete / start-of-listen.
   this->tx_complete_time_ = millis();
   this->transition_(State::WAITING_RESPONSE);
 }
@@ -134,20 +105,21 @@ bool WaterFurnaceAurora::read_frame_() {
     this->rx_buffer_[this->rx_buffer_len_++] = this->read();
   }
   
-  // Resync guard: a real frame must start with our slave address. If a stray
-  // byte (line noise, a transceiver turnaround glitch, etc.) ever ends up at
-  // the front of rx_buffer_, expected_frame_size() below has no way to know
-  // that — it just trusts byte[0]/byte[1] as address/function and computes a
-  // frame length from whatever garbage is there, which then either never
-  // matches a real boundary (permanent desync until the next timeout) or,
-  // worse, coincidentally "completes" on a bogus length and reports a false
-  // CRC-mismatch frame while quietly discarding real response bytes. Instead,
-  // discard any leading bytes that don't match our address so we resync onto
-  // the real frame as soon as it appears, rather than getting stuck on noise
-  // for the rest of the exchange.
-  while (this->rx_buffer_len_ > 0 && this->rx_buffer_[0] != this->address_) {
-    std::memmove(this->rx_buffer_.data(), this->rx_buffer_.data() + 1, this->rx_buffer_len_ - 1);
-    this->rx_buffer_len_--;
+  // Resync: drop leading noise/glitch bytes until the configured slave address
+  // is at the front. expected_frame_size() trusts byte[0] as the address, so a
+  // single stray prefix would desync the parser for the rest of the exchange.
+  if (this->rx_buffer_len_ > 0 && this->rx_buffer_[0] != this->address_) {
+    size_t start = 0;
+    while (start < this->rx_buffer_len_ && this->rx_buffer_[start] != this->address_) {
+      start++;
+    }
+    if (start >= this->rx_buffer_len_) {
+      this->rx_buffer_len_ = 0;
+    } else if (start > 0) {
+      std::memmove(this->rx_buffer_.data(), this->rx_buffer_.data() + start,
+                   this->rx_buffer_len_ - start);
+      this->rx_buffer_len_ -= start;
+    }
   }
   
   if (this->rx_buffer_len_ < 2) return false;
@@ -209,8 +181,6 @@ void WaterFurnaceAurora::process_response_() {
   
   // Route to appropriate handler.
   // Handlers may chain to a new request (e.g. poll → fault history → dealer info).
-  // Only clear pending_request_ if the handler did NOT chain — see the comment
-  // after this switch for how that's detected.
   switch (this->pending_request_) {
     case PendingRequest::SETUP_ID:
       this->process_setup_id_response_(resp);
@@ -242,13 +212,9 @@ void WaterFurnaceAurora::process_response_() {
       break;
   }
   
-  // Only clear pending_request_ if the handler did NOT chain to a new request.
-  // Chained requests (fault history, dealer info, medium poll) call send_request_()
-  // which now transitions state to WAITING_RESPONSE synchronously (see
-  // send_request_common_) and sets pending_request_ to the new type. A
-  // non-chaining handler leaves state_ as IDLE/ERROR_BACKOFF instead.
-  // Clearing pending_request_ here would clobber the new chained request,
-  // causing its response to be silently discarded by the default case above.
+  // Chained handlers call send_request_*() which leaves state_ as WAITING_RESPONSE
+  // with pending_request_ already set to the new type — do not clobber it.
+  // Non-chaining handlers leave IDLE / ERROR_BACKOFF / setup follow-on states.
   if (this->state_ != State::WAITING_RESPONSE) {
     this->pending_request_ = PendingRequest::NONE;
   }
@@ -420,16 +386,8 @@ void WaterFurnaceAurora::loop() {
       // Otherwise just wait for update() to kick off a poll cycle
       return;
       
-    case State::TX_PENDING:
-      // No longer reachable: send_request_common_() now flips the RS-485
-      // pin and transitions straight to WAITING_RESPONSE synchronously,
-      // right after flush() confirms TX is physically complete. Kept as a
-      // harmless fallback in case anything still lands here.
-      this->transition_(State::WAITING_RESPONSE);
-      return;
-      
     case State::WAITING_RESPONSE: {
-      // Check timeout (measured from when TX completed, not when we started transmitting)
+      // Timeout measured from TX-complete / start-of-listen (see send_request_common_).
       if ((now - this->tx_complete_time_) > RESPONSE_TIMEOUT_MS) {
         this->handle_timeout_();
         return;

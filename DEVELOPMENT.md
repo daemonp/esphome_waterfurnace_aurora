@@ -58,7 +58,7 @@ This builds and runs three test binaries:
 
 ### Key Design Decisions
 
-- **Zero blocking I/O** — The state machine never blocks. Bytes are read incrementally in `loop()`. No `delay()` calls in the communication path.
+- **Mostly non-blocking I/O** — Response bytes are read incrementally in `loop()` with no `delay()`. The one intentional block is `flush()` during RS-485 transmit turnaround in `send_request_common_()` (same pattern as ESPHome's built-in `modbus` component): wait until TX has left the wire, then release DE/RE immediately so fast ABC replies are not truncated. Request frames are small, so this is typically a few–tens of ms at 19200 baud.
 - **Write cooldowns** — 10-second cooldown after writes prevents stale read-backs from reverting optimistic UI updates.
 - **Connected sensor** — Tracks RS-485 communication health with configurable timeout (default 30s).
 - **Flat sorted vector** — `RegisterMap` uses binary search on a sorted `vector<pair>` instead of `std::map`, saving ~4KB heap fragmentation on ESP32.

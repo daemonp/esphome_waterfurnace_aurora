@@ -33,8 +33,7 @@ enum class State : uint8_t {
   SETUP_DETECT_COMPONENTS,  // Detect AXB, VS Drive, IZ2, blower, pump, energy
   SETUP_DETECT_VS,          // VS Drive probe (optional second detect step)
   IDLE,                     // Ready for next operation
-  TX_PENDING,               // Frame written to UART TX FIFO, waiting for transmit to complete
-  WAITING_RESPONSE,         // Request sent, collecting bytes
+  WAITING_RESPONSE,         // Request on the wire, collecting response bytes
   ERROR_BACKOFF,            // Communication error, waiting before retry
 };
 
@@ -429,7 +428,7 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
  protected:
   // --- State machine operations ---
   void transition_(State new_state);
-  /// Common send logic — flushes bus, toggles RS-485, writes frame, sets timing.
+  /// Common send logic — clear RX, DE/RE TX, write+flush, DE/RE RX, WAITING_RESPONSE.
   void send_request_common_(const uint8_t *frame, size_t frame_len, PendingRequest type);
   /// Send a Modbus request frame and transition to WAITING_RESPONSE.
   void send_request_(const uint8_t *frame, size_t frame_len, PendingRequest type,
@@ -651,7 +650,7 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   uint32_t last_request_time_{0};
   uint32_t error_backoff_until_{0};
   uint32_t last_successful_response_{0};
-  uint32_t tx_complete_time_{0};  // millis() when TX FIFO is expected to drain
+  uint32_t tx_complete_time_{0};  // millis() when TX completed and RX listening began
   
   // Connectivity
   binary_sensor::BinarySensor *connected_sensor_{nullptr};

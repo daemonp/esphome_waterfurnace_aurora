@@ -5,13 +5,14 @@
 using namespace esphome;
 using namespace esphome::waterfurnace_aurora;
 
-// Helper: advance millis and loop to transition past TX_PENDING → WAITING_RESPONSE.
-// After send_request_, the hub is in TX_PENDING; we need to advance time past the
-// calculated TX completion time.  A 100-register poll frame (~204 bytes) at 19200 baud
-// 8E1 takes ~120ms, so 150ms margin handles the worst case with room to spare.
+// Helper kept for call-site readability after a send.
+// send_request_common_() now completes TX synchronously (write + flush + DE/RE
+// release) and enters WAITING_RESPONSE immediately, so there is no TX_PENDING
+// drain step. We still nudge the test clock and pump loop() once so existing
+// sequences stay deterministic.
 static void complete_tx(WaterFurnaceAurora &hub, uint32_t current_ms) {
-  set_millis(current_ms + 150);  // 150ms covers the largest frames at 19200 baud
-  hub.loop();                    // transitions TX_PENDING → WAITING_RESPONSE
+  set_millis(current_ms + 1);
+  hub.loop();  // already WAITING_RESPONSE — may collect any already-queued RX
 }
 
 // Helper: build a valid func 0x42 response frame from address-value pairs
@@ -224,7 +225,7 @@ TEST_CASE("Setup failure and re-detection", "[hub][state][redetect]") {
   SECTION("setup timeout after MAX_SETUP_RETRIES sets needs_redetect") {
     // Loop through 5 timeout cycles
     for (int i = 0; i < 5; i++) {
-      hub.loop();                  // sends ID request → TX_PENDING
+      hub.loop();                  // sends ID request → WAITING_RESPONSE
       hub.mock_get_transmitted();  // drain tx
       complete_tx(hub, millis());  // WAITING_RESPONSE
       
@@ -375,11 +376,11 @@ TEST_CASE("Connected sensor", "[hub][connectivity]") {
 
     // Simulate the hub marking connected after a successful response
     // by driving a minimal setup flow.
-    hub.loop();  // sends setup ID request → TX_PENDING
+    hub.loop();  // sends setup ID request → WAITING_RESPONSE
     auto tx = hub.mock_get_transmitted();
     REQUIRE(tx.size() > 0);
 
-    complete_tx(hub, 0);  // advance past TX → WAITING_RESPONSE
+    complete_tx(hub, 0);
 
     // Feed a valid ID response (18 regs of spaces)
     std::vector<uint16_t> id_vals(18, 0x2020);
@@ -406,6 +407,51 @@ TEST_CASE("setup() is non-blocking", "[hub][state]") {
   REQUIRE_FALSE(hub.is_setup_complete());
 }
 
+// RS-485 turnaround: DE/RE must be released in the same send path as flush(),
+// before returning to loop(). A deferred release loses the head of fast ABC
+// replies (device-ID 0x03).
+TEST_CASE("RS-485 turnaround releases flow-control pin synchronously", "[hub][state][rs485]") {
+  WaterFurnaceAurora hub;
+  GPIOPin flow_pin;
+  hub.set_flow_control_pin(&flow_pin);
+  set_millis(0);
+
+  hub.setup();
+  hub.loop();  // sends ID request; TX + pin release happen inside send path
+
+  REQUIRE(hub.mock_get_transmitted().size() > 0);
+  REQUIRE_FALSE(flow_pin.state_);  // listening (RX) before next loop() tick
+}
+
+// Leading noise before the slave address must be discarded so expected_frame_size()
+// does not latch onto a false header.
+TEST_CASE("RS-485 resync drops leading noise before slave address", "[hub][state][rs485]") {
+  WaterFurnaceAurora hub;
+  set_millis(0);
+  hub.setup();
+  hub.loop();  // ID request → WAITING_RESPONSE
+  hub.mock_get_transmitted();
+  complete_tx(hub, 0);
+
+  std::vector<uint16_t> id_values(18, 0x2020);
+  auto id_resp = make_response_03(id_values);
+  // Glitch prefix, then a valid frame starting at address 0x01
+  std::vector<uint8_t> noisy = {0xFF, 0x00, 0x55};
+  noisy.insert(noisy.end(), id_resp.begin(), id_resp.end());
+  hub.mock_receive(noisy);
+
+  set_millis(30);
+  hub.loop();
+
+  // Successful ID parse advances setup past SETUP_READ_ID
+  REQUIRE_FALSE(hub.is_setup_complete());  // still needs detect, but...
+  // ...the ID step must have been accepted (next loop sends detect 0x42)
+  hub.loop();
+  auto tx = hub.mock_get_transmitted();
+  REQUIRE(tx.size() > 0);
+  REQUIRE(tx[1] == 0x42);
+}
+
 // Helper: drive a hub through the full setup sequence (ID + detect + VS probe).
 // Returns the hub in IDLE state with setup_complete_ == true.
 // Callers can set overrides before calling this.
@@ -413,16 +459,16 @@ static void drive_setup(WaterFurnaceAurora &hub) {
   hub.setup();
 
   // Step 1: ID request (func 0x03)
-  hub.loop();                  // sends ID request → TX_PENDING
+  hub.loop();                  // sends ID request → WAITING_RESPONSE
   hub.mock_get_transmitted();  // drain tx buffer
-  complete_tx(hub, 0);         // TX_PENDING → WAITING_RESPONSE
+  complete_tx(hub, 0);
   std::vector<uint16_t> id_values(18, 0x2020);
   hub.mock_receive(make_response_03(id_values));
   set_millis(50);
   hub.loop();                  // processes ID → SETUP_DETECT_COMPONENTS
 
   // Step 2: Detect request (func 0x42)
-  hub.loop();                  // sends detect → TX_PENDING
+  hub.loop();                  // sends detect → WAITING_RESPONSE
   auto tx = hub.mock_get_transmitted();
   size_t num_detect_regs = (tx.size() - 4) / 2;
   std::vector<std::pair<uint16_t, uint16_t>> detect_vals;
@@ -443,7 +489,7 @@ static void drive_setup(WaterFurnaceAurora &hub) {
 
   // Step 3: VS probe (no VS drive)
   hub.loop();                  // enters SETUP_DETECT_VS
-  hub.loop();                  // sends VS probe → TX_PENDING
+  hub.loop();                  // sends VS probe → WAITING_RESPONSE
   hub.mock_get_transmitted();  // drain tx buffer
   complete_tx(hub, 100);
   hub.mock_receive(make_response_42({{3001, 0}, {3322, 0}, {3325, 0}}));
@@ -457,13 +503,13 @@ TEST_CASE("Full setup flow with mock UART", "[hub][state][integration]") {
 
   hub.setup();
 
-  // First loop() sends the setup ID request → TX_PENDING
+  // First loop() sends the setup ID request → WAITING_RESPONSE
   hub.loop();
   auto tx = hub.mock_get_transmitted();
   REQUIRE(tx.size() > 0);
   REQUIRE(tx[1] == 0x03);  // func 0x03 holding read for model/serial
 
-  complete_tx(hub, 0);  // TX_PENDING → WAITING_RESPONSE
+  complete_tx(hub, 0);
 
   // Feed a valid response for model/serial (18 regs of spaces)
   std::vector<uint16_t> id_values(18, 0x2020);  // spaces
@@ -473,13 +519,13 @@ TEST_CASE("Full setup flow with mock UART", "[hub][state][integration]") {
   set_millis(50);
   hub.loop();  // Process response, transition to SETUP_DETECT_COMPONENTS
 
-  // Next loop() sends detect request → TX_PENDING
+  // Next loop() sends detect request → WAITING_RESPONSE
   hub.loop();
   tx = hub.mock_get_transmitted();
   REQUIRE(tx.size() > 0);
   REQUIRE(tx[1] == 0x42);  // func 0x42 for detect
 
-  complete_tx(hub, 50);  // TX_PENDING → WAITING_RESPONSE
+  complete_tx(hub, 50);
 
   // Feed a response: AXB=3 (absent), IZ2=3 (absent), thermostat=300 (v3.00),
   // blower=0 (PSC), energy=0, pump=0, ABC program = 0
@@ -504,14 +550,14 @@ TEST_CASE("Full setup flow with mock UART", "[hub][state][integration]") {
   // Since no VS drive detected from program, it should probe VS registers
   // next (SETUP_DETECT_VS).  After processing the detect response the hub
   // transitions to SETUP_DETECT_VS, but that state is entered on the NEXT
-  // loop() call.  We also need complete_tx() to advance past TX_PENDING.
+  // loop() call.  complete_tx() keeps the clock/loop pump consistent.
   hub.loop();  // Process detect response → transitions to SETUP_DETECT_VS
-  hub.loop();  // Enter SETUP_DETECT_VS → send VS probe → TX_PENDING
+  hub.loop();  // Enter SETUP_DETECT_VS → send VS probe → WAITING_RESPONSE
   tx = hub.mock_get_transmitted();
   REQUIRE(tx.size() > 0);
   REQUIRE(tx[1] == 0x42);  // VS probe is also func 0x42
 
-  complete_tx(hub, 100);  // TX_PENDING → WAITING_RESPONSE
+  complete_tx(hub, 100);
 
   // Feed VS probe response with all zeros (no VS drive)
   auto vs_resp = make_response_42({{3001, 0}, {3322, 0}, {3325, 0}});
@@ -548,7 +594,7 @@ TEST_CASE("IZ2 demand sensors", "[hub][iz2][sensors]") {
     
     // Trigger a poll cycle
     set_millis(200);
-    hub.update();  // starts poll → TX_PENDING
+    hub.update();  // starts poll → WAITING_RESPONSE
     auto tx = hub.mock_get_transmitted();
     REQUIRE(tx.size() > 0);
     complete_tx(hub, 200);
