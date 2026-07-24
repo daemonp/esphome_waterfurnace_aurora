@@ -121,7 +121,7 @@ The component automatically detects installed hardware at startup:
 - **IntelliZone 2**: register 812, zone count from register 483
 - **Blower Type**: register 404 (PSC, ECM, 5-Speed); gates ECM speed controls
 - **Energy Monitor Level**: register 412 (None, Compressor Monitor, Energy Monitor); gates refrigeration and energy registers
-- **Pump Type**: register 413 (Open Loop, FC1, FC2, VS Pump, etc.); gates VS pump speed registers
+- **Pump Type**: register 413 (Open Loop, FC1, FC2, VS Pump, etc.); gates modulating loop-output registers 321–325 for VS pump **and** Open Loop (shared 0–10V / control-valve path). Fixed-speed types (FC1/FC2) are excluded.
 - **AWL Versions**: thermostat (register 801), AXB (register 807), IZ2 (register 813); gates register selection
 
 Sensors that depend on hardware not present show as "Unknown" in Home Assistant. If auto-detection fails, you can add manual overrides to your YAML. These merge with the package configuration (you do not need to redefine the base component):

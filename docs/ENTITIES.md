@@ -40,7 +40,7 @@ Complete reference of all Home Assistant entities created by this component.
 | `vs_drive_temperature` | °F | VS drive board temperature | 3327 |
 | `vs_inverter_temperature` | °F | VS inverter temperature | 3522 |
 | `blower_speed` | - | Current indoor blower ECM speed | 344 |
-| `pump_speed` | % | Current loop pump speed | 325 |
+| `pump_speed` | % | Current modulating loop output (VS pump or open-loop 0–10V) | 325 |
 | `heating_liquid_line_temperature` | °F | Heating mode liquid line temp | 1109 |
 | `saturated_condenser_temperature` | °F | Saturated condenser temperature | 1134 |
 | `subcool_temperature` | °F | Subcooling temperature | 1135/1136 |
@@ -58,8 +58,8 @@ Complete reference of all Home Assistant entities created by this component.
 | `lo_compressor_speed` | - | Low compressor ECM speed setting | 341 |
 | `hi_compressor_speed` | - | High compressor ECM speed setting | 342 |
 | `aux_heat_speed` | - | Aux electric heat ECM speed setting | 347 |
-| `pump_min_speed` | % | Loop pump minimum speed setting | 321 |
-| `pump_max_speed` | % | Loop pump maximum speed setting | 322 |
+| `pump_min_speed` | % | Loop output minimum setting (VS pump or open loop) | 321 |
+| `pump_max_speed` | % | Loop output maximum setting (VS pump or open loop) | 322 |
 | `humidification_target` | % | Humidification setpoint | 12310/31110 |
 | `dehumidification_target` | % | Dehumidification setpoint | 12310/31110 |
 | `line_voltage_setting` | V | Configured line voltage setting | 112 |
@@ -154,11 +154,11 @@ Complete reference of all Home Assistant entities created by this component.
 | `lo_compressor_speed` | 1-12 | Indoor blower ECM speed for low compressor |
 | `hi_compressor_speed` | 1-12 | Indoor blower ECM speed for high compressor |
 | `aux_heat_speed` | 1-12 | Indoor blower ECM speed for aux electric heat |
-| `pump_min_speed` | 1-100% | Loop pump minimum speed |
-| `pump_max_speed` | 1-100% | Loop pump maximum speed |
+| `pump_min_speed` | 1-100% | Loop output minimum (VS pump or open-loop 0–10V) |
+| `pump_max_speed` | 1-100% | Loop output maximum (VS pump or open-loop 0–10V) |
 | `fan_intermittent_on` | 0-25 min | Fan on time (intermittent mode) |
 | `fan_intermittent_off` | 5-40 min | Fan off time (intermittent mode) |
-| `pump_speed` | 1-100% | Loop pump speed override (requires VS pump) |
+| `pump_speed` | 1-100% | Loop output override (VS pump or open loop; requires AXB ≥ v2 for readback) |
 | `humidification_target` | 15-50% | Humidification setpoint (see [Humidity Control](#humidity-control)) |
 | `dehumidification_target` | 35-65% | Dehumidification setpoint (see [Humidity Control](#humidity-control)) |
 | `line_voltage_setting` | 90-635 V | Configured line voltage (register 112) |
@@ -176,7 +176,7 @@ Complete reference of all Home Assistant entities created by this component.
 | Switch | Description |
 | :--- | :--- |
 | `dhw_enabled` | Enable/disable domestic hot water (legacy; superseded by water_heater entity) |
-| `pump_manual_control` | VS pump manual override (writes current speed or auto to register 323) |
+| `pump_manual_control` | Manual override for modulating loop output (writes speed or auto/`0x7FFF` to register 323); VS pump or open loop |
 
 ## Buttons
 
