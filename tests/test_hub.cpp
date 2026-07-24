@@ -1207,7 +1207,7 @@ static void drive_setup_with_pump(WaterFurnaceAurora &hub, uint16_t pump_type_va
   REQUIRE(hub.is_setup_complete());
 }
 
-TEST_CASE("VS pump register gating matches Ruby gem", "[hub][pump][poll]") {
+TEST_CASE("Modulating loop-output register gating", "[hub][pump][poll]") {
   // Trigger a poll and return the set of requested addresses
   auto get_poll_addrs = [](WaterFurnaceAurora &hub, uint32_t time_ms) -> std::set<uint16_t> {
     set_millis(time_ms);
@@ -1270,22 +1270,59 @@ TEST_CASE("VS pump register gating matches Ruby gem", "[hub][pump][poll]") {
     REQUIRE(all_addrs.count(registers::VS_PUMP_MAX) == 1);  // 322
   }
 
-  SECTION("non-VS pump + AXB: does NOT poll VS pump registers") {
-    // AXB v2.00 but pump type 0 (OPEN_LOOP) — is_vs_pump() is false
+  SECTION("OPEN_LOOP + AXB v2.x: polls 321, 322, 323, AND 325 (modulating 0-10V path)") {
+    // Open loop shares the VS pump register bank for control valve / VFD output.
+    // Extension beyond Ruby gem VSPump gating — see GitHub issue #30.
     WaterFurnaceAurora hub;
     set_millis(0);
     drive_setup_with_pump(hub, 0, 200, true);  // pump=OPEN_LOOP, axb=v2.00
 
-    // Run enough polls to cover all tiers
+    auto addrs = get_poll_addrs(hub, 200);
+    REQUIRE(addrs.count(registers::VS_PUMP_MANUAL) == 1);  // 323
+    REQUIRE(addrs.count(registers::VS_PUMP_SPEED) == 1);   // 325 — awl_axb
+
+    std::set<uint16_t> all_addrs;
+    for (int i = 0; i < 7; i++) {
+      auto a = get_poll_addrs(hub, 300 + i * 100);
+      all_addrs.insert(a.begin(), a.end());
+    }
+    REQUIRE(all_addrs.count(registers::VS_PUMP_MIN) == 1);  // 321
+    REQUIRE(all_addrs.count(registers::VS_PUMP_MAX) == 1);  // 322
+  }
+
+  SECTION("OPEN_LOOP + AXB v1.x: polls 321, 322, 323 but NOT 325") {
+    WaterFurnaceAurora hub;
+    set_millis(0);
+    drive_setup_with_pump(hub, 0, 101, true);  // pump=OPEN_LOOP, axb=v1.01
+
+    auto addrs = get_poll_addrs(hub, 200);
+    REQUIRE(addrs.count(registers::VS_PUMP_MANUAL) == 1);  // 323
+    REQUIRE(addrs.count(registers::VS_PUMP_SPEED) == 0);   // 325 needs awl_axb
+
+    std::set<uint16_t> all_addrs;
+    for (int i = 0; i < 7; i++) {
+      auto a = get_poll_addrs(hub, 300 + i * 100);
+      all_addrs.insert(a.begin(), a.end());
+    }
+    REQUIRE(all_addrs.count(registers::VS_PUMP_MIN) == 1);
+    REQUIRE(all_addrs.count(registers::VS_PUMP_MAX) == 1);
+  }
+
+  SECTION("FC1 fixed-speed + AXB: does NOT poll modulating loop-output registers") {
+    // FC1 (type 1) is a fixed-speed circulator config — must stay gated off.
+    WaterFurnaceAurora hub;
+    set_millis(0);
+    drive_setup_with_pump(hub, 1, 200, true);  // pump=FC1, axb=v2.00
+
     std::set<uint16_t> all_addrs;
     for (int i = 0; i < 7; i++) {
       auto a = get_poll_addrs(hub, 200 + i * 100);
       all_addrs.insert(a.begin(), a.end());
     }
-    REQUIRE(all_addrs.count(registers::VS_PUMP_MIN) == 0);    // 321
-    REQUIRE(all_addrs.count(registers::VS_PUMP_MAX) == 0);    // 322
-    REQUIRE(all_addrs.count(registers::VS_PUMP_MANUAL) == 0); // 323
-    REQUIRE(all_addrs.count(registers::VS_PUMP_SPEED) == 0);  // 325
+    REQUIRE(all_addrs.count(registers::VS_PUMP_MIN) == 0);
+    REQUIRE(all_addrs.count(registers::VS_PUMP_MAX) == 0);
+    REQUIRE(all_addrs.count(registers::VS_PUMP_MANUAL) == 0);
+    REQUIRE(all_addrs.count(registers::VS_PUMP_SPEED) == 0);
   }
 }
 

@@ -130,8 +130,8 @@ switch:
     # Uncomment if you prefer separate switch + number controls instead.
     # dhw_enabled:
     #   name: "DHW Enabled"
-    # VS pump manual override (requires variable speed pump)
-    # When enabled, loop pump runs at the current speed; writing 0x7FFF returns to auto.
+    # Modulating loop-output manual override (VS pump or Open Loop 0-10V path)
+    # When enabled, loop output runs at the current speed; writing 0x7FFF returns to auto.
     # pump_manual_control:
     #   name: "Pump Manual Control"
 
@@ -156,8 +156,8 @@ number:
       name: "High Compressor ECM Speed"
     aux_heat_speed:
       name: "Aux Electric Heat ECM Speed"
-    # Loop Pump speed settings (1-100%)
-    # NOTE: Requires variable speed (VS) pump. Shows "Unknown" on fixed-speed pumps.
+    # Loop output speed settings (1-100%)
+    # NOTE: Requires VS pump or Open Loop (0-10V valve/VFD path). Unknown on FC1/FC2 fixed-speed.
     pump_min_speed:
       name: "Loop Pump Minimum Speed"
     pump_max_speed:
@@ -306,7 +306,7 @@ sensor:
     aux_heat_speed:
       name: "Aux Electric Heat ECM Speed Setting"
     
-    # Loop Pump speeds (requires variable speed pump; show "Unknown" on fixed-speed pumps)
+    # Loop output speeds (VS pump or Open Loop 0-10V; Unknown on FC1/FC2 fixed-speed)
     pump_speed:
       name: "Loop Pump Speed"
     pump_min_speed:

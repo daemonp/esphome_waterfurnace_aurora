@@ -948,9 +948,11 @@ void WaterFurnaceAurora::build_poll_addresses_() {
     }
   }
   
-  // VS pump registers — the Ruby gem gates 321..324 on is_vs_pump (VSPump class),
-  // but only adds 325 (actual speed readback) when awl_axb? is true.
-  if (this->is_vs_pump()) {
+  // Modulating loop-output registers 321-325.
+  // Ruby gem gates these on VSPump (types 3-5) only. We also poll for OPEN_LOOP:
+  // the same 0-10V path drives control valves / VFDs on many open-loop installs
+  // (GitHub issue #30). Actual speed readback (325) still requires awl_axb().
+  if (this->has_modulating_loop_output()) {
     this->add_poll_addr_(registers::VS_PUMP_MANUAL);
     if (this->awl_axb()) {
       this->add_poll_addr_(registers::VS_PUMP_SPEED);
@@ -1013,7 +1015,7 @@ void WaterFurnaceAurora::build_poll_addresses_() {
       this->add_poll_addr_(registers::AUX_HEAT_ECM_SPEED);
     }
     
-    if (this->is_vs_pump()) {
+    if (this->has_modulating_loop_output()) {
       this->add_poll_addr_(registers::VS_PUMP_MIN);
       this->add_poll_addr_(registers::VS_PUMP_MAX);
     }
