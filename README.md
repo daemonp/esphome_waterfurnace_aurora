@@ -24,6 +24,8 @@ An ESPHome/C++ port of the [waterfurnace_aurora Ruby gem](https://github.com/ccu
 - Fan modes (Auto, Continuous, Intermittent)
 - Dual setpoint control (heating and cooling setpoints)
 - IZ2 zone support with per-zone climate entities
+- Dry-contact (non-AWL) wall thermostats: climate is status-oriented (action +
+  return-air temp); setpoints/mode writes require AWL thermostat or IZ2
 
 ### Monitoring
 - **Temperatures**: Entering/leaving air, entering/leaving water, outdoor, ambient
