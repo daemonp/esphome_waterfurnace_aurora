@@ -14,6 +14,7 @@ struct TestableHub : public WaterFurnaceAurora {
   State get_state() const { return this->state_; }
   bool get_dealer_info_read() const { return this->dealer_info_read_; }
   size_t get_response_frame_len() const { return this->response_frame_len_; }
+  size_t pending_writes() const { return this->pending_writes_len_; }
 };
 
 // Helper kept for call-site readability after a send.
@@ -25,6 +26,10 @@ static void complete_tx(WaterFurnaceAurora &hub, uint32_t current_ms) {
   set_millis(current_ms + 1);
   hub.loop();  // already WAITING_RESPONSE — may collect any already-queued RX
 }
+
+static void drive_setup(WaterFurnaceAurora &hub);
+static void drive_setup_thermostat(WaterFurnaceAurora &hub, uint16_t installed_val,
+                                   uint16_t version_raw, bool humidifier = false);
 
 // Helper: build a valid func 0x42 response frame from address-value pairs
 static std::vector<uint8_t> make_response_42(const std::vector<std::pair<uint16_t, uint16_t>> &regs) {
@@ -81,6 +86,9 @@ static std::vector<uint8_t> make_response_03(const std::vector<uint16_t> &values
 
 TEST_CASE("Write queue", "[hub][write]") {
   WaterFurnaceAurora hub;
+  // AWL + humidifier so range-validation sections exercise post-capability checks
+  set_millis(0);
+  drive_setup_thermostat(hub, 1, 300, true);
   set_millis(1000);
 
   SECTION("write_register queues a single write") {
@@ -158,13 +166,13 @@ TEST_CASE("Write queue", "[hub][write]") {
     REQUIRE(hub.set_dehumidification_target(50));         // Valid
   }
 
-  SECTION("set_hvac_mode always succeeds") {
+  SECTION("set_hvac_mode succeeds when AWL") {
     REQUIRE(hub.set_hvac_mode(HeatingMode::HEAT));
     REQUIRE(hub.set_hvac_mode(HeatingMode::COOL));
     REQUIRE(hub.set_hvac_mode(HeatingMode::OFF));
   }
 
-  SECTION("set_fan_mode always succeeds") {
+  SECTION("set_fan_mode succeeds when AWL") {
     REQUIRE(hub.set_fan_mode(FanMode::AUTO));
     REQUIRE(hub.set_fan_mode(FanMode::CONTINUOUS));
   }
@@ -480,8 +488,6 @@ TEST_CASE("RS-485 resync drops leading noise before slave address", "[hub][state
   REQUIRE(tx[1] == 0x42);
 }
 
-static void drive_setup(WaterFurnaceAurora &hub);
-
 TEST_CASE("fault history timeout chains to dealer info read", "[hub][state][chain]") {
   TestableHub hub;
   text_sensor::TextSensor fault_history;
@@ -558,6 +564,7 @@ static void drive_setup(WaterFurnaceAurora &hub) {
   for (size_t i = 0; i < num_detect_regs; i++) {
     uint16_t addr = (tx[2 + i * 2] << 8) | tx[3 + i * 2];
     uint16_t val = 3;
+    if (addr == registers::THERMOSTAT_INSTALLED) val = 1;
     if (addr == registers::THERMOSTAT_VERSION) val = 300;
     if (addr == registers::BLOWER_TYPE) val = 0;
     if (addr == registers::ENERGY_MONITOR) val = 0;
@@ -578,6 +585,54 @@ static void drive_setup(WaterFurnaceAurora &hub) {
   hub.mock_receive(make_response_42({{3001, 0}, {3322, 0}, {3325, 0}}));
   set_millis(150);
   hub.loop();                  // processes VS probe → finish setup → IDLE
+}
+
+
+/// Custom setup with explicit thermostat installed status + version.
+/// installed_val: COMPONENT_NOT_INSTALLED (3) = absent; any other = present (gem).
+/// version_raw: register 801 units (300 = v3.00).
+/// humidifier: DIP accessory_relay = HUMIDIFIER (bits 3-4 = 2 → raw 0x10).
+static void drive_setup_thermostat(WaterFurnaceAurora &hub, uint16_t installed_val,
+                                   uint16_t version_raw, bool humidifier) {
+  hub.setup();
+
+  hub.loop();
+  hub.mock_get_transmitted();
+  complete_tx(hub, 0);
+  std::vector<uint16_t> id_values(18, 0x2020);
+  hub.mock_receive(make_response_03(id_values));
+  set_millis(50);
+  hub.loop();
+
+  hub.loop();
+  auto tx = hub.mock_get_transmitted();
+  size_t num_detect_regs = (tx.size() - 4) / 2;
+  std::vector<std::pair<uint16_t, uint16_t>> detect_vals;
+  for (size_t i = 0; i < num_detect_regs; i++) {
+    uint16_t addr = (tx[2 + i * 2] << 8) | tx[3 + i * 2];
+    uint16_t val = 3;
+    if (addr == registers::THERMOSTAT_INSTALLED) val = installed_val;
+    if (addr == registers::THERMOSTAT_VERSION) val = version_raw;
+    if (addr == registers::BLOWER_TYPE) val = 0;
+    if (addr == registers::ENERGY_MONITOR) val = 0;
+    if (addr == registers::PUMP_TYPE) val = 0;
+    // accessory_relay HUMIDIFIER = 2 in bits 3-4 → (2 << 3) = 0x10
+    if (addr == registers::DIP_SWITCH_STATUS && humidifier) val = 0x10;
+    if (addr >= 88 && addr <= 91) val = 0x2020;
+    detect_vals.emplace_back(addr, val);
+  }
+  complete_tx(hub, 50);
+  hub.mock_receive(make_response_42(detect_vals));
+  set_millis(100);
+  hub.loop();
+
+  hub.loop();
+  hub.loop();
+  hub.mock_get_transmitted();
+  complete_tx(hub, 100);
+  hub.mock_receive(make_response_42({{3001, 0}, {3322, 0}, {3325, 0}}));
+  set_millis(150);
+  hub.loop();
 }
 
 TEST_CASE("Full setup flow with mock UART", "[hub][state][integration]") {
@@ -617,6 +672,7 @@ TEST_CASE("Full setup flow with mock UART", "[hub][state][integration]") {
   for (size_t i = 0; i < num_detect_regs; i++) {
     uint16_t addr = (tx[2 + i * 2] << 8) | tx[3 + i * 2];
     uint16_t val = 3;  // Default = "removed" for component status
+    if (addr == registers::THERMOSTAT_INSTALLED) val = 1;
     if (addr == registers::THERMOSTAT_VERSION) val = 300;
     if (addr == registers::BLOWER_TYPE) val = 0;
     if (addr == registers::ENERGY_MONITOR) val = 0;
@@ -820,6 +876,7 @@ TEST_CASE("Leaving air temperature on non-AWL systems", "[hub][sensors]") {
     for (size_t i = 0; i < num_detect_regs; i++) {
       uint16_t addr = (tx[2 + i * 2] << 8) | tx[3 + i * 2];
       uint16_t val = 3;
+      if (addr == registers::THERMOSTAT_INSTALLED) val = 1;
       if (addr == registers::THERMOSTAT_VERSION) val = 300;
       if (addr == registers::AXB_VERSION) val = 200;  // AWL AXB v2.00
       if (addr == registers::BLOWER_TYPE) val = 0;
@@ -1057,6 +1114,7 @@ TEST_CASE("Approach temperature requires compressor running", "[hub][sensors][de
   for (size_t i = 0; i < num_detect_regs; i++) {
     uint16_t addr = (tx[2 + i * 2] << 8) | tx[3 + i * 2];
     uint16_t val = 3;
+    if (addr == registers::THERMOSTAT_INSTALLED) val = 1;
     if (addr == registers::THERMOSTAT_VERSION) val = 300;
     if (addr == registers::AXB_VERSION) val = 200;  // AWL AXB v2.00
     if (addr == registers::BLOWER_TYPE) val = 0;
@@ -1183,6 +1241,7 @@ static void drive_setup_with_pump(WaterFurnaceAurora &hub, uint16_t pump_type_va
   for (size_t i = 0; i < num_detect_regs; i++) {
     uint16_t addr = (tx[2 + i * 2] << 8) | tx[3 + i * 2];
     uint16_t val = 3;
+    if (addr == registers::THERMOSTAT_INSTALLED) val = 1;
     if (addr == registers::THERMOSTAT_VERSION) val = 300;
     if (addr == registers::AXB_VERSION) val = axb_version_val;
     if (addr == registers::BLOWER_TYPE) val = 0;
@@ -1358,6 +1417,7 @@ TEST_CASE("water_temps_swapped corrects COP heat register", "[hub][swap][cop]") 
   for (size_t i = 0; i < num_detect_regs; i++) {
     uint16_t addr = (tx[2 + i * 2] << 8) | tx[3 + i * 2];
     uint16_t val = 3;
+    if (addr == registers::THERMOSTAT_INSTALLED) val = 1;
     if (addr == registers::THERMOSTAT_VERSION) val = 300;
     if (addr == registers::AXB_VERSION) val = 200;
     if (addr == registers::BLOWER_TYPE) val = 0;
@@ -1461,6 +1521,7 @@ TEST_CASE("water_temps_swapped corrects approach temp in cooling", "[hub][swap][
   for (size_t i = 0; i < num_detect_regs; i++) {
     uint16_t addr = (tx[2 + i * 2] << 8) | tx[3 + i * 2];
     uint16_t val = 3;
+    if (addr == registers::THERMOSTAT_INSTALLED) val = 1;
     if (addr == registers::THERMOSTAT_VERSION) val = 300;
     if (addr == registers::AXB_VERSION) val = 200;
     if (addr == registers::BLOWER_TYPE) val = 0;
@@ -1536,4 +1597,288 @@ TEST_CASE("VS Pump manual control state tracking", "[hub][pump]") {
     REQUIRE(hub.set_pump_manual_control(false));
     REQUIRE_FALSE(hub.is_pump_manual_control());
   }
+}
+
+
+// ============================================================================
+// AWL thermostat / humidistat capability (gem-compatible)
+// ============================================================================
+
+TEST_CASE("awl_thermostat requires installed and version >= 3.0", "[hub][awl][capability]") {
+  SECTION("version 3.00 but not installed") {
+    WaterFurnaceAurora hub;
+    set_millis(0);
+    drive_setup_thermostat(hub, COMPONENT_NOT_INSTALLED, 300);
+    REQUIRE(hub.is_setup_complete());
+    REQUIRE_FALSE(hub.has_thermostat());
+    REQUIRE_FALSE(hub.has_awl_thermostat_controls());
+    REQUIRE_FALSE(hub.awl_communicating());
+  }
+
+  SECTION("installed + version 3.00") {
+    WaterFurnaceAurora hub;
+    set_millis(0);
+    drive_setup_thermostat(hub, 1, 300);
+    REQUIRE(hub.has_thermostat());
+    REQUIRE(hub.has_awl_thermostat_controls());
+    REQUIRE(hub.awl_communicating());
+  }
+
+  SECTION("installed + version 0.00 (dry-contact garbage version)") {
+    WaterFurnaceAurora hub;
+    set_millis(0);
+    drive_setup_thermostat(hub, 1, 0);
+    REQUIRE(hub.has_thermostat());
+    REQUIRE_FALSE(hub.has_awl_thermostat_controls());
+  }
+
+  SECTION("not installed + version 0") {
+    WaterFurnaceAurora hub;
+    set_millis(0);
+    drive_setup_thermostat(hub, COMPONENT_NOT_INSTALLED, 0);
+    REQUIRE_FALSE(hub.has_awl_thermostat_controls());
+  }
+}
+
+TEST_CASE("has_humidistat_targets matches gem", "[hub][awl][humidistat]") {
+  SECTION("AWL thermostat without humidifier/dehumidifier/VS") {
+    WaterFurnaceAurora hub;
+    set_millis(0);
+    drive_setup_thermostat(hub, 1, 300, false);
+    REQUIRE(hub.has_awl_thermostat_controls());
+    REQUIRE_FALSE(hub.has_humidistat_targets());
+  }
+
+  SECTION("AWL thermostat with humidifier") {
+    WaterFurnaceAurora hub;
+    set_millis(0);
+    drive_setup_thermostat(hub, 1, 300, true);
+    REQUIRE(hub.has_humidifier());
+    REQUIRE(hub.has_humidistat_targets());
+  }
+
+  SECTION("non-AWL with humidifier") {
+    WaterFurnaceAurora hub;
+    set_millis(0);
+    drive_setup_thermostat(hub, COMPONENT_NOT_INSTALLED, 0, true);
+    REQUIRE(hub.has_humidifier());
+    REQUIRE_FALSE(hub.has_awl_thermostat_controls());
+    REQUIRE_FALSE(hub.has_humidistat_targets());
+  }
+}
+
+
+TEST_CASE("Reject thermostat writes without AWL thermostat", "[hub][awl][write]") {
+  TestableHub hub;
+  set_millis(0);
+  drive_setup_thermostat(hub, COMPONENT_NOT_INSTALLED, 0);
+  REQUIRE_FALSE(hub.has_awl_thermostat_controls());
+  REQUIRE(hub.pending_writes() == 0);
+
+  REQUIRE_FALSE(hub.set_heating_setpoint(70.0f));
+  REQUIRE_FALSE(hub.set_cooling_setpoint(74.0f));
+  REQUIRE_FALSE(hub.set_hvac_mode(HeatingMode::HEAT));
+  REQUIRE_FALSE(hub.set_fan_mode(FanMode::AUTO));
+  REQUIRE_FALSE(hub.set_fan_intermittent_on(5));
+  REQUIRE_FALSE(hub.set_fan_intermittent_off(10));
+  REQUIRE_FALSE(hub.set_humidification_target(40));
+  REQUIRE_FALSE(hub.set_dehumidification_target(50));
+  REQUIRE_FALSE(hub.set_humidifier_mode(true));
+  REQUIRE_FALSE(hub.set_dehumidifier_mode(true));
+
+  REQUIRE(hub.pending_writes() == 0);
+}
+
+TEST_CASE("Allow thermostat writes with AWL thermostat", "[hub][awl][write]") {
+  TestableHub hub;
+  set_millis(0);
+  drive_setup_thermostat(hub, 1, 300);
+  REQUIRE(hub.has_awl_thermostat_controls());
+  REQUIRE(hub.pending_writes() == 0);
+
+  REQUIRE(hub.set_heating_setpoint(70.0f));
+  REQUIRE(hub.set_cooling_setpoint(74.0f));
+  REQUIRE(hub.set_hvac_mode(HeatingMode::HEAT));
+  REQUIRE(hub.set_fan_mode(FanMode::CONTINUOUS));
+  REQUIRE(hub.pending_writes() == 4);
+
+  // Humidistat targets still require AWL + humidifier/dehumidifier/VS
+  REQUIRE_FALSE(hub.has_humidistat_targets());
+  size_t before = hub.pending_writes();
+  REQUIRE_FALSE(hub.set_humidification_target(40));
+  REQUIRE(hub.pending_writes() == before);
+}
+
+TEST_CASE("Allow humidistat target writes when AWL + humidifier", "[hub][awl][write]") {
+  TestableHub hub;
+  set_millis(0);
+  drive_setup_thermostat(hub, 1, 300, true);
+  REQUIRE(hub.has_humidistat_targets());
+  REQUIRE(hub.set_humidification_target(40));
+  REQUIRE(hub.set_dehumidification_target(50));
+  REQUIRE(hub.set_humidifier_mode(true));
+  REQUIRE(hub.set_dehumidifier_mode(false));
+  // Target writes share one register address; mode writes share another — queue coalesces to 2.
+  REQUIRE(hub.pending_writes() == 2);
+}
+
+
+TEST_CASE("Non-AWL publish ignores garbage setpoints; EAT climate fallback", "[hub][awl][publish]") {
+  WaterFurnaceAurora hub;
+  sensor::Sensor heat_sp;
+  sensor::Sensor cool_sp;
+  hub.set_heating_setpoint_sensor(&heat_sp);
+  hub.set_cooling_setpoint_sensor(&cool_sp);
+
+  set_millis(0);
+  drive_setup_thermostat(hub, COMPONENT_NOT_INSTALLED, 0);
+  REQUIRE_FALSE(hub.has_awl_thermostat_controls());
+
+  set_millis(200);
+  hub.update();
+  auto tx = hub.mock_get_transmitted();
+  REQUIRE(tx.size() > 0);
+
+  // Non-AWL must not poll thermostat setpoint/mode/ambient/fan regs
+  std::set<uint16_t> addrs;
+  size_t num_regs = (tx.size() - 4) / 2;
+  for (size_t i = 0; i < num_regs; i++) {
+    uint16_t addr = (tx[2 + i * 2] << 8) | tx[3 + i * 2];
+    addrs.insert(addr);
+  }
+  REQUIRE(addrs.count(registers::HEATING_SETPOINT) == 0);
+  REQUIRE(addrs.count(registers::COOLING_SETPOINT) == 0);
+  REQUIRE(addrs.count(registers::AMBIENT_TEMP) == 0);
+  REQUIRE(addrs.count(registers::HEATING_MODE_READ) == 0);
+  REQUIRE(addrs.count(registers::FAN_CONFIG) == 0);
+  REQUIRE(addrs.count(registers::ENTERING_AIR) == 1);
+
+  complete_tx(hub, 200);
+  std::vector<std::pair<uint16_t, uint16_t>> resp_vals;
+  for (size_t i = 0; i < num_regs; i++) {
+    uint16_t addr = (tx[2 + i * 2] << 8) | tx[3 + i * 2];
+    uint16_t val = 0;
+    if (addr == registers::ENTERING_AIR) val = 740;  // 74.0 F
+    // Even if somehow present, garbage should not stick — include in map only if polled
+    if (addr == registers::HEATING_SETPOINT) val = 1260;
+    if (addr == registers::COOLING_SETPOINT) val = 600;
+    resp_vals.emplace_back(addr, val);
+  }
+  hub.mock_receive(make_response_42(resp_vals));
+  set_millis(250);
+  hub.loop();
+
+  REQUIRE(std::isnan(hub.get_heating_setpoint()));
+  REQUIRE(std::isnan(hub.get_cooling_setpoint()));
+  REQUIRE(std::isnan(hub.get_ambient_temperature()));
+  REQUIRE(hub.get_entering_air_temperature() == Catch::Approx(74.0f));
+  REQUIRE(hub.get_climate_current_temperature_f() == Catch::Approx(74.0f));
+  REQUIRE_FALSE(heat_sp.has_state_);
+  REQUIRE_FALSE(cool_sp.has_state_);
+}
+
+TEST_CASE("AWL publish accepts valid setpoints and rejects out-of-range", "[hub][awl][publish]") {
+  WaterFurnaceAurora hub;
+  set_millis(0);
+  drive_setup_thermostat(hub, 1, 300);
+  REQUIRE(hub.has_awl_thermostat_controls());
+
+  auto run_poll = [&](uint16_t heat_raw, uint16_t cool_raw, uint16_t ambient_raw, uint32_t t) {
+    set_millis(t);
+    hub.update();
+    auto tx = hub.mock_get_transmitted();
+    REQUIRE(tx.size() > 0);
+    complete_tx(hub, t);
+    size_t num_regs = (tx.size() - 4) / 2;
+    std::vector<std::pair<uint16_t, uint16_t>> resp_vals;
+    for (size_t i = 0; i < num_regs; i++) {
+      uint16_t addr = (tx[2 + i * 2] << 8) | tx[3 + i * 2];
+      uint16_t val = 0;
+      if (addr == registers::HEATING_SETPOINT) val = heat_raw;
+      if (addr == registers::COOLING_SETPOINT) val = cool_raw;
+      if (addr == registers::AMBIENT_TEMP) val = ambient_raw;
+      if (addr == registers::ENTERING_AIR) val = 800;  // 80 F EAT differs from ambient
+      resp_vals.emplace_back(addr, val);
+    }
+    hub.mock_receive(make_response_42(resp_vals));
+    set_millis(t + 50);
+    hub.loop();
+  };
+
+  SECTION("valid setpoints and ambient preferred over EAT") {
+    run_poll(700, 740, 720, 200);  // 70, 74, 72 F
+    REQUIRE(hub.get_heating_setpoint() == Catch::Approx(70.0f));
+    REQUIRE(hub.get_cooling_setpoint() == Catch::Approx(74.0f));
+    REQUIRE(hub.get_ambient_temperature() == Catch::Approx(72.0f));
+    REQUIRE(hub.get_climate_current_temperature_f() == Catch::Approx(72.0f));
+  }
+
+  SECTION("out-of-range heating forces NAN") {
+    run_poll(700, 740, 720, 200);
+    REQUIRE(hub.get_heating_setpoint() == Catch::Approx(70.0f));
+    run_poll(1260, 740, 720, 400);  // 126 F garbage
+    REQUIRE(std::isnan(hub.get_heating_setpoint()));
+    REQUIRE(hub.get_cooling_setpoint() == Catch::Approx(74.0f));
+  }
+}
+
+TEST_CASE("Humidistat targets not polled without has_humidistat_targets", "[hub][awl][publish]") {
+  WaterFurnaceAurora hub;
+  set_millis(0);
+  drive_setup_thermostat(hub, 1, 300, false);  // AWL, no humidifier
+  REQUIRE(hub.has_awl_thermostat_controls());
+  REQUIRE_FALSE(hub.has_humidistat_targets());
+
+  // Medium tier every 6th cycle — advance poll counter by calling update multiple times
+  // with responses so tier advances. Simpler: request one poll at time where medium applies.
+  // poll_tier_counter_ % 6 == 0 on first update after setup.
+  set_millis(200);
+  hub.update();
+  auto tx = hub.mock_get_transmitted();
+  std::set<uint16_t> addrs;
+  size_t num_regs = (tx.size() - 4) / 2;
+  for (size_t i = 0; i < num_regs; i++) {
+    uint16_t addr = (tx[2 + i * 2] << 8) | tx[3 + i * 2];
+    addrs.insert(addr);
+  }
+  // First poll may or may not be medium tier. Force medium by draining several cycles.
+  complete_tx(hub, 200);
+  // Feed empty zeros for all requested
+  std::vector<std::pair<uint16_t, uint16_t>> resp;
+  for (size_t i = 0; i < num_regs; i++) {
+    uint16_t addr = (tx[2 + i * 2] << 8) | tx[3 + i * 2];
+    resp.emplace_back(addr, 0);
+  }
+  hub.mock_receive(make_response_42(resp));
+  set_millis(250);
+  hub.loop();
+
+  // Run 6 more full poll cycles to hit medium tier with certainty
+  bool saw_medium_without_humidistat = false;
+  for (int cycle = 0; cycle < 8; cycle++) {
+    uint32_t t = 300 + cycle * 100;
+    set_millis(t);
+    hub.update();
+    tx = hub.mock_get_transmitted();
+    if (tx.empty()) continue;
+    complete_tx(hub, t);
+    num_regs = (tx.size() - 4) / 2;
+    addrs.clear();
+    resp.clear();
+    for (size_t i = 0; i < num_regs; i++) {
+      uint16_t addr = (tx[2 + i * 2] << 8) | tx[3 + i * 2];
+      addrs.insert(addr);
+      resp.emplace_back(addr, 0);
+    }
+    if (addrs.count(registers::LAST_LOCKOUT_FAULT)) {
+      // medium tier
+      REQUIRE(addrs.count(registers::HUMIDISTAT_TARGETS) == 0);
+      REQUIRE(addrs.count(registers::HUMIDISTAT_SETTINGS) == 0);
+      saw_medium_without_humidistat = true;
+    }
+    hub.mock_receive(make_response_42(resp));
+    set_millis(t + 50);
+    hub.loop();
+  }
+  REQUIRE(saw_medium_without_humidistat);
 }

@@ -370,6 +370,17 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   bool get_humidifier_auto() const { return this->humidifier_auto_; }
   bool get_dehumidifier_auto() const { return this->dehumidifier_auto_; }
   bool awl_communicating() const { return this->awl_thermostat() || this->awl_iz2(); }
+  bool has_thermostat() const { return this->has_thermostat_; }
+  /// True when system-wide (non-IZ2) AWL thermostat setpoint/mode/fan regs are valid.
+  bool has_awl_thermostat_controls() const { return this->awl_thermostat(); }
+  /// Gem: awl_communicating && (humidifier || dehumidifier || VS drive).
+  bool has_humidistat_targets() const {
+    return this->awl_communicating() &&
+           (this->has_humidifier_ || this->has_dehumidifier_ || this->has_vs_drive_);
+  }
+  /// Ambient if AWL thermostat controls else entering-air cache (may be NAN).
+  float get_climate_current_temperature_f() const;
+  float get_entering_air_temperature() const { return this->entering_air_temp_; }
   bool has_humidifier() const { return this->has_humidifier_; }
   bool has_dehumidifier() const { return this->has_dehumidifier_; }
   const DipSwitchSettings &get_dip_switches() const { return this->dip_switches_; }
@@ -512,7 +523,10 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   
   // AWL version helpers
   bool awl_axb() const { return this->has_axb_ && this->axb_version_ >= 2.0f; }
-  bool awl_thermostat() const { return this->thermostat_version_ >= 3.0f; }
+  // Match gem: thermostat? && version >= 3.0 (reg 800 != 3, reg 801 / 100)
+  bool awl_thermostat() const {
+    return this->has_thermostat_ && this->thermostat_version_ >= 3.0f;
+  }
   bool awl_iz2() const { return this->has_iz2_ && this->iz2_version_ >= 2.0f; }
   bool is_ecm_blower() const { return this->blower_type_ == BlowerType::ECM_208 || this->blower_type_ == BlowerType::ECM_265; }
   bool is_vs_pump() const { return this->pump_type_ == PumpType::VS_PUMP || this->pump_type_ == PumpType::VS_PUMP_26_99 || this->pump_type_ == PumpType::VS_PUMP_UPS26_99; }
@@ -691,6 +705,7 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   
   // --- Heat pump state ---
   float ambient_temp_{NAN};
+  float entering_air_temp_{NAN};  // Cache for climate current-temp fallback
   float heating_setpoint_{NAN};
   float cooling_setpoint_{NAN};
   float dhw_temp_{NAN};
@@ -704,6 +719,7 @@ class WaterFurnaceAurora : public PollingComponent, public uart::UARTDevice
   bool locked_out_{false};
   bool has_axb_{false};
   bool has_vs_drive_{false};
+  bool has_thermostat_{false};
   bool has_iz2_{false};
   uint8_t num_iz2_zones_{0};
   bool active_dehumidify_{false};

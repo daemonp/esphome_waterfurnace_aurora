@@ -193,6 +193,25 @@ The component creates climate entities for thermostat control:
 
 The climate entity reports the current **action** in real time: Idle, Heating, Cooling, Drying (active dehumidification), or Fan. The Drying action appears when the VS drive is actively dehumidifying with the reversing valve engaged, or when the AXB dehumidifier relay is active.
 
+### Dry-contact / non-AWL thermostats
+
+Installs **without** an AWL-compliant communicating thermostat or IntelliZone 2
+(`Tstat` not installed or version < 3.00) still show useful **status** on the
+climate entity (the entity itself stays **available**):
+
+- **Action** tracks equipment from ABC outputs (heating/cooling/fan/idle)
+- **Current temperature** uses entering/return air when ambient (register 502)
+  is not valid for dry-contact
+- **Target temperatures, HVAC mode, and fan mode** are not meaningful from holding
+  registers and are left unset/unavailable; climate `control()` writes are rejected
+- **Humidity target numbers/selects** and system **fan intermittent** numbers stay
+  unavailable (those registers are not polled without AWL thermostat / humidistat path)
+
+Full setpoint/mode/fan/humidity control requires a communicating AWL thermostat
+(version ≥ 3.00, installed) or IZ2 zones. Home Assistant may still show climate
+controls (traits are static); target values stay empty and commands are ignored
+with a warning in the ESPHome log.
+
 ### Mode-Aware Humidity Slider (`target_humidity`)
 
 The Aurora has two independent humidity targets (humidification to add moisture, dehumidification to remove it) packed as two bytes in a single 16-bit register. Rather than exposing two separate sliders, the climate entity's single humidity slider **automatically routes to the correct target based on the current HVAC mode**:
