@@ -197,17 +197,20 @@ The climate entity reports the current **action** in real time: Idle, Heating, C
 
 Installs **without** an AWL-compliant communicating thermostat or IntelliZone 2
 (`Tstat` not installed or version < 3.00) still show useful **status** on the
-climate entity:
+climate entity (the entity itself stays **available**):
 
 - **Action** tracks equipment from ABC outputs (heating/cooling/fan/idle)
 - **Current temperature** uses entering/return air when ambient (register 502)
   is not valid for dry-contact
-- **Target temperatures, HVAC mode, fan mode, and humidity targets** are not
-  meaningful from holding registers and are left unavailable; writes are rejected
+- **Target temperatures, HVAC mode, and fan mode** are not meaningful from holding
+  registers and are left unset/unavailable; climate `control()` writes are rejected
+- **Humidity target numbers/selects** and system **fan intermittent** numbers stay
+  unavailable (those registers are not polled without AWL thermostat / humidistat path)
 
 Full setpoint/mode/fan/humidity control requires a communicating AWL thermostat
-or IZ2 zones. Home Assistant may still show climate controls (traits are static);
-values stay unavailable and commands are ignored with a warning in the ESPHome log.
+(version ≥ 3.00, installed) or IZ2 zones. Home Assistant may still show climate
+controls (traits are static); target values stay empty and commands are ignored
+with a warning in the ESPHome log.
 
 ### Mode-Aware Humidity Slider (`target_humidity`)
 

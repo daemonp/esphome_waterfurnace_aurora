@@ -353,10 +353,13 @@ void AuroraClimate::update_state_() {
         }
       }
     } else {
-      // Dry-contact / non-AWL: clear bogus targets; do not claim mode/fan from AWL regs
+      // Dry-contact / non-AWL: clear bogus temp targets; do not claim mode/fan from AWL regs.
+      // Temperature NANs are fine — HA's esphome_float_state_property filters them to None.
+      // Do NOT set target_humidity = NAN here: Climate advertises TARGET_HUMIDITY, and HA's
+      // EsphomeClimateEntity.target_humidity does round(value) without an isfinite() guard.
+      // round(nan) raises ValueError and leaves the climate entity permanently unavailable.
       this->target_temperature_low = NAN;
       this->target_temperature_high = NAN;
-      this->target_humidity = NAN;
     }
 
     // Action always tracks equipment outputs (AWL and dry-contact)
@@ -392,10 +395,10 @@ void AuroraClimate::update_state_() {
     this->current_humidity = rh;
   }
 
-  // Target humidity — gated via has_humidistat_targets inside helper; force NAN on dry-contact
-  if (!this->is_iz2_mode_() && !this->parent_->has_awl_thermostat_controls()) {
-    this->target_humidity = NAN;
-  } else if (!this->parent_->humidity_target_cooldown_active()) {
+  // Target humidity — helper returns NAN without has_humidistat_targets() or bad cache.
+  // Only assign when finite. Never force NAN onto the climate field (HA round() crash; see
+  // dry-contact branch comment above). Default/zero remains until a real target arrives.
+  if (!this->parent_->humidity_target_cooldown_active()) {
     float humidity_target = read_mode_humidity_target(this->parent_, this->mode);
     if (!std::isnan(humidity_target)) {
       this->target_humidity = humidity_target;

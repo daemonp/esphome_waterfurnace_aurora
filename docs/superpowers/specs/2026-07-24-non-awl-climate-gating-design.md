@@ -279,7 +279,7 @@ Applies to the **non-IZ2 thermostat path** (`!is_iz2_mode_()`). IZ2 path unchang
 | Climate field                          | Behavior                                                          |
 | -------------------------------------- | ----------------------------------------------------------------- |
 | `target_temperature_low/high`          | Do not update; ensure `NAN` so HA does not show 126/60            |
-| `target_humidity`                      | Do not update; `NAN`                                              |
+| `target_humidity`                      | Do not update from humidistat regs. **Do not publish `NAN`** — HA `EsphomeClimateEntity.target_humidity` does `round(value)` without `isfinite()`, so `NaN` raises and the climate entity stays unavailable. Leave default/prior finite value until a real target exists. |
 | `mode` / `preset`                      | Do **not** update from hub AWL mode regs                          |
 | `fan_mode`                             | Do **not** update from hub fan regs                               |
 | `action`                               | Still updated from outputs                                        |
